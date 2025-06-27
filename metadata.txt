@@ -9,9 +9,9 @@ version=1.0.0
 author=Ofer Butbega
 email=ofer@butbega.com
 
-tracker=https://github.com/espressouk/Geo-OSAM/issues
-repository=https://github.com/espressouk/Geo-OSAM
-homepage=https://github.com/espressouk/Geo-OSAM
+tracker=https://github.com/espressouk/GeoOSAM/issues
+repository=https://github.com/espressouk/GeoOSAM
+homepage=https://github.com/espressouk/GeoOSAM
 
 # Detailed tags for discoverability
 tags=python,segmentation,AI,SAM,SAM2,machine learning,deep learning,computer vision,remote sensing,satellite imagery,urban planning,environmental monitoring,geospatial analysis,object detection,semantic segmentation,GPU acceleration,CUDA,pytorch,raster analysis,GIS
