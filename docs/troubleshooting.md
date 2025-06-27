@@ -515,5 +515,5 @@ mv ~/.local/share/QGIS/QGIS3 ~/.local/share/QGIS/QGIS3_backup
 
 **Still having issues? Don't hesitate to reach out!** 📧
 
-Email: ofer@butbega.com  
+Email: bkst.dev@gmail.com
 GitHub: https://github.com/espressouk/geoOSAM/issues

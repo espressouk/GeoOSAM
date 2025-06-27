@@ -304,7 +304,7 @@ Each polygon includes detailed information:
 ### Providing Feedback
 
 - **GitHub Issues:** Bug reports and feature requests
-- **Email:** ofer@butbega.com for direct support
+- **Email:** bkst.dev@gmail.com for direct support
 - **QGIS Hub:** Rate and review the plugin
 
 **Happy segmenting!** 🛰️

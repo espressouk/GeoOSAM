@@ -8,7 +8,7 @@
                              -------------------
         begin                : 2025-06-26
         copyright            : (C) 2025 by Ofer Butbega
-        email                : ofer@butbega.com
+        email                : bkst.dev@gmail.com
         git sha              : $Format:%H$
  ***************************************************************************/
 

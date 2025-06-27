@@ -8,7 +8,7 @@
 
 """
 
-__author__ = 'ofer@butbega.com'
+__author__ = 'bkst.dev@gmail.com'
 __date__ = '2025-06-26'
 __copyright__ = 'Copyright 2025, Ofer Butbega'
 
@@ -48,8 +48,8 @@ class SegSamDialogTest(unittest.TestCase):
         result = self.dialog.result()
         self.assertEqual(result, QDialog.Rejected)
 
+
 if __name__ == "__main__":
     suite = unittest.makeSuite(SegSamDialogTest)
     runner = unittest.TextTestRunner(verbosity=2)
     runner.run(suite)
-

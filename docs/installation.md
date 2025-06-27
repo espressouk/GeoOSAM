@@ -332,7 +332,7 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
 #### Support Channels
 
 - **GitHub Issues:** https://github.com/espressouk/GeoOSAM/issues
-- **Email:** ofer@butbega.com
+- **Email:** bkst.dev@gmail.com
 - **QGIS Community:** https://qgis.org/en/site/forusers/support.html
 
 #### Bug Reports

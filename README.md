@@ -136,7 +136,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/oferbutbega/GeoOSAM/issues)
-- **Email**: ofer@butbega.com
+- **Email**: bkst.dev@gmail.com
 - **Documentation**: [Wiki](https://github.com/oferbutbega/GeoOSAM/wiki)
 
 ## 🙏 Acknowledgments
