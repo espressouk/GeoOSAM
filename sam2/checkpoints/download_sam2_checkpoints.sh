@@ -28,7 +28,7 @@ else
     exit 1
 fi
 
-echo "📥 Downloading SAM2 tiny checkpoint (~38MB)..."
+echo "📥 Downloading SAM2 tiny checkpoint (~160MB)..."
 echo "🌐 URL: https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
 
 $DL_CMD "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"

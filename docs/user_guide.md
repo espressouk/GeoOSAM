@@ -6,7 +6,7 @@
 
 1. **Load a raster layer** in QGIS (satellite/aerial imagery)
 2. **Click the GeoOSAM icon** 🛰️ in the toolbar
-3. **Wait for SAM2 model download** (automatic, ~38MB, one-time only)
+3. **Wait for SAM2 model download** (automatic, ~160MB, one-time only)
 4. **Control panel opens** on the right side
 
 ### 2. Basic Workflow

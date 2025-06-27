@@ -120,7 +120,7 @@ def show_checkpoint_dialog(parent=None):
     msg = QMessageBox(parent)
     msg.setIcon(QMessageBox.Question)
     msg.setWindowTitle("SAM2 Model Download")
-    msg.setText("GeoOSAM requires the SAM2 model checkpoint (~38MB).")
+    msg.setText("GeoOSAM requires the SAM2 model checkpoint (~160MB).")
     msg.setInformativeText("Would you like to download it now?")
     msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
     msg.setDefaultButton(QMessageBox.Yes)

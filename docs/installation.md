@@ -25,7 +25,7 @@ for pkg in packages:
 ### Step 3: First Use
 
 1. **Click GeoOSAM icon** 🛰️ in QGIS toolbar
-2. **SAM2 model auto-downloads** (~38MB, one-time)
+2. **SAM2 model auto-downloads** (~160MB, one-time)
 3. **Start segmenting!** 🚀
 
 ---

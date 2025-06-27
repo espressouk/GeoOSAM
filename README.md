@@ -103,7 +103,7 @@ pip install torch torchvision opencv-python rasterio shapely hydra-core
 
 ### SAM2 Model Download
 
-**The SAM2 model (~38MB) will be automatically downloaded when you first use the plugin.**
+**The SAM2 model (~160MB) will be automatically downloaded when you first use the plugin.**
 
 If auto-download fails, manually run:
 
