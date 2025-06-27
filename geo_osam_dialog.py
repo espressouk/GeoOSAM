@@ -37,7 +37,7 @@ import io
         begin                : 2025-06-26
         git sha              : $Format:%H$
         copyright            : (C) 2025 by Ofer Butbega
-        email                : ofer@butbega.com
+        email                : bkst.dev@gmail.com
  ***************************************************************************/
 """
 

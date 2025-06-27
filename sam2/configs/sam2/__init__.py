@@ -22,15 +22,3 @@
  ***************************************************************************/
  This script initializes the plugin, making it known to QGIS.
 """
-
-
-# noinspection PyPep8Naming
-def classFactory(iface):  # pylint: disable=invalid-name
-    """Load SegSam class from file SegSam.
-
-    :param iface: A QGIS interface instance.
-    :type iface: QgsInterface
-    """
-    #
-    from .geo_osam import SegSam
-    return SegSam(iface)

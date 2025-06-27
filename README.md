@@ -67,7 +67,7 @@
 
 ### Option 2: Download from GitHub (Manual)
 
-1. Download ZIP from: https://github.com/espressouk/geo-osam
+1. Download ZIP from: https://github.com/espressouk/GeoOSAM
 2. Extract the plugin
 3. Copy to QGIS plugins directory:
 
@@ -137,9 +137,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/oferbutbega/geo-osam/issues)
-- **Email**: ofer@butbega.com
-- **Documentation**: [Wiki](https://github.com/oferbutbega/geo-osam/wiki)
+- **Issues**: [GitHub Issues](https://github.com/espressouk/GeoOSAM/issues)
+- **Email**: bkst.dev@gmail.com
+- **Documentation**: [Wiki](https://github.com/espressouk/GeoOSAM/wiki)
 
 ## 🙏 Acknowledgments
 
@@ -160,6 +160,6 @@ If you use GeoOSAM in your research, please cite:
   title={GeoOSAM: Advanced Segmentation for QGIS},
   author={Butbega, Ofer},
   year={2025},
-  url={https://github.com/oferbutbega/geo-osam}
+  url={https://github.com/espressouk/GeoOSAM}
 }
 ```
