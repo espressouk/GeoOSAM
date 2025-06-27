@@ -69,7 +69,6 @@ plugin_upload.pyc
 *.tmp
 
 # Ignore screenshots and large sample files (optional)
-Screenshots/
 test/data/
 *.tif
 *.tiff
