@@ -53,84 +53,101 @@
 
 ## 📦 Installation
 
-### From QGIS Plugin Repository
+## 📦 Installation
+
+**⚠️ Important: Both installation methods require manual dependency installation**
+
+### Option 1: From QGIS Plugin Repository (Recommended)
 
 1. Open QGIS
 2. Go to **Plugins > Manage and Install Plugins**
 3. Search "GeoOSAM"
 4. Click **Install Plugin**
-5. Dependencies will be installed automatically
+5. **Install dependencies** (see below)
 
-### Manual Installation
+### Option 2: Download from GitHub (Manual)
 
-```bash
-# Download and extract plugin
-# Copy to QGIS plugins directory
-cp -r geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
+1. Download ZIP from: https://github.com/espressouk/geo-osam
+2. Extract the plugin
+3. Copy to QGIS plugins directory:
 
-# Install dependencies
-pip install torch torchvision numpy opencv-python rasterio shapely hydra-core
+   ```bash
+   # Linux/Mac
+   cp -r geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
+
+   # Windows
+   xcopy geo_osam "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
+   ```
+
+4. **Install dependencies** (see below)
+
+### Required Dependencies (Both Options)
+
+**Choose one method:**
+
+**Method A: QGIS Python Console (Recommended)**
+
+```python
+# Open QGIS > Plugins > Python Console, paste and run:
+import subprocess
+import sys
+packages = ["torch", "torchvision", "opencv-python", "rasterio", "shapely", "hydra-core"]
+for pkg in packages:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+    print(f"✅ Installed {pkg}")
 ```
 
-🎯 Use Cases
+**Method B: System Terminal**
 
-🏙️ Urban Planning: Building and infrastructure mapping
-🌱 Environmental Monitoring: Vegetation and land cover analysis
-🚗 Transportation: Vehicle and traffic analysis
-🌊 Coastal Studies: Ship detection and water body mapping
-🏗️ Construction: Site monitoring and progress tracking
-📡 Remote Sensing: Large-scale imagery analysis
+```bash
+pip install torch torchvision opencv-python rasterio shapely hydra-core
+```
 
-📚 Documentation
+## 🎯 Use Cases
 
-User Guide
-Installation Guide
-Troubleshooting
-API Reference
+- **🏙️ Urban Planning**: Building and infrastructure mapping
+- **🌱 Environmental Monitoring**: Vegetation and land cover analysis
+- **🚗 Transportation**: Vehicle and traffic analysis
+- **🌊 Coastal Studies**: Ship detection and water body mapping
+- **🏗️ Construction**: Site monitoring and progress tracking
+- **📡 Remote Sensing**: Large-scale imagery analysis
 
-🤝 Contributing
-We welcome contributions! Please see our Contributing Guide.
-📞 Support
+## 📚 Documentation
 
-Issues: GitHub Issues
-Email: ofer@butbega.com
-Documentation: Wiki
+- [User Guide](docs/user_guide.md)
+- [Installation Guide](docs/installation.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [API Reference](docs/api.md)
 
-🙏 Acknowledgments
+## 🤝 Contributing
 
-Meta AI: For the Segment Anything Model (SAM2)
-QGIS Community: For the excellent GIS platform
-PyTorch Team: For the deep learning framework
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 
-📄 License
-This project is licensed under the GPL v2 License - see the LICENSE file for details.
-🏆 Citation
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/oferbutbega/geo-osam/issues)
+- **Email**: ofer@butbega.com
+- **Documentation**: [Wiki](https://github.com/oferbutbega/geo-osam/wiki)
+
+## 🙏 Acknowledgments
+
+- **Meta AI**: For the Segment Anything Model (SAM2)
+- **QGIS Community**: For the excellent GIS platform
+- **PyTorch Team**: For the deep learning framework
+
+## 📄 License
+
+This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) file for details.
+
+## 🏆 Citation
+
 If you use GeoOSAM in your research, please cite:
-bibtex@software{geosam2025,
-title={GeoOSAM: Advanced Segmentation for QGIS},
-author={Butbega, Ofer},
-year={2025},
-url={https://github.com/espressouk/Geo-OSAM}
+
+```bibtex
+@software{geosam2025,
+  title={GeoOSAM: Advanced Segmentation for QGIS},
+  author={Butbega, Ofer},
+  year={2025},
+  url={https://github.com/oferbutbega/geo-osam}
 }
-
-### **4. Documentation Folder** (RECOMMENDED)
-
-Create `docs/` folder with:
-
-**docs/user_guide.md**:
-
-```markdown
-# GeoOSAM User Guide
-
-## Getting Started
-
-[Detailed user instructions...]
-
-## Workflow Examples
-
-[Step-by-step tutorials...]
-
-## Troubleshooting
-
-[Common issues and solutions...]
 ```
