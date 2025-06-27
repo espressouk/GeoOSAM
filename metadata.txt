@@ -1,0 +1,51 @@
+[general]
+name=GeoOSAM
+qgisMinimumVersion=3.16
+qgisMaximumVersion=3.99
+description=Advanced SAM2-based segmentation tool for QGIS with GPU acceleration, threading, and professional workflow features
+about=GeoOSAM brings Meta's Segment Anything Model (SAM2) to QGIS with professional features. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Supports NVIDIA GPU, Apple Silicon, and multi-core CPU processing for optimal performance.
+
+version=1.0.0
+author=Ofer Butbega
+email=ofer@butbega.com
+
+tracker=https://github.com/espressouk/Geo-OSAM/issues
+repository=https://github.com/espressouk/Geo-OSAM
+homepage=https://github.com/espressouk/Geo-OSAM
+
+# Detailed tags for discoverability
+tags=python,segmentation,AI,SAM,SAM2,machine learning,deep learning,computer vision,remote sensing,satellite imagery,urban planning,environmental monitoring,geospatial analysis,object detection,semantic segmentation,GPU acceleration,CUDA,pytorch,raster analysis,GIS
+
+category=Raster
+icon=icon.png
+
+# Plugin status
+experimental=False
+deprecated=False
+approved=False
+
+# Server and processing
+hasProcessingProvider=no
+server=False
+
+# Plugin dependencies and requirements
+plugin_dependencies=
+
+# Changelog (REQUIRED for updates)
+changelog=1.0.0 - Initial release
+    - SAM2-based segmentation with GPU/CPU support
+    - Multi-threaded processing for responsive UI
+    - Point and BBox segmentation modes
+    - 12 pre-defined classes + custom class creation
+    - Vehicle and Ship classes for transportation analysis
+    - Undo functionality for mistake correction
+    - Custom output folder selection
+    - Optional debug mask saving (disabled by default)
+    - Automatic raster layer re-selection
+    - Professional shapefile export with detailed attributes
+    - Performance optimization for different hardware
+    - Comprehensive error handling and user feedback
+    - Professional workflow features for GIS analysis
+
+# Update and support information
+update_date=2025-06-27
