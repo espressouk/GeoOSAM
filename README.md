@@ -6,6 +6,14 @@
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 
+## 📸 Plugin Overview
+
+![Main Interface](screenshots/main_interface.png)
+_GeoOSAM control panel with class selection and segmentation tools_
+
+![Segmentation Results](screenshots/results_view.png)
+_AI-powered segmentation results showing detected building polygons_
+
 ## 🌟 Features
 
 - **🚀 High Performance**: GPU acceleration (CUDA/Apple Silicon) + multi-threading
@@ -28,12 +36,26 @@
 
 ## 🚀 Quick Start
 
-1. **Install Plugin**: Enable in QGIS Plugin Manager
-2. **Load Raster**: Open satellite/aerial imagery
-3. **Select Class**: Choose from 12 pre-defined classes
-4. **Choose Mode**: Point or BBox segmentation
-5. **Click & Segment**: Point-and-click to create polygons
-6. **Export Results**: Save as professional shapefiles
+### 1. Install Plugin
+
+Enable in QGIS Plugin Manager or download from GitHub
+
+### 2. Load Imagery & Select Class
+
+![Main Interface](screenshots/main_interface.png)
+
+### 3. Point & Click to Segment
+
+Select a class (Buildings, Water, etc.) and click on objects in your imagery
+
+### 4. View Results
+
+![Segmentation Results](screenshots/results_view.png)
+
+### 5. Export Professional Shapefiles
+
+![Export Functionality](screenshots/export_shape.png)
+_Export segmented polygons as shapefiles with detailed attributes_
 
 ## 📋 System Requirements
 
