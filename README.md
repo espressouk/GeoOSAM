@@ -103,6 +103,18 @@ for pkg in packages:
 pip install torch torchvision opencv-python rasterio shapely hydra-core
 ```
 
+### SAM2 Model Download
+
+**The SAM2 model (~38MB) will be automatically downloaded when you first use the plugin.**
+
+If auto-download fails, manually run:
+
+```bash
+# Navigate to plugin directory
+cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
+bash download_sam2_checkpoints.sh
+```
+
 ## 🎯 Use Cases
 
 - **🏙️ Urban Planning**: Building and infrastructure mapping

@@ -1,6 +1,6 @@
 import sys
-from qgis.PyQt import QtWidgets, uic, QtCore, QtGui
-from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand, QgsMapTool
+from qgis.PyQt import QtWidgets, QtCore, QtGui
+from qgis.gui import QgsRubberBand, QgsMapTool
 from qgis.core import (
     QgsProject,
     QgsRasterLayer,
@@ -10,21 +10,17 @@ from qgis.core import (
     QgsVectorLayer,
     QgsFeature,
     QgsGeometry,
-    QgsSymbol,
-    QgsRendererRange,
-    QgsGraduatedSymbolRenderer,
     QgsFillSymbol,
-    QgsMarkerSymbol,
     QgsField,
-    QgsMessageLog,
-    Qgis,
     QgsVectorFileWriter
 )
-from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal, QObject
+from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal
+import os
+import urllib.request
+import subprocess
+import platform
 import pathlib
 import datetime
-import shutil
-import io
 import torch
 import numpy as np
 import cv2
@@ -34,7 +30,6 @@ from shapely.geometry import shape
 from hydra import initialize_config_module, compose
 from hydra.core.global_hydra import GlobalHydra
 # fmt: off
-import sys, os
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(plugin_dir)
 from sam2.build_sam import build_sam2
@@ -53,6 +48,112 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
         email                : ofer@butbega.com
  ***************************************************************************/
 """
+
+def auto_download_checkpoint():
+    """Automatically download SAM2 checkpoint if missing"""
+    plugin_dir = os.path.dirname(os.path.abspath(__file__))
+    checkpoint_dir = os.path.join(plugin_dir, "sam2", "checkpoints")
+    checkpoint_path = os.path.join(checkpoint_dir, "sam2_hiera_tiny.pt")
+    download_script = os.path.join(checkpoint_dir, "download_sam2_checkpoints.sh")
+
+    # Check if checkpoint already exists
+    if os.path.exists(checkpoint_path):
+        print(f"✅ SAM2 checkpoint found: {checkpoint_path}")
+        return True
+
+    print(f"🔍 SAM2 checkpoint not found, attempting download...")
+
+    # Ensure checkpoint directory exists
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    # Method 1: Try running the bash script (Linux/Mac)
+    if platform.system() in ['Linux', 'Darwin'] and os.path.exists(download_script):
+        try:
+            print("📥 Running download script...")
+            result = subprocess.run(['bash', download_script], 
+                                  cwd=checkpoint_dir, 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=300)  # 5 minute timeout
+
+            if result.returncode == 0 and os.path.exists(checkpoint_path):
+                print("✅ Checkpoint downloaded successfully via script!")
+                return True
+            else:
+                print(f"⚠️ Script failed: {result.stderr}")
+        except Exception as e:
+            print(f"⚠️ Script execution failed: {e}")
+
+    # Method 2: Python fallback (cross-platform)
+    try:
+        print("📥 Downloading via Python (fallback method)...")
+        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+
+        # Download with progress callback
+        def progress_callback(block_num, block_size, total_size):
+            downloaded = block_num * block_size
+            if total_size > 0:
+                percent = min(100, (downloaded * 100) // total_size)
+                print(f"\r📥 Downloading... {percent}%", end='', flush=True)
+
+        print(f"🌐 Downloading from: {url}")
+        urllib.request.urlretrieve(url, checkpoint_path, progress_callback)
+        print("\n✅ Download completed!")
+
+        # Verify download
+        if os.path.exists(checkpoint_path) and os.path.getsize(checkpoint_path) > 1000000:  # > 1MB
+            print(f"✅ Checkpoint verified: {os.path.getsize(checkpoint_path) / 1024 / 1024:.1f}MB")
+            return True
+        else:
+            print("❌ Download verification failed")
+            return False
+
+    except Exception as e:
+        print(f"❌ Python download failed: {e}")
+        return False
+
+def show_checkpoint_dialog(parent=None):
+    """Show user-friendly dialog for checkpoint download"""
+    from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog
+    from qgis.PyQt.QtCore import Qt
+
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Question)
+    msg.setWindowTitle("SAM2 Model Download")
+    msg.setText("GeoOSAM requires the SAM2 model checkpoint (~38MB).")
+    msg.setInformativeText("Would you like to download it now?")
+    msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+    msg.setDefaultButton(QMessageBox.Yes)
+
+    if msg.exec_() == QMessageBox.Yes:
+        # Show progress dialog
+        progress = QProgressDialog("Downloading SAM2 model...", "Cancel", 0, 0, parent)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.show()
+
+        try:
+            success = auto_download_checkpoint()
+            progress.close()
+
+            if success:
+                QMessageBox.information(parent, "Success", 
+                    "✅ SAM2 model downloaded successfully!\n\nGeoOSAM is ready to use.")
+                return True
+            else:
+                QMessageBox.critical(parent, "Download Failed", 
+                    "❌ Failed to download SAM2 model.\n\n"
+                    "Please download manually:\n"
+                    "1. Go to: sam2/checkpoints/\n"
+                    "2. Run: bash download_sam2_checkpoints.sh\n"
+                    "3. Or download from Facebook AI manually")
+                return False
+
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(parent, "Error", f"Download error: {e}")
+            return False
+
+    return False
 
 # ----------------------------------------------------------------------
 # Performance Configuration (unchanged)
@@ -341,10 +442,25 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._setup_ui()
 
     def _init_optimized_sam_model(self):
-        """Initialize SAM model with performance optimizations"""
+        """Initialize SAM model with auto-download support"""
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
         checkpoint_path = os.path.join(plugin_dir, "sam2", "checkpoints", "sam2_hiera_tiny.pt")
 
+        # Auto-download checkpoint if missing
+        if not os.path.exists(checkpoint_path):
+            print("🔍 SAM2 checkpoint not found, initiating download...")
+
+            # Try silent download first
+            if not auto_download_checkpoint():
+                # If silent download fails, show user dialog
+                if not show_checkpoint_dialog(self):
+                    raise Exception("SAM2 checkpoint required but not available")
+
+            # Verify checkpoint exists after download
+            if not os.path.exists(checkpoint_path):
+                raise Exception(f"SAM2 checkpoint still not found: {checkpoint_path}")
+
+        # Continue with your existing model initialization code...
         if GlobalHydra.instance().is_initialized():
             GlobalHydra.instance().clear()
 
@@ -368,7 +484,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 print(f"✅ SAM2 model loaded on {self.device}")
 
         except Exception as e:
-            print(f"❌ Failed to load optimized SAM model: {e}")
+            print(f"❌ Failed to load SAM model: {e}")
             self.device = "cpu"
             self.use_mixed_precision = False
             with initialize_config_module(config_module="sam2.configs"):
