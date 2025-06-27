@@ -6,14 +6,6 @@
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 
-## 📸 Plugin Overview
-
-![Main Interface](screenshots/main_interface.png)
-_GeoOSAM control panel with class selection and segmentation tools_
-
-![Segmentation Results](screenshots/results_view.png)
-_AI-powered segmentation results showing detected building polygons_
-
 ## 🌟 Features
 
 - **🚀 High Performance**: GPU acceleration (CUDA/Apple Silicon) + multi-threading
