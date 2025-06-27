@@ -1,0 +1,100 @@
+name: 💡 Feature Request
+description: Suggest a new feature or enhancement for GeoOSAM
+title: "[FEATURE] "
+labels: ["enhancement", "needs-discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! 💡
+        
+        Please provide as much detail as possible to help us understand your needs.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing feature requests
+          required: true
+        - label: This is not a duplicate request
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature Summary
+      description: Brief, one-line description of the feature
+      placeholder: "Add support for custom SAM2 models"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      options:
+        - Segmentation/AI
+        - User Interface
+        - Export/Import
+        - Performance
+        - Documentation
+        - Integration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem/Use Case
+      description: What problem does this solve? Who would benefit?
+      placeholder: |
+        Currently, users can only use the built-in SAM2 tiny model.
+        Research users want to use custom-trained models for specific domains.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Detailed description of how you envision this working
+      placeholder: |
+        Add a "Custom Model" option in the control panel that allows users to:
+        1. Browse and select custom .pt model files
+        2. Configure model parameters
+        3. Use the custom model for segmentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Other ways this could be implemented
+      placeholder: "Could also be done via configuration file, or plugin extension system..."
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      options:
+        - Low - Nice to have
+        - Medium - Would improve workflow
+        - High - Critical for my use case
+        - Critical - Blocking my work
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples/Mockups
+      description: Screenshots, mockups, or examples of similar features
+      placeholder: "Attach images or links to similar implementations"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other relevant information
+      placeholder: "Related research papers, technical constraints, etc."

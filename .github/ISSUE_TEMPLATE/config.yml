@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Community Discussions
+    url: https://github.com/espressouk/geo-osam/discussions
+    about: General questions and community discussions
+  - name: 📚 Documentation
+    url: https://github.com/espressouk/geo-osam/tree/main/docs
+    about: User guides, installation instructions, and API documentation
+  - name: 🔧 Troubleshooting Guide
+    url: https://github.com/espressouk/geo-osam/blob/main/docs/troubleshooting.md
+    about: Common issues and solutions
+  - name: 📧 Direct Contact
+    url: mailto:ofer@butbega.com
+    about: For sensitive issues or direct communication

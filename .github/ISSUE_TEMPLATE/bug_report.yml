@@ -1,0 +1,138 @@
+name: 🐛 Bug Report
+description: Report a bug to help us improve GeoOSAM
+title: "[BUG] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! 🐛
+        
+        Before submitting, please:
+        - Search existing issues to avoid duplicates
+        - Test with the latest plugin version
+        - Try the diagnostic steps in our Troubleshooting guide
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues
+          required: true
+        - label: I am using the latest version of GeoOSAM
+          required: true
+        - label: I have read the troubleshooting guide
+          required: true
+
+  - type: input
+    id: qgis-version
+    attributes:
+      label: QGIS Version
+      placeholder: "e.g., 3.28.12"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin Version
+      placeholder: "e.g., 1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Ubuntu 20.04
+        - Ubuntu 22.04
+        - Other Linux
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU/Hardware
+      options:
+        - NVIDIA GPU (CUDA)
+        - Apple Silicon (M1/M2/M3)
+        - Intel GPU
+        - AMD GPU
+        - CPU only
+        - Other
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear and concise description of what the bug is
+      placeholder: "The plugin crashes when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue
+      placeholder: |
+        1. Load raster layer...
+        2. Select Buildings class...
+        3. Click Point mode...
+        4. Click on map...
+        5. Error occurs...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should happen instead
+      placeholder: "Should segment the building and create polygon"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happens
+      placeholder: "Shows error message and no polygon created"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-message
+    attributes:
+      label: Error Messages
+      description: Full text of any error messages
+      placeholder: "Paste error messages here"
+      render: text
+
+  - type: textarea
+    id: raster-info
+    attributes:
+      label: Raster Information
+      description: Details about the imagery being used
+      placeholder: |
+        - Format: GeoTIFF
+        - Size: 2048x2048 pixels
+        - Bands: 3 (RGB)
+        - Resolution: 0.5m/pixel
+        - CRS: EPSG:4326
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other relevant information, screenshots, or files
+      placeholder: "Add screenshots, sample data links, or other context"

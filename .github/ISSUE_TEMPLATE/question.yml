@@ -1,0 +1,100 @@
+name: ❓ Question/Help
+description: Ask a question about using GeoOSAM
+title: "[QUESTION] "
+labels: ["question", "help-wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Need help using GeoOSAM? We're here to help! ❓
+        
+        Before asking:
+        - Check the User Guide and documentation
+        - Look through existing questions/issues
+        - Try the troubleshooting guide
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have read the User Guide
+          required: true
+        - label: I have checked existing questions
+          required: true
+        - label: This is not a bug report (use Bug Report template instead)
+          required: true
+
+  - type: dropdown
+    id: question-type
+    attributes:
+      label: Question Category
+      options:
+        - Installation/Setup
+        - Usage/Workflow
+        - Performance/Optimization
+        - Data/Formats
+        - Integration with QGIS
+        - Technical/Development
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What do you need help with?
+      placeholder: "How do I segment water bodies in satellite imagery?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context/Background
+      description: Relevant details about your use case, data, or setup
+      placeholder: |
+        - Working with Sentinel-2 imagery
+        - Need to map water bodies for environmental monitoring
+        - Have tried both point and bbox modes
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What You've Tried
+      description: Steps you've already attempted
+      placeholder: |
+        1. Tried using "Water" class with point mode
+        2. Results were inconsistent
+        3. Checked documentation but need more specific guidance
+
+  - type: input
+    id: qgis-version
+    attributes:
+      label: QGIS Version
+      placeholder: "e.g., 3.28.12"
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin Version
+      placeholder: "e.g., 1.0.0"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Information
+      description: Screenshots, data samples, or other relevant details
