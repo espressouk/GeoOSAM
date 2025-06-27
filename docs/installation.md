@@ -103,12 +103,12 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu11
 
 ```bash
 # 1. Download plugin from GitHub
-wget https://github.com/espressouk/geo-osam/archive/main.zip
+wget https://github.com/espressouk/geoOSAM/archive/main.zip
 unzip main.zip
 cd geo-osam-main
 
 # Or clone with git:
-git clone https://github.com/espressouk/geo-osam.git
+git clone https://github.com/espressouk/geoOSAM.git
 cd geo-osam
 ```
 
@@ -188,7 +188,7 @@ print(f"MPS available: {torch.backends.mps.is_available()}")
 
 ```bash
 # Clone repository:
-git clone https://github.com/espressouk/geo-osam.git
+git clone https://github.com/espressouk/geoOSAM.git
 cd geo-osam
 
 # Create development environment:

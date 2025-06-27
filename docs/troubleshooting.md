@@ -433,7 +433,7 @@ C:\Users\[USERNAME]\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\g
 
 #### GitHub Issues
 
-Create issue at: https://github.com/espressouk/geo-osam/issues
+Create issue at: https://github.com/espressouk/geoOSAM/issues
 
 #### Include This Information
 
@@ -516,4 +516,4 @@ mv ~/.local/share/QGIS/QGIS3 ~/.local/share/QGIS/QGIS3_backup
 **Still having issues? Don't hesitate to reach out!** 📧
 
 Email: ofer@butbega.com  
-GitHub: https://github.com/espressouk/geo-osam/issues
+GitHub: https://github.com/espressouk/geoOSAM/issues
