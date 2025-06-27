@@ -135,9 +135,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/oferbutbega/GeoOSAM/issues)
+- **Issues**: [GitHub Issues](https://github.com/espressouk/GeoOSAM/issues)
 - **Email**: bkst.dev@gmail.com
-- **Documentation**: [Wiki](https://github.com/oferbutbega/GeoOSAM/wiki)
+- **Documentation**: [Wiki](https://github.com/espressouk/GeoOSAM/wiki)
 
 ## 🙏 Acknowledgments
 
@@ -158,6 +158,6 @@ If you use GeoOSAM in your research, please cite:
   title={GeoOSAM: Advanced Segmentation for QGIS},
   author={Butbega, Ofer},
   year={2025},
-  url={https://github.com/oferbutbega/GeoOSAM}
+  url={https://github.com/espressouk/GeoOSAM}
 }
 ```
