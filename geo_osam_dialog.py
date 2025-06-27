@@ -512,7 +512,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Title with performance info
         device_icon = "🎮" if "cuda" in self.device else "🍎" if "mps" in self.device else "💻"
-        title = QtWidgets.QLabel(f"🛰️ GeoOSAM Control Panel")
+        title = QtWidgets.QLabel(f"GeoOSAM Control Panel")
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2E86AB; padding: 5px;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
