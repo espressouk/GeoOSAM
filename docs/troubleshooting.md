@@ -16,30 +16,76 @@ plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/pyt
 print("Plugin exists:", os.path.exists(plugin_path))
 ```
 
-### SAM2 Model Issues
+### Model Issues
 
-```bash
-# Check model file:
-ls -la ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
+```python
+# Check model selection and availability:
+try:
+    from ultralytics import SAM
+    print("✅ Ultralytics available - MobileSAM ready")
 
-# Re-download if corrupted:
-cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
-rm sam2_hiera_tiny.pt
-bash download_sam2_checkpoints.sh
+    # Test model loading
+    test_model = SAM('mobile_sam.pt')
+    print("✅ MobileSAM loaded successfully")
+except ImportError:
+    print("❌ Ultralytics not available - falling back to SAM 2.1")
+except Exception as e:
+    print(f"⚠️ MobileSAM error: {e}")
+
+# Check SAM 2.1 model:
+sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2_hiera_tiny.pt")
+print(f"SAM 2.1 model exists: {os.path.exists(sam_path)}")
+if os.path.exists(sam_path):
+    print(f"SAM 2.1 size: {os.path.getsize(sam_path)/1024/1024:.1f}MB")
+```
+
+### Device Detection Issues
+
+```python
+# Check what device/model combination is selected:
+import torch
+
+print("=== Device Detection ===")
+if torch.cuda.is_available():
+    print(f"🎮 CUDA GPU: {torch.cuda.get_device_name(0)}")
+    print("→ Will use SAM 2.1 for maximum accuracy")
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    print("🍎 Apple Silicon GPU detected")
+    print("→ Will use SAM 2.1 for optimal performance")
+else:
+    print("💻 CPU-only system detected")
+    print("→ Will use MobileSAM for optimal CPU performance")
+
+# Check threading setup:
+print(f"PyTorch threads: {torch.get_num_threads()}")
+print(f"CPU cores: {os.cpu_count()}")
 ```
 
 ### Segmentation Not Working
 
-1. **Check raster layer is selected** (not vector)
-2. **Zoom to appropriate level** (not too far out)
-3. **Try different click position** (center of object)
-4. **Check image quality** (contrast, resolution)
+1. **Check device/model selection** - Look at control panel header
+2. **Check raster layer is selected** (not vector)
+3. **Zoom to appropriate level** (not too far out)
+4. **Try different click position** (center of object)
+5. **Check image quality** (contrast, resolution)
 
 ---
 
 ## 📋 Common Error Messages
 
 ### Installation Errors
+
+#### Error: "No module named 'ultralytics'"
+
+**Cause:** Ultralytics not installed (needed for MobileSAM)  
+**Solution:**
+
+```python
+# In QGIS Python Console:
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "ultralytics"])
+print("✅ Ultralytics installed - MobileSAM now available")
+```
 
 #### Error: "No module named 'torch'"
 
@@ -49,16 +95,11 @@ bash download_sam2_checkpoints.sh
 ```python
 # In QGIS Python Console:
 import subprocess, sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "torchvision"])
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
+for pkg in packages:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+    print(f"✅ Installed {pkg}")
 ```
-
-#### Error: "Permission denied"
-
-**Cause:** Insufficient permissions (Windows)  
-**Solution:**
-
-- Use QGIS Python Console instead of Command Prompt
-- Or run Command Prompt as Administrator
 
 #### Error: "Plugin could not be loaded"
 
@@ -66,99 +107,166 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "torchvi
 **Solution:**
 
 ```python
-# Check all dependencies:
-deps = ["torch", "torchvision", "cv2", "rasterio", "shapely", "hydra"]
+# Check all dependencies (including new ones):
+deps = {
+    "torch": "torch",
+    "torchvision": "torchvision",
+    "ultralytics": "ultralytics",
+    "cv2": "opencv-python",
+    "rasterio": "rasterio",
+    "shapely": "shapely",
+    "hydra": "hydra-core"
+}
+
 missing = []
-for dep in deps:
+for dep, pkg_name in deps.items():
     try:
         __import__(dep)
         print(f"✅ {dep}")
     except ImportError:
-        missing.append(dep)
+        missing.append(pkg_name)
         print(f"❌ {dep} MISSING")
 
 if missing:
     import subprocess, sys
     for pkg in missing:
-        pkg_name = "opencv-python" if pkg == "cv2" else "hydra-core" if pkg == "hydra" else pkg
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+```
+
+### Model Selection Errors
+
+#### Error: "MobileSAM prediction error"
+
+**Cause:** Ultralytics model issue  
+**Solution:**
+
+```python
+# Force re-download of MobileSAM:
+import os
+ultralytics_cache = os.path.expanduser("~/.ultralytics")
+print(f"Clearing Ultralytics cache: {ultralytics_cache}")
+# Remove cache and restart QGIS
+
+# Or force CPU fallback:
+os.environ["GEOOSAM_FORCE_CPU"] = "1"  # Forces SAM 2.1 on CPU
+```
+
+#### Error: "Device detection failed"
+
+**Cause:** CUDA/MPS detection issues  
+**Solution:**
+
+```python
+# Debug device detection:
+import torch
+import os
+
+print("=== Device Debug ===")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    try:
+        props = torch.cuda.get_device_properties(0)
+        print(f"GPU memory: {props.total_memory / 1024**3:.1f}GB")
+        print(f"GPU name: {torch.cuda.get_device_name(0)}")
+    except Exception as e:
+        print(f"CUDA error: {e}")
+
+print(f"MPS available: {torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else 'Not supported'}")
+
+# Force specific device:
+# os.environ["GEOOSAM_FORCE_CPU"] = "1"  # Force CPU mode
+# os.environ["GEOOSAM_FORCE_GPU"] = "1"  # Force GPU mode
 ```
 
 ### Runtime Errors
+
+#### Error: "Ultralytics not available - falling back to SAM2"
+
+**Cause:** Normal fallback behavior, but you might want MobileSAM  
+**Solution:**
+
+```bash
+# Install Ultralytics for better CPU performance:
+pip install ultralytics
+
+# Restart QGIS to detect new installation
+```
 
 #### Error: "CUDA out of memory"
 
 **Cause:** GPU memory insufficient  
 **Solution:**
 
-- Plugin automatically falls back to CPU
+- Plugin automatically falls back to MobileSAM on CPU
 - Close other GPU-intensive applications
 - Restart QGIS
-
-#### Error: "No raster layer selected"
-
-**Cause:** Vector layer active or no layer loaded  
-**Solution:**
-
-```python
-# Check active layer type:
-layer = iface.activeLayer()
-print(f"Active layer: {layer.name() if layer else 'None'}")
-print(f"Layer type: {type(layer).__name__ if layer else 'None'}")
-
-# Select a raster layer:
-from qgis.core import QgsRasterLayer
-for layer in QgsProject.instance().mapLayers().values():
-    if isinstance(layer, QgsRasterLayer):
-        iface.setActiveLayer(layer)
-        print(f"Selected raster: {layer.name()}")
-        break
-```
+- Use smaller image crop sizes
 
 #### Error: "SAM model failed to load"
 
-**Cause:** Corrupted model file or wrong path  
+**Cause:** Issues with either SAM 2.1 or MobileSAM  
 **Solution:**
 
 ```bash
-# Re-download SAM2 model:
+# For SAM 2.1 (GPU users):
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
 rm -f sam2_hiera_tiny.pt
 wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
 
-# Or use the download script:
-bash download_sam2_checkpoints.sh
+# For MobileSAM (CPU users):
+pip uninstall ultralytics
+pip install ultralytics
+# MobileSAM will auto-download on next use
 ```
 
-### Segmentation Errors
+#### Error: "UltralyticsPredictor failed"
 
-#### Error: "Empty crop area"
-
-**Cause:** Clicked outside raster bounds or invalid coordinates  
+**Cause:** Issues with MobileSAM model or Ultralytics  
 **Solution:**
 
-- Ensure click is within the raster image
-- Check raster CRS matches project CRS
-- Zoom to raster extent
+```python
+# Debug Ultralytics installation:
+try:
+    from ultralytics import SAM
+    model = SAM('mobile_sam.pt')
+    print("✅ Ultralytics working")
 
-#### Error: "No segments found"
+    # Test prediction
+    import numpy as np
+    test_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+    result = model.predict(source=test_img, verbose=False)
+    print("✅ MobileSAM prediction working")
 
-**Cause:** Poor image quality or inappropriate settings  
+except Exception as e:
+    print(f"❌ Ultralytics error: {e}")
+    print("→ Plugin will fallback to SAM 2.1")
+```
+
+### Performance Issues
+
+#### Error: "CPU threading setup failed"
+
+**Cause:** Multi-threading optimization issues  
 **Solution:**
 
-- Try different click position (center vs. edge)
-- Switch between Point and BBox modes
-- Zoom in for better resolution
-- Check image contrast
+```python
+# Check threading setup:
+import torch
+import multiprocessing
+import os
 
-#### Error: "Segmentation timeout"
+print(f"CPU cores detected: {multiprocessing.cpu_count()}")
+print(f"PyTorch threads: {torch.get_num_threads()}")
+print(f"PyTorch interop threads: {torch.get_num_interop_threads()}")
 
-**Cause:** Processing taking too long (CPU mode)  
-**Solution:**
+# Environment variables:
+thread_vars = ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"]
+for var in thread_vars:
+    print(f"{var}: {os.environ.get(var, 'Not set')}")
 
-- Reduce crop size by zooming in
-- Use GPU if available
-- Close other applications
+# Manual override:
+torch.set_num_threads(8)  # Adjust based on your CPU
+```
 
 ---
 
@@ -166,102 +274,73 @@ bash download_sam2_checkpoints.sh
 
 ### Windows Issues
 
-#### Issue: "DLL load failed"
+#### Issue: "DLL load failed" (Ultralytics)
 
 **Cause:** Missing Visual C++ redistributables  
 **Solution:**
 
-- Install Visual C++ Redistributable for Visual Studio 2019
-- Download from Microsoft website
+- Install Visual C++ Redistributable for Visual Studio 2019+
+- Or use CPU fallback: `os.environ["GEOOSAM_FORCE_CPU"] = "1"`
 
-#### Issue: "pip is not recognized"
+#### Issue: Ultralytics slow on Windows
 
-**Cause:** Python/pip not in PATH  
+**Cause:** Windows Defender or antivirus scanning  
 **Solution:**
 
-```python
-# Use QGIS Python Console instead:
-import subprocess, sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "package_name"])
-```
-
-#### Issue: Long path names on Windows
-
-**Cause:** Windows path length limitations  
-**Solution:**
-
-- Move QGIS installation to shorter path (e.g., C:\QGIS)
-- Enable long path support in Windows
+- Add QGIS and Python to antivirus exceptions
+- Add `~/.ultralytics` cache folder to exceptions
 
 ### macOS Issues
 
-#### Issue: "Killed: 9" error
+#### Issue: "MPS fallback warnings" (Apple Silicon)
 
-**Cause:** macOS Gatekeeper blocking unsigned code  
+**Cause:** Some operations not supported on MPS  
 **Solution:**
 
-```bash
-# Allow QGIS to run downloaded plugins:
-sudo xattr -rd com.apple.quarantine /Applications/QGIS.app
+```python
+# This is normal - plugin handles fallback automatically
+# Operations fall back to CPU when needed
+# Performance is still excellent overall
 ```
 
-#### Issue: "SSL certificate verify failed"
+#### Issue: Ultralytics download fails on macOS
 
-**Cause:** Corporate firewall or proxy  
+**Cause:** Certificate or firewall issues  
 **Solution:**
 
 ```bash
-# Download model manually:
-curl -k https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt -o sam2_hiera_tiny.pt
-```
-
-#### Issue: Apple Silicon compatibility
-
-**Cause:** x86 PyTorch on ARM processor  
-**Solution:**
-
-```bash
-# Install native ARM PyTorch:
-pip uninstall torch torchvision
-pip install torch torchvision
+# Manual MobileSAM download:
+pip uninstall ultralytics
+pip install ultralytics --trusted-host pypi.org --trusted-host pypi.python.org
 ```
 
 ### Linux Issues
 
-#### Issue: "libGL.so.1: cannot open shared file"
+#### Issue: "libGL.so.1: cannot open shared file" (Ultralytics)
 
-**Cause:** Missing OpenGL libraries  
+**Cause:** Missing OpenGL libraries for OpenCV  
 **Solution:**
 
 ```bash
 # Ubuntu/Debian:
-sudo apt install libgl1-mesa-glx libglib2.0-0
+sudo apt install libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev
 
 # CentOS/RHEL:
-sudo yum install mesa-libGL
+sudo yum install mesa-libGL libXext libSM
 ```
 
-#### Issue: "Permission denied" for pip
+#### Issue: Permission denied for Ultralytics cache
 
-**Cause:** System Python permissions  
+**Cause:** Cache directory permissions  
 **Solution:**
 
 ```bash
-# Use user installation:
-pip install --user torch torchvision opencv-python rasterio shapely hydra-core
-```
+# Fix permissions:
+mkdir -p ~/.ultralytics
+chmod 755 ~/.ultralytics
 
-#### Issue: NVIDIA driver conflicts
-
-**Cause:** Multiple CUDA versions  
-**Solution:**
-
-```bash
-# Check CUDA version:
-nvidia-smi
-
-# Install matching PyTorch:
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# Or use system-wide installation:
+sudo pip install ultralytics
 ```
 
 ---
@@ -273,92 +352,273 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 #### Diagnosis
 
 ```python
-# Check device being used:
-import torch
-print(f"CUDA available: {torch.cuda.is_available()}")
-print(f"MPS available: {torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else False}")
+# Check current model and device:
+print("=== Performance Diagnosis ===")
 
-# Check processing time:
-import time
-start = time.time()
-# ... perform segmentation ...
-print(f"Processing time: {time.time() - start:.2f} seconds")
+# Device check:
+import torch
+device = "unknown"
+if torch.cuda.is_available():
+    device = f"CUDA ({torch.cuda.get_device_name(0)})"
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    device = "Apple Silicon (MPS)"
+else:
+    device = f"CPU ({torch.get_num_threads()} threads)"
+
+print(f"Device: {device}")
+
+# Model check:
+try:
+    from ultralytics import SAM
+    print("Model: MobileSAM (CPU optimized)")
+except ImportError:
+    print("Model: SAM 2.1 (Fallback)")
+
+# Expected performance:
+import os
+cores = os.cpu_count()
+if "CUDA" in device:
+    print("Expected speed: 0.2-0.5 seconds")
+elif "MPS" in device:
+    print("Expected speed: 1-2 seconds")
+elif cores >= 24:
+    print("Expected speed: <1 second (high-core CPU)")
+elif cores >= 16:
+    print("Expected speed: 1-2 seconds")
+elif cores >= 8:
+    print("Expected speed: 2-4 seconds")
+else:
+    print("Expected speed: 3-6 seconds")
 ```
 
-#### Solutions
+#### Solutions by Hardware
 
-- **Enable GPU acceleration** (CUDA/MPS)
-- **Reduce image resolution** (zoom in)
-- **Close other applications**
-- **Use faster storage** (SSD)
-- **Increase RAM** if possible
+**GPU Users (slow performance):**
 
-### Memory Issues
+- Verify GPU is actually being used (check control panel header)
+- Close other GPU applications
+- Check VRAM usage (`nvidia-smi`)
+- Try smaller crop sizes (zoom in more)
 
-#### High RAM Usage
+**CPU Users (slower than expected):**
 
-**Solution:**
+- Verify MobileSAM is being used (shows in control panel)
+- Check CPU usage during processing
+- Close other CPU-intensive applications
+- For 16+ cores: Should be using 75% of cores
 
-- Process smaller areas at a time
-- Close other applications
-- Restart QGIS periodically
-- Use smaller crop sizes
+**Apple Silicon Users:**
 
-#### GPU Memory Errors
+- Verify MPS is detected and used
+- Some operations may fallback to CPU (normal)
+- Performance should still be excellent
+
+### Threading Issues
+
+#### High CPU Usage
+
+**Diagnosis:**
+
+```python
+import psutil
+import os
+
+print(f"System CPU cores: {os.cpu_count()}")
+print(f"PyTorch threads: {torch.get_num_threads()}")
+print(f"Current CPU usage: {psutil.cpu_percent()}%")
+
+# During processing, CPU usage should be high but not 100%
+# for extended periods
+```
 
 **Solution:**
 
 ```python
-# Plugin should auto-fallback to CPU, but if not:
+# Reduce thread count if system becomes unresponsive:
 import torch
-torch.cuda.empty_cache()  # Clear GPU memory
+torch.set_num_threads(max(1, os.cpu_count() // 2))
 ```
-
-### UI Freezing
-
-#### Cause
-
-Long processing operations blocking main thread
-
-#### Solution
-
-- Plugin uses threading to prevent this
-- If UI freezes, restart QGIS
-- Reduce processing complexity
 
 ---
 
-## 🔍 Debugging Tools
+## 🔍 Advanced Debugging
 
-### Enable Debug Mode
+### Model Selection Debug
 
 ```python
-# In QGIS Python Console:
-import logging
-logging.basicConfig(level=logging.DEBUG)
+# Complete model selection diagnostic:
+print("=== GeoOSAM Model Selection Debug ===")
 
-# Enable debug mask saving:
-# Check "💾 Save debug masks" in control panel
+import os
+import torch
+
+# 1. Check force flags
+force_cpu = os.getenv("GEOOSAM_FORCE_CPU")
+force_gpu = os.getenv("GEOOSAM_FORCE_GPU")
+print(f"Force CPU: {force_cpu}")
+print(f"Force GPU: {force_gpu}")
+
+# 2. Hardware detection
+print("\n--- Hardware Detection ---")
+cuda_available = torch.cuda.is_available()
+mps_available = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+
+print(f"CUDA available: {cuda_available}")
+if cuda_available:
+    props = torch.cuda.get_device_properties(0)
+    print(f"  GPU: {torch.cuda.get_device_name(0)}")
+    print(f"  Memory: {props.total_memory / 1024**3:.1f}GB")
+    print(f"  Sufficient memory (≥4GB): {props.total_memory / 1024**3 >= 4}")
+
+print(f"MPS available: {mps_available}")
+
+# 3. Model availability
+print("\n--- Model Availability ---")
+try:
+    from ultralytics import SAM
+    test_model = SAM('mobile_sam.pt')
+    print("✅ MobileSAM available")
+    mobilesam_available = True
+except Exception as e:
+    print(f"❌ MobileSAM failed: {e}")
+    mobilesam_available = False
+
+sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2_hiera_tiny.pt")
+sam2_available = os.path.exists(sam2_path)
+print(f"SAM 2.1 available: {sam2_available}")
+
+# 4. Final selection logic
+print("\n--- Final Selection ---")
+if force_cpu:
+    device = "cpu"
+    model = "MobileSAM" if mobilesam_available else "SAM2"
+    print(f"FORCED → {device}, {model}")
+elif cuda_available and not force_cpu:
+    gpu_props = torch.cuda.get_device_properties(0)
+    if gpu_props.total_memory / 1024**3 >= 4:
+        device = "cuda"
+        model = "SAM2"
+        print(f"AUTO → {device}, {model} (sufficient GPU memory)")
+    else:
+        device = "cpu"
+        model = "MobileSAM" if mobilesam_available else "SAM2"
+        print(f"AUTO → {device}, {model} (insufficient GPU memory)")
+elif mps_available:
+    device = "mps"
+    model = "SAM2"
+    print(f"AUTO → {device}, {model}")
+else:
+    device = "cpu"
+    model = "MobileSAM" if mobilesam_available else "SAM2"
+    print(f"AUTO → {device}, {model}")
+
+print(f"\nFinal: {model} on {device.upper()}")
 ```
 
-### Diagnostic Script
+### Performance Profiling
 
 ```python
-# Comprehensive system check:
-import os, sys, torch, cv2, rasterio, shapely, hydra
-from qgis.core import QgsApplication, QgsRasterLayer, QgsProject
+# Profile segmentation performance:
+import time
 
-print("=== GeoOSAM Diagnostic Report ===")
+def profile_segmentation():
+    """Profile a complete segmentation cycle."""
+
+    print("=== Performance Profile ===")
+
+    # Setup timing
+    start_total = time.time()
+
+    # Mock preparation (replace with actual)
+    start_prep = time.time()
+    # ... preparation code ...
+    prep_time = time.time() - start_prep
+
+    # Mock inference (replace with actual)
+    start_inference = time.time()
+    # ... inference code ...
+    inference_time = time.time() - start_inference
+
+    # Mock post-processing (replace with actual)
+    start_post = time.time()
+    # ... post-processing code ...
+    post_time = time.time() - start_post
+
+    total_time = time.time() - start_total
+
+    print(f"Preparation: {prep_time:.3f}s ({prep_time/total_time*100:.1f}%)")
+    print(f"Inference: {inference_time:.3f}s ({inference_time/total_time*100:.1f}%)")
+    print(f"Post-process: {post_time:.3f}s ({post_time/total_time*100:.1f}%)")
+    print(f"Total: {total_time:.3f}s")
+
+    # Performance expectations
+    import os
+    cores = os.cpu_count()
+
+    if torch.cuda.is_available():
+        expected = "0.2-0.5s"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        expected = "1-2s"
+    elif cores >= 24:
+        expected = "<1s"
+    elif cores >= 16:
+        expected = "1-2s"
+    else:
+        expected = "2-4s"
+
+    print(f"Expected: {expected}")
+    print(f"Performance: {'✅ Good' if total_time <= 5 else '⚠️ Slow' if total_time <= 10 else '❌ Very Slow'}")
+
+# Run during actual segmentation:
+# profile_segmentation()
+```
+
+---
+
+## 📞 Getting Help
+
+### Enhanced Bug Reports
+
+When reporting issues, include this enhanced diagnostic:
+
+```python
+# Enhanced diagnostic script:
+print("=== GeoOSAM Enhanced Diagnostic ===")
+
+import os, sys, torch
+from qgis.core import QgsApplication
+
+# Basic info
 print(f"Python: {sys.version}")
 print(f"QGIS: {QgsApplication.version()}")
-print(f"PyTorch: {torch.__version__}")
-print(f"OpenCV: {cv2.__version__}")
-print(f"Rasterio: {rasterio.__version__}")
-print(f"Shapely: {shapely.__version__}")
-print(f"Hydra: {hydra.__version__}")
+print(f"OS: {os.name} {os.uname().sysname if hasattr(os, 'uname') else 'Windows'}")
 
-# Hardware info:
-print(f"CPU cores: {os.cpu_count()}")
+# Dependencies
+deps = {
+    "torch": torch.__version__,
+    "ultralytics": None,
+    "cv2": None,
+    "rasterio": None,
+    "shapely": None,
+    "hydra": None
+}
+
+for name in deps:
+    try:
+        if name == "torch":
+            continue  # Already have version
+        module = __import__(name)
+        deps[name] = getattr(module, '__version__', 'unknown')
+    except ImportError:
+        deps[name] = "MISSING"
+
+for name, version in deps.items():
+    print(f"{name}: {version}")
+
+# Hardware
+print(f"\nCPU cores: {os.cpu_count()}")
+print(f"PyTorch threads: {torch.get_num_threads()}")
+
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
@@ -367,153 +627,45 @@ elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
 else:
     print("GPU: None (CPU only)")
 
-# Plugin status:
-plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam")
-print(f"Plugin installed: {os.path.exists(plugin_path)}")
-
-model_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2_hiera_tiny.pt")
-if os.path.exists(model_path):
-    print(f"SAM2 model: {os.path.getsize(model_path)/1024/1024:.1f}MB")
+# Model selection
+print(f"\nExpected device: ", end="")
+if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1024**3 >= 4:
+    print("CUDA → SAM 2.1")
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    print("MPS → SAM 2.1")
 else:
-    print("SAM2 model: Missing")
+    mobilesam = "MobileSAM" if deps["ultralytics"] != "MISSING" else "SAM 2.1 (fallback)"
+    print(f"CPU → {mobilesam}")
 
-# Active layers:
-layers = QgsProject.instance().mapLayers()
-print(f"Loaded layers: {len(layers)}")
-for name, layer in layers.items():
-    print(f"  {layer.name()}: {type(layer).__name__}")
+# Plugin status
+plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam")
+print(f"\nPlugin installed: {os.path.exists(plugin_path)}")
 
-active = iface.activeLayer()
-print(f"Active layer: {active.name() if active else 'None'}")
-print("=== End Report ===")
+# Models
+sam2_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2_hiera_tiny.pt")
+if os.path.exists(sam2_path):
+    print(f"SAM 2.1 model: {os.path.getsize(sam2_path)/1024/1024:.1f}MB")
+else:
+    print("SAM 2.1 model: Missing")
+
+if deps["ultralytics"] != "MISSING":
+    print("MobileSAM: Available via Ultralytics")
+else:
+    print("MobileSAM: Not available")
+
+print("=== End Enhanced Diagnostic ===")
 ```
 
-### Log File Locations
+### Support Channels
 
-#### Windows
+- **GitHub Issues:** https://github.com/espressouk/GeoOSAM/issues
 
-```
-C:\Users\[USERNAME]\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam\logs\
-```
+  - Include enhanced diagnostic output
+  - Specify which model was being used
+  - Note performance expectations vs. reality
 
-#### macOS
+- **Email:** bkst.dev@gmail.com
+  - For complex performance issues
+  - Hardware-specific problems
 
-```
-~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/logs/
-```
-
-#### Linux
-
-```
-~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/logs/
-```
-
----
-
-## 📞 Getting Help
-
-### Before Reporting Issues
-
-#### Collect Information
-
-1. **Run diagnostic script** (above)
-2. **Note exact error messages**
-3. **Document steps to reproduce**
-4. **Check QGIS and plugin versions**
-5. **Test with different imagery**
-
-#### Try These First
-
-- **Restart QGIS**
-- **Reload the plugin**
-- **Test with sample data**
-- **Check internet connection** (for model download)
-
-### Reporting Bugs
-
-#### GitHub Issues
-
-Create issue at: https://github.com/espressouk/geoOSAM/issues
-
-#### Include This Information
-
-```
-**Environment:**
-- OS: [Windows 11 / macOS 12 / Ubuntu 20.04]
-- QGIS Version: [3.28.12]
-- Plugin Version: [1.0.0]
-- Python Version: [3.9.16]
-
-**Hardware:**
-- RAM: [16GB]
-- GPU: [NVIDIA RTX 4090 / Apple M2 / None]
-- Storage: [SSD / HDD]
-
-**Error:**
-[Paste full error message]
-
-**Steps to Reproduce:**
-1. Load raster layer
-2. Click GeoOSAM icon
-3. Select Buildings class
-4. Click Point mode
-5. Click on building
-6. Error occurs
-
-**Expected Behavior:**
-Should segment the building
-
-**Actual Behavior:**
-Shows error: "No segments found"
-
-**Additional Context:**
-- Works with some images but not others
-- Imagery: Sentinel-2, 10m resolution
-- File format: GeoTIFF
-```
-
-### Emergency Solutions
-
-#### Plugin Completely Broken
-
-```python
-# Disable plugin:
-# Plugins → Manage and Install Plugins → Installed → GeoOSAM → Uncheck
-
-# Reset plugin settings:
-import os
-settings_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/QGIS/QGIS3.ini")
-# Edit file and remove [geo_osam] section
-
-# Fresh installation:
-# Uninstall and reinstall plugin
-```
-
-#### QGIS Won't Start
-
-```bash
-# Reset QGIS configuration:
-# Backup and remove QGIS3 folder, then restart QGIS
-mv ~/.local/share/QGIS/QGIS3 ~/.local/share/QGIS/QGIS3_backup
-```
-
----
-
-## 🔄 Updates and Patches
-
-### Staying Updated
-
-- **Check for updates** in QGIS Plugin Manager
-- **Watch GitHub releases** for announcements
-- **Subscribe to issues** for bug fixes
-
-### Beta Testing
-
-- **Join beta program** for early access to fixes
-- **Test with your specific workflows**
-- **Report feedback** to improve stability
-
-**Still having issues? Don't hesitate to reach out!** 📧
-
-Email: bkst.dev@gmail.com
-GitHub: https://github.com/espressouk/geoOSAM/issues
+**Still having issues? The enhanced diagnostic output above will help us solve your problem quickly!** 📧

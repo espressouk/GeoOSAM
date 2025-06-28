@@ -2,20 +2,49 @@
 
 ## 📋 Overview
 
-GeoOSAM is built with a modular architecture for extensibility and maintainability. This document covers the public API for developers who want to extend or integrate with the plugin.
+GeoOSAM is built with a modular architecture featuring intelligent model selection between SAM 2.1 and MobileSAM based on available hardware. This document covers the public API for developers who want to extend or integrate with the plugin.
 
 ## 🏗️ Architecture
 
 ```
 geo_osam/
 ├── geo_osam.py              # Main plugin class
-├── geo_osam_dialog.py       # Control panel and core logic
+├── geo_osam_dialog.py       # Control panel with intelligent model selection
 ├── sam2/                    # SAM2 model integration
 │   ├── build_sam.py
 │   ├── sam2_image_predictor.py
 │   └── configs/
+├── UltralyticsPredictor     # MobileSAM wrapper (embedded)
 └── resources/               # UI resources
 ```
+
+## 🧠 Intelligent Model Selection
+
+### Core Logic
+
+GeoOSAM automatically selects the optimal model based on hardware:
+
+```python
+def detect_best_device():
+    """Detect best device and model combination."""
+    if torch.cuda.is_available() and gpu_memory >= 4GB:
+        return "cuda", "SAM2.1"
+    elif torch.backends.mps.is_available():
+        return "mps", "SAM2.1"
+    else:
+        model = "MobileSAM" if ultralytics_available else "SAM2"
+        return "cpu", model
+```
+
+### Model Performance Matrix
+
+| Hardware      | Model     | Expected Speed | Use Case              |
+| ------------- | --------- | -------------- | --------------------- |
+| NVIDIA GPU    | SAM 2.1   | 0.2-0.5s       | Maximum accuracy      |
+| Apple Silicon | SAM 2.1   | 1-2s           | Balanced performance  |
+| 24+ Core CPU  | MobileSAM | <1s            | High-end workstations |
+| 8-16 Core CPU | MobileSAM | 1-2s           | Standard systems      |
+| 4-8 Core CPU  | MobileSAM | 2-4s           | Budget systems        |
 
 ## 📚 Core Classes
 
@@ -23,7 +52,7 @@ geo_osam/
 
 ```python
 class SegSam:
-    """Main QGIS Plugin Implementation."""
+    """Main QGIS Plugin Implementation with intelligent model selection."""
 
     def __init__(self, iface: QgsInterface):
         """Initialize plugin with QGIS interface."""
@@ -35,526 +64,697 @@ class SegSam:
         """Remove plugin UI elements on unload."""
 
     def show_control_panel(self) -> None:
-        """Show the GeoOSAM control panel."""
-
-    def toggle_control_panel(self) -> None:
-        """Toggle control panel visibility."""
+        """Show the GeoOSAM control panel with auto device detection."""
 ```
 
-#### Methods
-
-##### `__init__(iface: QgsInterface)`
-
-Initializes the plugin with QGIS interface reference.
-
-**Parameters:**
-
-- `iface`: QGIS interface object
-
-**Example:**
-
-```python
-plugin = SegSam(iface)
-```
-
-##### `show_control_panel()`
-
-Creates and displays the control panel as a dockable widget.
-
-**Returns:** None
-
-**Side Effects:**
-
-- Creates `GeoOSAMControlPanel` instance
-- Docks panel to right side of QGIS
-- Updates QGIS message bar
-
-### GeoOSAMControlPanel (Core Functionality)
+### GeoOSAMControlPanel (Enhanced)
 
 ```python
 class GeoOSAMControlPanel(QtWidgets.QDockWidget):
-    """Enhanced control panel with output folder selection, undo, and more classes."""
+    """Enhanced control panel with intelligent model selection."""
 
     def __init__(self, iface: QgsInterface, parent=None):
-        """Initialize control panel."""
+        """Initialize with automatic device/model detection."""
+        self.device, self.model_choice, self.num_cores = detect_best_device()
+        self._init_sam_model()  # Initialize selected model
 
-    # Public Methods
-    def set_output_folder(self, folder_path: str) -> bool:
-        """Set custom output folder for shapefiles."""
-
-    def add_custom_class(self, name: str, color: str, description: str = "") -> bool:
-        """Add a new segmentation class."""
-
-    def export_class_layer(self, class_name: str, output_path: str = None) -> bool:
-        """Export specific class layer to shapefile."""
-
-    def get_segmentation_stats(self) -> dict:
-        """Get current segmentation statistics."""
+    # Enhanced Properties
+    @property
+    def current_model_info(self) -> dict:
+        """Get current model and device information."""
+        return {
+            'device': self.device,
+            'model': self.model_choice,
+            'cores': self.num_cores,
+            'expected_speed': self._get_expected_speed()
+        }
 ```
 
-#### Properties
+#### New Model Selection Methods
 
-##### `DEFAULT_CLASSES`
+##### `detect_best_device() -> tuple`
 
-Dictionary of pre-defined segmentation classes:
-
-```python
-DEFAULT_CLASSES = {
-    'Buildings': {'color': '220,20,60', 'description': 'Residential and commercial buildings'},
-    'Roads': {'color': '105,105,105', 'description': 'Streets, highways, and pathways'},
-    'Vegetation': {'color': '34,139,34', 'description': 'Trees, grass, and vegetation'},
-    'Water': {'color': '30,144,255', 'description': 'Rivers, lakes, and water bodies'},
-    'Agriculture': {'color': '255,215,0', 'description': 'Farmland and crops'},
-    'Parking': {'color': '255,140,0', 'description': 'Parking lots and areas'},
-    'Industrial': {'color': '138,43,226', 'description': 'Industrial buildings and areas'},
-    'Residential': {'color': '255,20,147', 'description': 'Residential areas'},
-    'Commercial': {'color': '0,191,255', 'description': 'Commercial areas'},
-    'Vehicle': {'color': '255,69,0', 'description': 'Cars, trucks, and vehicles'},
-    'Ship': {'color': '0,206,209', 'description': 'Ships, boats, and vessels'},
-    'Other': {'color': '148,0,211', 'description': 'Unclassified objects'}
-}
-```
-
-#### Core Methods
-
-##### `set_output_folder(folder_path: str) -> bool`
-
-Set custom output folder for shapefile exports.
-
-**Parameters:**
-
-- `folder_path` (str): Absolute path to output directory
+Intelligently detects optimal device and model combination.
 
 **Returns:**
 
-- `bool`: True if successful, False otherwise
+- `tuple`: (device_str, model_choice, num_cores)
+  - `device_str`: "cuda", "mps", or "cpu"
+  - `model_choice`: "SAM2" or "MobileSAM"
+  - `num_cores`: CPU core count (None for GPU)
 
 **Example:**
 
 ```python
-panel = GeoOSAMControlPanel(iface)
-success = panel.set_output_folder("/home/user/my_segments")
+device, model, cores = detect_best_device()
+print(f"Using {model} on {device}")
+if cores:
+    print(f"CPU threading: {cores} cores")
 ```
 
-##### `add_custom_class(name: str, color: str, description: str = "") -> bool`
+##### `setup_pytorch_performance() -> int`
 
-Add a new segmentation class to the available options.
-
-**Parameters:**
-
-- `name` (str): Class name (must be unique)
-- `color` (str): RGB color in format "R,G,B" (0-255)
-- `description` (str): Optional class description
-
-**Returns:**
-
-- `bool`: True if successful, False if class exists
-
-**Example:**
-
-```python
-panel.add_custom_class("Solar Panels", "255,255,0", "Rooftop solar installations")
-```
-
-##### `export_class_layer(class_name: str, output_path: str = None) -> bool`
-
-Export a specific class layer to shapefile.
-
-**Parameters:**
-
-- `class_name` (str): Name of class to export
-- `output_path` (str, optional): Custom output path, uses default if None
-
-**Returns:**
-
-- `bool`: True if export successful
-
-**Example:**
-
-```python
-success = panel.export_class_layer("Buildings", "/path/to/buildings.shp")
-```
-
-##### `get_segmentation_stats() -> dict`
-
-Get current segmentation statistics.
-
-**Returns:**
-
-- `dict`: Statistics including feature counts, classes, etc.
-
-**Example:**
-
-```python
-stats = panel.get_segmentation_stats()
-print(f"Total segments: {stats['total_segments']}")
-print(f"Active classes: {stats['active_classes']}")
-```
-
-## 🔧 Utility Functions
-
-### Performance Configuration
-
-#### `setup_pytorch_performance() -> int`
-
-Configure PyTorch for optimal performance.
+Configure PyTorch threading for optimal CPU performance.
 
 **Returns:**
 
 - `int`: Number of threads configured
 
+**Logic:**
+
+```python
+if cores >= 16:
+    optimal_threads = max(8, int(cores * 0.75))  # Use 75% for high-core
+elif cores >= 8:
+    optimal_threads = max(4, cores - 2)          # Leave 2 for system
+else:
+    optimal_threads = max(1, cores - 1)          # Leave 1 for system
+```
+
 **Example:**
 
 ```python
-from geo_osam_dialog import setup_pytorch_performance
 threads = setup_pytorch_performance()
-print(f"Using {threads} CPU threads")
+print(f"Configured {threads} PyTorch threads")
 ```
 
-#### `detect_best_device() -> str`
+## 🤖 Model Classes
 
-Detect best available device for inference.
+### UltralyticsPredictor
+
+```python
+class UltralyticsPredictor:
+    """Wrapper for Ultralytics MobileSAM with SAM2 interface compatibility."""
+
+    def __init__(self, model):
+        """Initialize with Ultralytics SAM model."""
+        self.model = model  # SAM('mobile_sam.pt')
+        self.features = None
+
+    def set_image(self, image: np.ndarray) -> None:
+        """Set image for segmentation (compatible with SAM2 interface)."""
+        self.image = image
+
+    def predict(self, point_coords=None, point_labels=None, box=None,
+                multimask_output=False) -> tuple:
+        """Predict segmentation mask (SAM2-compatible interface)."""
+        # Returns: (masks, scores, logits)
+```
+
+#### Key Methods
+
+##### `predict(point_coords=None, point_labels=None, box=None, multimask_output=False)`
+
+Perform segmentation prediction with SAM2-compatible interface.
+
+**Parameters:**
+
+- `point_coords` (array): Point coordinates [[x, y]]
+- `point_labels` (array): Point labels [1] (positive)
+- `box` (array): Bounding box [[x1, y1, x2, y2]]
+- `multimask_output` (bool): Return multiple masks (ignored for MobileSAM)
 
 **Returns:**
 
-- `str`: Device identifier ("cuda", "mps", or "cpu")
+- `tuple`: (masks, scores, logits)
+  - `masks`: List of numpy arrays
+  - `scores`: List of confidence scores
+  - `logits`: None (not used by MobileSAM)
 
 **Example:**
 
 ```python
-from geo_osam_dialog import detect_best_device
-device = detect_best_device()
-print(f"Using device: {device}")
+from ultralytics import SAM
+
+# Initialize MobileSAM
+mobile_sam = SAM('mobile_sam.pt')
+predictor = UltralyticsPredictor(mobile_sam)
+
+# Set image
+predictor.set_image(image_array)
+
+# Point-based prediction
+masks, scores, logits = predictor.predict(
+    point_coords=[[100, 150]],
+    point_labels=[1]
+)
+
+# Box-based prediction
+masks, scores, logits = predictor.predict(
+    box=[[50, 50, 200, 200]]
+)
+```
+
+### Enhanced SAM2ImagePredictor
+
+```python
+class SAM2ImagePredictor:
+    """Enhanced SAM2 predictor with performance optimizations."""
+
+    def __init__(self, sam_model):
+        """Initialize with SAM2 model and device optimization."""
+        self.model = sam_model
+
+        # Performance optimizations
+        if device == "cpu":
+            try:
+                self.model = torch.jit.optimize_for_inference(self.model)
+            except:
+                pass  # Fallback gracefully
+```
+
+## 🔧 Utility Functions
+
+### Device Detection
+
+#### `detect_best_device() -> tuple`
+
+Main device detection function with comprehensive hardware analysis.
+
+**Logic Flow:**
+
+```python
+def detect_best_device():
+    cores = None
+    try:
+        # 1. Check CUDA GPU
+        if torch.cuda.is_available() and not os.getenv("GEOOSAM_FORCE_CPU"):
+            gpu_props = torch.cuda.get_device_properties(0)
+            if gpu_props.total_memory / 1024**3 >= 4:  # 4GB minimum
+                return "cuda", "SAM2", cores
+
+        # 2. Check Apple Silicon
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return "mps", "SAM2", cores
+
+        # 3. CPU fallback with model selection
+        else:
+            model_choice = "MobileSAM" if MOBILESAM_AVAILABLE else "SAM2"
+            cores = setup_pytorch_performance()
+            return "cpu", model_choice, cores
+
+    except Exception as e:
+        # Graceful fallback
+        device, model_choice = "cpu", "SAM2"
+        cores = setup_pytorch_performance()
+        return device, model_choice, cores
+```
+
+#### Environment Variables
+
+Control device selection with environment variables:
+
+```python
+# Force CPU mode (useful for testing)
+os.environ["GEOOSAM_FORCE_CPU"] = "1"
+
+# Force GPU mode (override memory checks)
+os.environ["GEOOSAM_FORCE_GPU"] = "1"
+```
+
+### Performance Configuration
+
+#### `setup_pytorch_performance() -> int`
+
+Advanced CPU threading configuration with hardware-aware optimization.
+
+**Features:**
+
+- **Core-aware scaling**: Uses 75% of cores on 16+ core systems
+- **System responsiveness**: Leaves cores for OS and other apps
+- **Environment setup**: Configures OpenMP, MKL, and OpenBLAS
+- **Safety checks**: Handles threading conflicts gracefully
+
+**Example:**
+
+```python
+import multiprocessing
+import os
+import torch
+
+def setup_pytorch_performance():
+    num_cores = multiprocessing.cpu_count()
+
+    # Intelligent thread allocation
+    if num_cores >= 16:
+        optimal_threads = max(8, int(num_cores * 0.75))
+    elif num_cores >= 8:
+        optimal_threads = max(4, num_cores - 2)
+    else:
+        optimal_threads = max(1, num_cores - 1)
+
+    # Configure PyTorch
+    torch.set_num_interop_threads(min(4, optimal_threads // 2))
+    torch.set_num_threads(optimal_threads)
+
+    # Configure external libraries
+    os.environ["OMP_NUM_THREADS"] = str(optimal_threads)
+    os.environ["MKL_NUM_THREADS"] = str(optimal_threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(optimal_threads)
+
+    return optimal_threads
 ```
 
 ### Model Management
 
 #### `auto_download_checkpoint() -> bool`
 
-Automatically download SAM2 checkpoint if missing.
+Enhanced checkpoint downloading with better error handling.
 
-**Returns:**
+**Features:**
 
-- `bool`: True if checkpoint available after operation
+- **Cross-platform**: Bash script on Linux/Mac, Python fallback
+- **Progress tracking**: Shows download progress
+- **Verification**: Checks file size and integrity
+- **Timeout handling**: 5-minute timeout for large downloads
 
-**Example:**
+#### MobileSAM Auto-Download
 
 ```python
-from geo_osam_dialog import auto_download_checkpoint
-if auto_download_checkpoint():
-    print("Checkpoint ready")
+# MobileSAM downloading is handled automatically by Ultralytics
+try:
+    from ultralytics import SAM
+    test_model = SAM('mobile_sam.pt')  # Auto-downloads if needed
+    MOBILESAM_AVAILABLE = True
+except Exception:
+    MOBILESAM_AVAILABLE = False
 ```
 
-## 🧵 Threading Classes
+## 🧵 Enhanced Threading Classes
 
-### OptimizedSAM2Worker
+### OptimizedSAM2Worker (Updated)
 
 ```python
 class OptimizedSAM2Worker(QThread):
-    """Worker thread for SAM2 inference."""
+    """Enhanced worker thread supporting both SAM2 and MobileSAM."""
 
-    # Signals
-    finished = pyqtSignal(object)  # Emitted with result dict
-    error = pyqtSignal(str)        # Emitted with error message
-    progress = pyqtSignal(str)     # Emitted with progress updates
+    def __init__(self, predictor, arr, mode, model_choice="SAM2",
+                 point_coords=None, point_labels=None, box=None,
+                 mask_transform=None, debug_info=None, device="cpu"):
+        """Initialize with model choice and device information."""
+        super().__init__()
+        self.model_choice = model_choice  # "SAM2" or "MobileSAM"
+        self.device = device
+        # ... other parameters
 
-    def __init__(self, predictor, arr, mode, point_coords=None,
-                 point_labels=None, box=None, mask_transform=None,
-                 debug_info=None, device="cpu"):
-        """Initialize worker thread."""
+    def run(self):
+        """Run inference with model-specific optimizations."""
+        try:
+            self.progress.emit(f"🖼️ Setting image for {self.model_choice}...")
+            self.predictor.set_image(self.arr)
+
+            self.progress.emit(f"🧠 Running {self.model_choice} inference...")
+
+            with torch.no_grad():
+                if self.mode == "point":
+                    masks, scores, logits = self.predictor.predict(
+                        point_coords=self.point_coords,
+                        point_labels=self.point_labels,
+                        multimask_output=False
+                    )
+                elif self.mode == "bbox":
+                    masks, scores, logits = self.predictor.predict(
+                        box=self.box,
+                        multimask_output=False
+                    )
+
+            # Enhanced result processing
+            result = {
+                'mask': self._process_mask(masks[0]),
+                'scores': scores,
+                'logits': logits,
+                'mask_transform': self.mask_transform,
+                'debug_info': {
+                    **self.debug_info,
+                    'model': self.model_choice,
+                    'device': self.device
+                }
+            }
+
+            self.finished.emit(result)
+
+        except Exception as e:
+            error_msg = f"{self.model_choice} inference failed: {str(e)}"
+            self.error.emit(error_msg)
 ```
 
-#### Signals
+#### Enhanced Features
 
-- **`finished(object)`**: Emitted when segmentation completes successfully
-- **`error(str)`**: Emitted when an error occurs during processing
-- **`progress(str)`**: Emitted with progress update messages
+- **Model-aware processing**: Different optimizations for SAM2 vs MobileSAM
+- **Device-specific handling**: GPU vs CPU optimizations
+- **Progress tracking**: Model-specific progress messages
+- **Error context**: Enhanced error reporting with model information
 
-#### Usage Example
+## 📊 Enhanced Data Structures
+
+### Device Information
 
 ```python
-# Create worker
-worker = OptimizedSAM2Worker(
-    predictor=sam_predictor,
-    arr=image_array,
-    mode="point",
-    point_coords=[[100, 150]],
-    point_labels=[1],
-    device="cuda"
-)
-
-# Connect signals
-worker.finished.connect(self.on_result)
-worker.error.connect(self.on_error)
-worker.progress.connect(self.update_status)
-
-# Start processing
-worker.start()
+device_info = {
+    'device': str,           # "cuda", "mps", "cpu"
+    'model': str,            # "SAM2", "MobileSAM"
+    'cores': int,            # CPU cores (None for GPU)
+    'gpu_name': str,         # GPU name (None for CPU)
+    'gpu_memory': float,     # GPU memory in GB (None for CPU)
+    'expected_speed': str,   # Expected processing time
+    'threading_info': {      # CPU threading details
+        'num_threads': int,
+        'interop_threads': int,
+        'core_utilization': float
+    }
+}
 ```
 
-## 🗺️ Map Tools
-
-### EnhancedPointClickTool
-
-```python
-class EnhancedPointClickTool(QgsMapTool):
-    """Enhanced point selection tool with visual feedback."""
-
-    def __init__(self, canvas: QgsMapCanvas, callback: callable):
-        """Initialize point tool."""
-
-    def canvasReleaseEvent(self, e: QgsMapMouseEvent) -> None:
-        """Handle mouse click events."""
-
-    def clear_feedback(self) -> None:
-        """Clear visual feedback."""
-```
-
-### EnhancedBBoxClickTool
-
-```python
-class EnhancedBBoxClickTool(QgsMapTool):
-    """Enhanced bounding box selection tool with drag feedback."""
-
-    def __init__(self, canvas: QgsMapCanvas, callback: callable):
-        """Initialize bbox tool."""
-
-    def canvasPressEvent(self, e: QgsMapMouseEvent) -> None:
-        """Handle mouse press events."""
-
-    def canvasMoveEvent(self, e: QgsMapMouseEvent) -> None:
-        """Handle mouse move events."""
-
-    def canvasReleaseEvent(self, e: QgsMapMouseEvent) -> None:
-        """Handle mouse release events."""
-```
-
-## 📊 Data Structures
-
-### Segmentation Result
-
-Results returned by the SAM2 worker contain:
+### Enhanced Segmentation Result
 
 ```python
 result = {
     'mask': numpy.ndarray,           # Binary segmentation mask
     'scores': numpy.ndarray,         # Confidence scores
-    'logits': numpy.ndarray,         # Raw model outputs
+    'logits': numpy.ndarray,         # Raw model outputs (None for MobileSAM)
     'mask_transform': Affine,        # Geospatial transform
-    'debug_info': {                  # Processing metadata
+    'debug_info': {                  # Enhanced processing metadata
         'mode': str,                 # "point" or "bbox"
         'class': str,                # Target class name
         'device': str,               # Processing device
+        'model': str,                # Model used ("SAM2" or "MobileSAM")
         'prep_time': float,          # Preprocessing time
-        'crop_size': str             # Processing dimensions
+        'inference_time': float,     # Model inference time
+        'crop_size': str,            # Processing dimensions
+        'threading_info': dict       # CPU threading details
     }
 }
 ```
 
-### Feature Attributes
+## 🔌 Enhanced Extension Points
 
-Generated features include these attributes:
+### Custom Model Selection
 
-```python
-attributes = [
-    'segment_id',      # int: Unique segment identifier
-    'class_name',      # str: Assigned class name
-    'class_color',     # str: RGB color code
-    'method',          # str: "point" or "bbox"
-    'timestamp',       # str: Creation timestamp
-    'mask_file',       # str: Debug mask filename
-    'crop_size',       # str: Processing dimensions
-    'canvas_scale'     # float: Map scale when created
-]
-```
-
-## 🔌 Extension Points
-
-### Custom Classes
-
-Add application-specific classes:
+Override automatic model selection:
 
 ```python
-# Define custom classes
-FORESTRY_CLASSES = {
-    'Deciduous': {'color': '34,139,34', 'description': 'Deciduous trees'},
-    'Coniferous': {'color': '0,100,0', 'description': 'Coniferous trees'},
-    'Clearcut': {'color': '139,69,19', 'description': 'Harvested areas'},
-    'Access Roads': {'color': '160,82,45', 'description': 'Forest access roads'}
-}
+import os
 
-# Add to control panel
-panel = GeoOSAMControlPanel(iface)
-for name, info in FORESTRY_CLASSES.items():
-    panel.add_custom_class(name, info['color'], info['description'])
-```
+# Force specific configurations for testing
+os.environ["GEOOSAM_FORCE_CPU"] = "1"      # Force CPU mode
+os.environ["GEOOSAM_FORCE_GPU"] = "1"      # Force GPU mode
+os.environ["GEOOSAM_FORCE_SAM2"] = "1"     # Force SAM2 (any device)
+os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"  # Force MobileSAM
 
-### Custom Processing
-
-Override segmentation processing:
-
-```python
+# Custom device detection
 class CustomGeoOSAMPanel(GeoOSAMControlPanel):
-    """Extended panel with custom processing."""
+    def _init_sam_model(self):
+        """Override model selection logic."""
 
-    def _process_segmentation_result(self, mask, mask_transform, debug_info):
-        """Override to add custom post-processing."""
-
-        # Custom processing here
-        processed_mask = self.custom_filter(mask)
-
-        # Call parent method
-        super()._process_segmentation_result(processed_mask, mask_transform, debug_info)
-
-    def custom_filter(self, mask):
-        """Apply custom filtering to mask."""
-        # Morphological operations, size filtering, etc.
-        return filtered_mask
+        # Custom logic here
+        if self.custom_condition():
+            self.device = "cpu"
+            self.model_choice = "MobileSAM"
+            self._init_mobilesam_model()
+        else:
+            super()._init_sam_model()
 ```
 
-### Export Customization
-
-Custom export formats:
+### Performance Monitoring
 
 ```python
-def export_to_geojson(layer, output_path):
-    """Export layer to GeoJSON format."""
-    from qgis.core import QgsVectorFileWriter
+class PerformanceMonitor:
+    """Monitor and log model performance."""
 
-    error = QgsVectorFileWriter.writeAsVectorFormat(
-        layer,
-        output_path,
-        "utf-8",
-        layer.crs(),
-        "GeoJSON"
-    )
+    def __init__(self):
+        self.performance_log = []
 
-    return error[0] == QgsVectorFileWriter.NoError
+    def log_segmentation(self, result):
+        """Log segmentation performance."""
+        debug_info = result['debug_info']
+
+        entry = {
+            'timestamp': time.time(),
+            'model': debug_info.get('model'),
+            'device': debug_info.get('device'),
+            'prep_time': debug_info.get('prep_time'),
+            'inference_time': debug_info.get('inference_time'),
+            'total_time': debug_info.get('prep_time', 0) + debug_info.get('inference_time', 0),
+            'crop_size': debug_info.get('crop_size'),
+            'success': len(result.get('mask', [])) > 0
+        }
+
+        self.performance_log.append(entry)
+
+    def get_performance_stats(self):
+        """Get performance statistics."""
+        if not self.performance_log:
+            return {}
+
+        times = [entry['total_time'] for entry in self.performance_log if entry['success']]
+
+        return {
+            'total_segmentations': len(self.performance_log),
+            'successful': sum(1 for e in self.performance_log if e['success']),
+            'avg_time': sum(times) / len(times) if times else 0,
+            'min_time': min(times) if times else 0,
+            'max_time': max(times) if times else 0,
+            'models_used': list(set(e['model'] for e in self.performance_log)),
+            'devices_used': list(set(e['device'] for e in self.performance_log))
+        }
 
 # Usage
-layer = panel.result_layers['Buildings']
-export_to_geojson(layer, "/path/to/buildings.geojson")
+monitor = PerformanceMonitor()
+
+# In segmentation callback:
+def on_segmentation_finished(result):
+    monitor.log_segmentation(result)
+
+    # Print stats every 10 segmentations
+    if len(monitor.performance_log) % 10 == 0:
+        stats = monitor.get_performance_stats()
+        print(f"Avg time: {stats['avg_time']:.2f}s using {stats['models_used']}")
 ```
 
-## 🧪 Testing Interface
+### Hardware-Specific Optimizations
 
-### Unit Testing
+```python
+class HardwareOptimizer:
+    """Apply hardware-specific optimizations."""
+
+    @staticmethod
+    def optimize_for_device(device, model_choice):
+        """Apply device-specific optimizations."""
+
+        if device == "cuda":
+            # GPU optimizations
+            torch.backends.cudnn.benchmark = True
+            torch.backends.cudnn.deterministic = False
+
+        elif device == "mps":
+            # Apple Silicon optimizations
+            # Some operations may fallback to CPU automatically
+            pass
+
+        elif device == "cpu":
+            # CPU optimizations
+            if model_choice == "MobileSAM":
+                # MobileSAM-specific optimizations
+                torch.set_num_threads(setup_pytorch_performance())
+
+            # Memory optimizations
+            torch.set_grad_enabled(False)
+
+        return device, model_choice
+
+# Usage in control panel
+class OptimizedGeoOSAMPanel(GeoOSAMControlPanel):
+    def _init_sam_model(self):
+        """Initialize with hardware optimizations."""
+
+        # Apply optimizations
+        self.device, self.model_choice = HardwareOptimizer.optimize_for_device(
+            self.device, self.model_choice
+        )
+
+        # Continue with normal initialization
+        super()._init_sam_model()
+```
+
+## 🧪 Enhanced Testing Interface
+
+### Model Selection Testing
 
 ```python
 import unittest
-from qgis.testing import start_app
-from geo_osam_dialog import GeoOSAMControlPanel
+from unittest.mock import patch, MagicMock
 
-class TestGeoOSAM(unittest.TestCase):
+class TestModelSelection(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        """Initialize QGIS application."""
-        cls.app = start_app()
+    def test_cuda_selection(self):
+        """Test CUDA GPU selection logic."""
+        with patch('torch.cuda.is_available', return_value=True), \
+             patch('torch.cuda.get_device_properties') as mock_props:
 
-    def test_class_creation(self):
-        """Test custom class creation."""
-        panel = GeoOSAMControlPanel(None)
+            # Mock sufficient GPU memory
+            mock_props.return_value.total_memory = 8 * 1024**3  # 8GB
 
-        success = panel.add_custom_class("Test", "255,0,0", "Test class")
-        self.assertTrue(success)
+            device, model, cores = detect_best_device()
 
-        # Test duplicate
-        duplicate = panel.add_custom_class("Test", "0,255,0", "Duplicate")
-        self.assertFalse(duplicate)
+            self.assertEqual(device, "cuda")
+            self.assertEqual(model, "SAM2")
+            self.assertIsNone(cores)
 
-    def test_device_detection(self):
-        """Test device detection."""
-        from geo_osam_dialog import detect_best_device
-        device = detect_best_device()
-        self.assertIn(device, ["cuda", "mps", "cpu"])
+    def test_cpu_mobilesam_selection(self):
+        """Test CPU with MobileSAM selection."""
+        with patch('torch.cuda.is_available', return_value=False), \
+             patch('torch.backends.mps.is_available', return_value=False), \
+             patch('geo_osam_dialog.MOBILESAM_AVAILABLE', True):
+
+            device, model, cores = detect_best_device()
+
+            self.assertEqual(device, "cpu")
+            self.assertEqual(model, "MobileSAM")
+            self.assertIsInstance(cores, int)
+            self.assertGreater(cores, 0)
+
+    def test_cpu_fallback(self):
+        """Test CPU fallback when MobileSAM unavailable."""
+        with patch('torch.cuda.is_available', return_value=False), \
+             patch('torch.backends.mps.is_available', return_value=False), \
+             patch('geo_osam_dialog.MOBILESAM_AVAILABLE', False):
+
+            device, model, cores = detect_best_device()
+
+            self.assertEqual(device, "cpu")
+            self.assertEqual(model, "SAM2")
+            self.assertIsInstance(cores, int)
+
+    def test_force_cpu_environment(self):
+        """Test forced CPU mode via environment variable."""
+        with patch.dict(os.environ, {'GEOOSAM_FORCE_CPU': '1'}), \
+             patch('torch.cuda.is_available', return_value=True):
+
+            device, model, cores = detect_best_device()
+
+            self.assertEqual(device, "cpu")
+            # Should prefer MobileSAM on forced CPU
+            self.assertIn(model, ["MobileSAM", "SAM2"])
 ```
 
-### Integration Testing
+### Performance Testing
 
 ```python
-def test_segmentation_workflow():
-    """Test complete segmentation workflow."""
+class TestPerformance(unittest.TestCase):
 
-    # Setup
-    panel = GeoOSAMControlPanel(iface)
+    def test_threading_setup(self):
+        """Test CPU threading configuration."""
+        with patch('multiprocessing.cpu_count', return_value=24):
+            threads = setup_pytorch_performance()
 
-    # Load test raster
-    test_layer = QgsRasterLayer("/path/to/test.tif", "test")
-    QgsProject.instance().addMapLayer(test_layer)
-    iface.setActiveLayer(test_layer)
+            # Should use 75% of 24 cores = 18 threads
+            self.assertEqual(threads, 18)
 
-    # Configure
-    panel.current_class = "Buildings"
-    panel.point = QgsPointXY(100, 200)
+        with patch('multiprocessing.cpu_count', return_value=8):
+            threads = setup_pytorch_performance()
 
-    # Run segmentation
-    panel._run_segmentation()
+            # Should use 8-2 = 6 threads
+            self.assertEqual(threads, 6)
 
-    # Verify results
-    assert "Buildings" in panel.result_layers
-    layer = panel.result_layers["Buildings"]
-    assert layer.featureCount() > 0
+    def test_model_loading_performance(self):
+        """Test model loading times."""
+        import time
+
+        # Test MobileSAM loading
+        if MOBILESAM_AVAILABLE:
+            start = time.time()
+            from ultralytics import SAM
+            model = SAM('mobile_sam.pt')
+            predictor = UltralyticsPredictor(model)
+            load_time = time.time() - start
+
+            # Should load quickly
+            self.assertLess(load_time, 10.0)  # 10 seconds max
 ```
 
-## 📖 Code Examples
+## 📖 Enhanced Code Examples
 
-### Basic Plugin Usage
+### Complete Workflow with Model Selection
 
 ```python
 from qgis.core import QgsProject, QgsRasterLayer
 from geo_osam import SegSam
+from geo_osam_dialog import detect_best_device, GeoOSAMControlPanel
 
-# Initialize plugin
+# 1. Initialize with automatic device detection
+device, model, cores = detect_best_device()
+print(f"Detected: {model} on {device}")
+
+# 2. Initialize plugin
 plugin = SegSam(iface)
 plugin.initGui()
 
-# Load raster data
+# 3. Load raster data
 raster = QgsRasterLayer("/path/to/satellite.tif", "Satellite")
 QgsProject.instance().addMapLayer(raster)
 iface.setActiveLayer(raster)
 
-# Show control panel
+# 4. Show control panel (with auto-detected model)
 plugin.show_control_panel()
+panel = plugin.control_panel
+
+# 5. Check what was actually selected
+model_info = panel.current_model_info
+print(f"Using: {model_info['model']} on {model_info['device']}")
+print(f"Expected speed: {model_info['expected_speed']}")
 ```
 
-### Programmatic Segmentation
+### Programmatic Segmentation with Model Info
 
 ```python
-# Access control panel
+# Access control panel with model information
 panel = plugin.control_panel
+
+# Print current configuration
+print(f"Device: {panel.device}")
+print(f"Model: {panel.model_choice}")
+if panel.num_cores:
+    print(f"CPU cores: {panel.num_cores}")
 
 # Set parameters
 panel.current_class = "Buildings"
 panel.point = QgsPointXY(longitude, latitude)
 
-# Run segmentation
+# Run segmentation (uses auto-selected model)
 panel._run_segmentation()
 
-# Export results
+# Export results with model info in attributes
 panel.export_class_layer("Buildings", "/output/buildings.shp")
 ```
 
-### Batch Processing
+### Batch Processing with Performance Monitoring
 
 ```python
-def batch_segment_buildings(raster_path, points, output_dir):
-    """Segment multiple buildings from point list."""
+def batch_segment_with_monitoring(raster_path, points, output_dir):
+    """Batch segmentation with performance monitoring."""
 
-    # Load raster
-    raster = QgsRasterLayer(raster_path, "input")
-    QgsProject.instance().addMapLayer(raster)
-    iface.setActiveLayer(raster)
+    # Setup
+    device, model, cores = detect_best_device()
+    print(f"Batch processing with {model} on {device}")
 
-    # Initialize panel
     panel = GeoOSAMControlPanel(iface)
     panel.current_class = "Buildings"
     panel.set_output_folder(output_dir)
 
+    # Performance tracking
+    times = []
+
     # Process each point
     for i, (x, y) in enumerate(points):
+        start_time = time.time()
+
         panel.point = QgsPointXY(x, y)
         panel._run_segmentation()
+
+        process_time = time.time() - start_time
+        times.append(process_time)
+
+        print(f"Point {i+1}: {process_time:.2f}s")
 
         # Export individual result
         output_path = f"{output_dir}/building_{i:03d}.shp"
@@ -562,70 +762,86 @@ def batch_segment_buildings(raster_path, points, output_dir):
 
         # Clear for next iteration
         panel._start_new_shape()
+
+    # Performance summary
+    avg_time = sum(times) / len(times)
+    print(f"\nBatch complete:")
+    print(f"  Model: {model} on {device}")
+    print(f"  Average time: {avg_time:.2f}s")
+    print(f"  Total time: {sum(times):.2f}s")
+    print(f"  Expected range: {panel._get_expected_speed()}")
 ```
 
-## 🔗 External Integrations
-
-### QGIS Processing Integration
+### Advanced Model Selection Override
 
 ```python
-from qgis.core import QgsProcessingAlgorithm, QgsProcessingParameterRasterLayer
+class CustomModelSelector:
+    """Custom model selection logic."""
 
-class GeoOSAMProcessingAlgorithm(QgsProcessingAlgorithm):
-    """QGIS Processing algorithm wrapper for GeoOSAM."""
+    @staticmethod
+    def select_model_for_workload(image_size, batch_size, accuracy_priority=False):
+        """Select model based on workload characteristics."""
 
-    def processAlgorithm(self, parameters, context, feedback):
-        """Run GeoOSAM segmentation as processing algorithm."""
+        # Large batch processing: prefer speed
+        if batch_size > 100:
+            return "cpu", "MobileSAM"
 
-        # Get input raster
-        raster = self.parameterAsRasterLayer(parameters, 'INPUT', context)
+        # High accuracy requirement: prefer SAM2
+        if accuracy_priority:
+            device, _, _ = detect_best_device()
+            return device, "SAM2"
 
-        # Initialize GeoOSAM
-        panel = GeoOSAMControlPanel(None)
+        # Small images: CPU is often sufficient
+        if image_size < (512, 512):
+            return "cpu", "MobileSAM"
 
-        # Configure and run
-        panel.current_class = self.parameterAsString(parameters, 'CLASS', context)
+        # Default to automatic detection
+        return detect_best_device()[:2]
 
-        # Process points
-        points = self.parameterAsMatrix(parameters, 'POINTS', context)
-        for x, y in points:
-            panel.point = QgsPointXY(x, y)
-            panel._run_segmentation()
+# Usage in custom application
+class CustomGeoOSAMApp:
+    def __init__(self, workload_config):
+        self.workload = workload_config
 
-        # Return output layer
-        return {'OUTPUT': panel.result_layers[panel.current_class]}
+        # Custom model selection
+        device, model = CustomModelSelector.select_model_for_workload(
+            self.workload['image_size'],
+            self.workload['batch_size'],
+            self.workload['accuracy_priority']
+        )
+
+        # Override environment
+        if model == "MobileSAM":
+            os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"
+
+        # Initialize panel
+        self.panel = GeoOSAMControlPanel(iface)
+        print(f"Custom selection: {self.panel.model_choice} on {self.panel.device}")
 ```
 
 ---
 
 ## 📝 Development Guidelines
 
-### Code Style
+### Model-Aware Development
 
-- Follow PEP 8 for Python code
-- Use type hints where possible
-- Document all public methods
-- Include docstring examples
+- **Test both models**: Ensure compatibility with SAM2 and MobileSAM
+- **Handle device switching**: Code should work across GPU/CPU
+- **Performance expectations**: Different models have different characteristics
+- **Error handling**: Model-specific error scenarios
 
-### Error Handling
+### Threading Considerations
 
-- Use try/catch blocks for external operations
-- Provide meaningful error messages
-- Log errors for debugging
-- Gracefully degrade functionality
+- **CPU optimization**: Respect the threading configuration
+- **GPU memory**: Handle CUDA out-of-memory gracefully
+- **UI responsiveness**: Use the worker thread pattern
+- **Resource cleanup**: Properly dispose of models and tensors
 
-### Performance
+### Backward Compatibility
 
-- Use threading for long operations
-- Cache expensive computations
-- Optimize memory usage
-- Profile critical paths
+- **API consistency**: Maintain SAM2-compatible interfaces
+- **Graceful fallbacks**: Handle missing dependencies
+- **Version detection**: Check available models and capabilities
+- **Documentation**: Update docs when adding model-specific features
 
-### Testing
-
-- Write unit tests for core functions
-- Include integration tests
-- Test on multiple platforms
-- Verify with various data formats
-
-**For more examples and detailed documentation, see the source code comments and docstrings.** 📚
+**The enhanced API provides powerful model selection and performance optimization while maintaining simplicity for basic use cases.** 🚀
