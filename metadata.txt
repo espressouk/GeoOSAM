@@ -2,8 +2,8 @@
 name=GeoOSAM
 qgisMinimumVersion=3.16
 qgisMaximumVersion=3.99
-description=Advanced SAM2-based segmentation tool for QGIS with GPU acceleration, threading, and professional workflow features
-about=GeoOSAM brings Meta's Segment Anything Model (SAM2) to QGIS with professional features. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Supports NVIDIA GPU, Apple Silicon, and multi-core CPU processing for optimal performance.
+description=Advanced segmentation tool with intelligent SAM 2.1/MobileSAM selection, GPU acceleration, threading, and professional workflow features
+about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics MobileSAM to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and MobileSAM for CPU-only systems, providing 5-10x performance improvements. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
 version=1.0.0
 author=Ofer Butbega
@@ -14,7 +14,7 @@ repository=https://github.com/espressouk/GeoOSAM
 homepage=https://github.com/espressouk/GeoOSAM
 
 # Detailed tags for discoverability
-tags=python,segmentation,AI,SAM,SAM2,machine learning,deep learning,computer vision,remote sensing,satellite imagery,urban planning,environmental monitoring,geospatial analysis,object detection,semantic segmentation,GPU acceleration,CUDA,pytorch,raster analysis,GIS
+tags=python,segmentation,AI,SAM,SAM2,SAM2.1,MobileSAM,Ultralytics,machine learning,deep learning,computer vision,remote sensing,satellite imagery,urban planning,environmental monitoring,geospatial analysis,object detection,semantic segmentation,GPU acceleration,CUDA,Apple Silicon,pytorch,raster analysis,GIS,intelligent model selection,performance optimization
 
 category=Raster
 icon=icon.png
@@ -32,20 +32,27 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.0.0 - Initial release
-    - SAM2-based segmentation with GPU/CPU support
-    - Multi-threaded processing for responsive UI
-    - Point and BBox segmentation modes
-    - 12 pre-defined classes + custom class creation
-    - Vehicle and Ship classes for transportation analysis
-    - Undo functionality for mistake correction
-    - Custom output folder selection
-    - Optional debug mask saving (disabled by default)
-    - Automatic raster layer re-selection
-    - Professional shapefile export with detailed attributes
-    - Performance optimization for different hardware
-    - Comprehensive error handling and user feedback
-    - Professional workflow features for GIS analysis
+changelog=1.0.0 - Major Update with Intelligent Model Selection
+    - Intelligent model selection: SAM 2.1 for GPU, MobileSAM for CPU
+    - Enhanced CPU performance with Ultralytics MobileSAM integration (5-10x speedup)
+    - Automatic device detection (CUDA/Apple Silicon/CPU) with optimal model selection
+    - SAM 2.1 support with improved accuracy for small objects and occlusion handling
+    - Multi-threaded processing for responsive UI during inference
+    - Point and BBox segmentation modes with adaptive processing
+    - 12 pre-defined classes + custom class creation with color coding
+    - Vehicle and Ship classes for transportation and maritime analysis
+    - Undo functionality for mistake correction with polygon-level tracking
+    - Custom output folder selection with user-configurable paths
+    - Optional debug mask saving (disabled by default for performance)
+    - Automatic raster layer re-selection for streamlined workflow
+    - Professional shapefile export with detailed attributes and metadata
+    - Performance optimization based on zoom level and hardware capabilities
+    - Comprehensive error handling and user feedback system
+    - Professional workflow features optimized for GIS analysis
+    - Updated dependencies: torch, torchvision, ultralytics, opencv-python, rasterio, shapely, hydra-core
+    - Automatic model downloading for both SAM 2.1 and MobileSAM
+    - Enhanced memory management and processing efficiency
+    - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-06-27
+update_date=2025-06-28

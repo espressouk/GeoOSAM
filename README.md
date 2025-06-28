@@ -1,6 +1,6 @@
 # GeoOSAM - Advanced Segmentation for QGIS
 
-🛰️ **State-of-the-art image segmentation using Meta's SAM2 with professional QGIS integration**
+🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and MobileSAM with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
@@ -8,7 +8,8 @@
 
 ## 🌟 Features
 
-- **🚀 High Performance**: GPU acceleration (CUDA/Apple Silicon) + multi-threading
+- **🧠 Intelligent Model Selection**: Automatically chooses the best AI model for your hardware
+- **🚀 Optimized Performance**: SAM 2.1 for GPU, MobileSAM for CPU
 - **🎯 Dual Modes**: Point-click and bounding box segmentation
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Ship, and more
 - **↶ Undo Support**: Mistake correction with polygon-level undo
@@ -16,15 +17,21 @@
 - **🎨 Class Management**: Custom classes with color coding
 - **📡 Smart Workflow**: Auto-raster selection, progress tracking
 - **💾 Professional Export**: Shapefile export with detailed attributes
-- **🔧 Optimized**: Adaptive processing based on zoom level and hardware
+- **🔧 Adaptive Processing**: Optimized based on zoom level and hardware
 
-## 📊 Performance
+## 📊 Performance & Model Selection
 
-| Hardware       | Typical Speed | Improvement       |
-| -------------- | ------------- | ----------------- |
-| NVIDIA RTX GPU | 0.2-0.5s      | **10-50x faster** |
-| Apple M1/M2    | 1-2s          | **5-15x faster**  |
-| Multi-core CPU | 3-5s          | **2-8x faster**   |
+| Hardware       | Model Used | Typical Speed | Improvement       |
+| -------------- | ---------- | ------------- | ----------------- |
+| NVIDIA RTX GPU | SAM 2.1    | 0.2-0.5s      | **10-50x faster** |
+| Apple M1/M2    | SAM 2.1    | 1-2s          | **5-15x faster**  |
+| Multi-core CPU | MobileSAM  | 2-4s          | **5-10x faster**  |
+
+**🎯 Smart Model Selection:**
+
+- **GPU Available** (CUDA/Apple Silicon) → **SAM 2.1** (latest accuracy)
+- **CPU Only** → **MobileSAM** (5x smaller, 7x faster than SAM)
+- **Automatic Fallback** → SAM 2 if MobileSAM unavailable
 
 ## 🚀 Quick Start
 
@@ -61,7 +68,7 @@ _Export segmented polygons as shapefiles with detailed attributes_
 ### Recommended
 
 - QGIS 3.28+
-- NVIDIA GPU with CUDA
+- NVIDIA GPU with CUDA or Apple Silicon
 - 16GB+ RAM
 - SSD storage
 
@@ -103,7 +110,7 @@ _Export segmented polygons as shapefiles with detailed attributes_
 # Open QGIS > Plugins > Python Console, paste and run:
 import subprocess
 import sys
-packages = ["torch", "torchvision", "opencv-python", "rasterio", "shapely", "hydra-core"]
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
 for pkg in packages:
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
     print(f"✅ Installed {pkg}")
@@ -112,19 +119,28 @@ for pkg in packages:
 **Method B: System Terminal**
 
 ```bash
-pip install torch torchvision opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
 ```
 
-### SAM2 Model Download
+### Model Download (Automatic)
 
-**The SAM2 model (~160MB) will be automatically downloaded when you first use the plugin.**
+**Both SAM 2.1 and MobileSAM models (~200MB total) will be automatically downloaded when you first use the plugin.**
+
+The plugin intelligently downloads only the models needed for your hardware:
+
+- **GPU systems**: Downloads SAM 2.1 checkpoint
+- **CPU systems**: Downloads MobileSAM via Ultralytics
+- **Automatic fallback**: SAM 2 if other models fail
 
 If auto-download fails, manually run:
 
 ```bash
-# Navigate to plugin directory
+# For SAM 2.1 (GPU users)
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
 bash download_sam2_checkpoints.sh
+
+# For MobileSAM (CPU users) - automatic via Ultralytics
+# No manual download needed
 ```
 
 ## 🎯 Use Cases
@@ -135,6 +151,21 @@ bash download_sam2_checkpoints.sh
 - **🌊 Coastal Studies**: Ship detection and water body mapping
 - **🏗️ Construction**: Site monitoring and progress tracking
 - **📡 Remote Sensing**: Large-scale imagery analysis
+
+## ⚙️ Technical Details
+
+### Model Architecture
+
+- **SAM 2.1**: Latest from Meta AI with improved accuracy for small objects
+- **MobileSAM**: Lightweight version with Tiny-ViT encoder (5M vs 632M parameters)
+- **Automatic Selection**: Based on available GPU memory and compute capability
+
+### Performance Optimization
+
+- **Multi-threaded Processing**: Responsive UI during inference
+- **Adaptive Crop Sizes**: Zoom-level aware processing
+- **Memory Management**: Efficient handling of large imagery
+- **Device Detection**: Automatic CUDA/MPS/CPU optimization
 
 ## 📚 Documentation
 
@@ -155,7 +186,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 
 ## 🙏 Acknowledgments
 
-- **Meta AI**: For the Segment Anything Model (SAM2)
+- **Meta AI**: For the Segment Anything Model (SAM 2.1)
+- **Ultralytics**: For MobileSAM integration and optimization
 - **QGIS Community**: For the excellent GIS platform
 - **PyTorch Team**: For the deep learning framework
 
@@ -169,9 +201,19 @@ If you use GeoOSAM in your research, please cite:
 
 ```bibtex
 @software{geosam2025,
-  title={GeoOSAM: Advanced Segmentation for QGIS},
+  title={GeoOSAM: Advanced Segmentation for QGIS with Intelligent Model Selection},
   author={Butbega, Ofer},
   year={2025},
   url={https://github.com/espressouk/GeoOSAM}
 }
 ```
+
+## 🔄 Changelog
+
+### v1.0.0 - Latest
+
+- **Intelligent Model Selection**: Automatic SAM 2.1 vs MobileSAM selection
+- **Enhanced CPU Performance**: MobileSAM integration for 5-10x CPU speedup
+- **Ultralytics Integration**: Professional computer vision library support
+- **Improved Device Detection**: Better GPU/CPU/Apple Silicon handling
+- **Updated Dependencies**: Modern ML stack with automatic model downloads
