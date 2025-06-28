@@ -2,8 +2,8 @@
 name=GeoOSAM
 qgisMinimumVersion=3.16
 qgisMaximumVersion=3.99
-description=Advanced segmentation tool with intelligent SAM 2.1/MobileSAM selection, GPU acceleration, threading, and professional workflow features
-about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics MobileSAM to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and MobileSAM for CPU-only systems, providing 5-10x performance improvements. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
+description=Advanced segmentation tool with intelligent SAM 2.1/MobileSAM selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
+about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics MobileSAM to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and MobileSAM for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles MobileSAM downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
 version=1.0.0
 author=Ofer Butbega
@@ -34,9 +34,11 @@ plugin_dependencies=
 # Changelog (REQUIRED for updates)
 changelog=1.0.0 - Major Update with Intelligent Model Selection
     - Intelligent model selection: SAM 2.1 for GPU, MobileSAM for CPU
-    - Enhanced CPU performance with Ultralytics MobileSAM integration (5-10x speedup)
+    - Exceptional CPU performance: Sub-second segmentation on high-core systems (24+ cores)
+    - Enhanced CPU performance with Ultralytics MobileSAM integration (5-30x speedup)
     - Automatic device detection (CUDA/Apple Silicon/CPU) with optimal model selection
     - SAM 2.1 support with improved accuracy for small objects and occlusion handling
+    - Intelligent threading optimization: High-core CPUs (16+) use 75% of cores for maximum throughput
     - Multi-threaded processing for responsive UI during inference
     - Point and BBox segmentation modes with adaptive processing
     - 12 pre-defined classes + custom class creation with color coding
@@ -50,7 +52,7 @@ changelog=1.0.0 - Major Update with Intelligent Model Selection
     - Comprehensive error handling and user feedback system
     - Professional workflow features optimized for GIS analysis
     - Updated dependencies: torch, torchvision, ultralytics, opencv-python, rasterio, shapely, hydra-core
-    - Automatic model downloading for both SAM 2.1 and MobileSAM
+    - Automatic model downloading: Ultralytics handles MobileSAM, plugin manages SAM 2.1
     - Enhanced memory management and processing efficiency
     - Cross-platform compatibility with Windows, macOS, and Linux
 
