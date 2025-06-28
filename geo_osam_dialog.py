@@ -420,15 +420,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     """Enhanced SAM segmentation control panel for QGIS"""
 
     DEFAULT_CLASSES = {
-        'Buildings': {'color': '220,20,60', 'description': 'Residential and commercial buildings'},
-        'Roads': {'color': '105,105,105', 'description': 'Streets, highways, and pathways'},
-        'Vegetation': {'color': '34,139,34', 'description': 'Trees, grass, and vegetation'},
-        'Water': {'color': '30,144,255', 'description': 'Rivers, lakes, and water bodies'},
-        'Agriculture': {'color': '255,215,0', 'description': 'Farmland and crops'},
-        'Vehicle': {'color': '255,69,0', 'description': 'Cars, trucks, and vehicles'},
-        'Ship': {'color': '0,206,209', 'description': 'Ships, boats, and vessels'},
-        'Other': {'color': '148,0,211', 'description': 'Unclassified objects'}
+        'Agriculture' : {'color': '255,215,0',   'description': 'Farmland and crops'},
+        'Buildings'   : {'color': '220,20,60',   'description': 'Residential & commercial structures'},
+        'Commercial'  : {'color': '135,206,250', 'description': 'Shopping and business districts'},
+        'Industrial'  : {'color': '128,0,128',   'description': 'Factories and warehouses'},
+        'Other'       : {'color': '148,0,211',   'description': 'Unclassified objects'},
+        'Parking'     : {'color': '255,140,0',   'description': 'Parking lots and areas'},
+        'Residential' : {'color': '255,105,180', 'description': 'Housing areas'},
+        'Roads'       : {'color': '105,105,105', 'description': 'Streets, highways, and pathways'},
+        'Vessels'     : {'color': '0,206,209',   'description': 'Boats, ship'},
+        'Vehicle'     : {'color': '255,69,0',    'description': 'Cars, trucks, and buses'},
+        'Vegetation'  : {'color': '34,139,34',   'description': 'Trees, grass, and parks'},
+        'Water'       : {'color': '30,144,255',  'description': 'Rivers, lakes, and ponds'}
     }
+
 
     EXTRA_COLORS = [
         '50,205,50', '255,20,147', '255,165,0', '186,85,211', '0,128,128',
