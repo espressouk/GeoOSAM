@@ -1,42 +1,50 @@
-#!/bin/bash
-# Improved download_sam2_checkpoints.sh
+#!/usr/bin/env bash
+# download_sam2.1_checkpoint.sh
+# --------------------------------------------
+# Downloads the SAM 2.1 *tiny* checkpoint once,
+# verifies size, and exits cleanly.
+# --------------------------------------------
 
-set -e  # Exit on any error
+set -e  # Exit immediately on any error
 
-echo "🚀 GeoOSAM SAM2 Checkpoint Downloader"
-echo "====================================="
+echo "🚀 GeoOSAM · SAM 2.1 Checkpoint Downloader"
+echo "=========================================="
 
-# Check if we're in the right directory
-if [[ ! "$(basename $(pwd))" == "checkpoints" ]]; then
-    echo "❌ Please run this script from the checkpoints directory"
-    exit 1
+# Ensure we’re inside the checkpoints directory
+if [[ ! "$(basename "$(pwd)")" == "checkpoints" ]]; then
+  echo "❌ Please run this script from your plugin’s checkpoints directory."
+  echo "   (current dir: $(pwd))"
+  exit 1
 fi
 
-# Check if checkpoint already exists
-if [[ -f "sam2_hiera_tiny.pt" ]]; then
-    echo "✅ Checkpoint already exists: $(ls -lh sam2_hiera_tiny.pt)"
-    exit 0
+CKPT_FILE="sam2.1_hiera_tiny.pt"
+CKPT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/${CKPT_FILE}"
+
+# If the checkpoint is already present, skip download
+if [[ -f "${CKPT_FILE}" ]]; then
+  echo "✅ Checkpoint already exists: $(ls -lh "${CKPT_FILE}")"
+  exit 0
 fi
 
-# Detect download tool
+# Detect an available downloader
 if command -v wget &> /dev/null; then
-    DL_CMD="wget --progress=bar:force"
+  DL_CMD="wget --progress=bar:force -O ${CKPT_FILE}"
 elif command -v curl &> /dev/null; then
-    DL_CMD="curl -L -O --progress-bar"
+  DL_CMD="curl -L -o ${CKPT_FILE} --progress-bar"
 else
-    echo "❌ Please install wget or curl to download the checkpoint."
-    exit 1
+  echo "❌ Neither wget nor curl found. Please install one of them."
+  exit 1
 fi
 
-echo "📥 Downloading SAM2 tiny checkpoint (~160MB)..."
-echo "🌐 URL: https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+echo "📥 Downloading SAM 2.1 tiny checkpoint (~160 MB)…"
+echo "🌐 ${CKPT_URL}"
+eval "${DL_CMD} \"${CKPT_URL}\""
 
-$DL_CMD "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
-
-# Verify download
-if [[ -f "sam2_hiera_tiny.pt" ]] && [[ $(stat -f%z "sam2_hiera_tiny.pt" 2>/dev/null || stat -c%s "sam2_hiera_tiny.pt") -gt 1000000 ]]; then
-    echo "✅ Download successful: $(ls -lh sam2_hiera_tiny.pt)"
+# Simple size check (>1 MB) to catch truncated downloads
+FILE_SIZE=$(stat -c%s "${CKPT_FILE}" 2>/dev/null || stat -f%z "${CKPT_FILE}")
+if [[ "${FILE_SIZE}" -gt 1000000 ]]; then
+  echo "✅ Download successful: $(ls -lh "${CKPT_FILE}")"
 else
-    echo "❌ Download failed or file too small"
-    exit 1
+  echo "❌ Download failed or file too small. Remove the file and retry."
+  exit 1
 fi

@@ -33,7 +33,7 @@ except Exception as e:
     print(f"⚠️ MobileSAM error: {e}")
 
 # Check SAM 2.1 model:
-sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2_hiera_tiny.pt")
+sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
 print(f"SAM 2.1 model exists: {os.path.exists(sam_path)}")
 if os.path.exists(sam_path):
     print(f"SAM 2.1 size: {os.path.getsize(sam_path)/1024/1024:.1f}MB")
@@ -210,8 +210,8 @@ pip install ultralytics
 ```bash
 # For SAM 2.1 (GPU users):
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
-rm -f sam2_hiera_tiny.pt
-wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
+rm -f sam2.1_hiera_tiny.pt
+wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt
 
 # For MobileSAM (CPU users):
 pip uninstall ultralytics
@@ -483,7 +483,7 @@ except Exception as e:
     print(f"❌ MobileSAM failed: {e}")
     mobilesam_available = False
 
-sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2_hiera_tiny.pt")
+sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
 sam2_available = os.path.exists(sam2_path)
 print(f"SAM 2.1 available: {sam2_available}")
 
@@ -642,7 +642,7 @@ plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/pyt
 print(f"\nPlugin installed: {os.path.exists(plugin_path)}")
 
 # Models
-sam2_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2_hiera_tiny.pt")
+sam2_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2.1_hiera_tiny.pt")
 if os.path.exists(sam2_path):
     print(f"SAM 2.1 model: {os.path.getsize(sam2_path)/1024/1024:.1f}MB")
 else:

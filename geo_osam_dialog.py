@@ -164,7 +164,7 @@ def auto_download_checkpoint():
     """Download SAM2 checkpoint if missing"""
     plugin_dir = os.path.dirname(os.path.abspath(__file__))
     checkpoint_dir = os.path.join(plugin_dir, "sam2", "checkpoints")
-    checkpoint_path = os.path.join(checkpoint_dir, "sam2_hiera_tiny.pt")
+    checkpoint_path = os.path.join(checkpoint_dir, "sam2.1_hiera_tiny.pt")
     download_script = os.path.join(
         checkpoint_dir, "download_sam2_checkpoints.sh")
 
@@ -188,7 +188,7 @@ def auto_download_checkpoint():
 
     # Python fallback
     try:
-        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt"
         urllib.request.urlretrieve(url, checkpoint_path)
         if os.path.exists(checkpoint_path) and os.path.getsize(checkpoint_path) > 1000000:
             print("✅ Checkpoint downloaded via Python")
@@ -493,7 +493,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _init_sam2_model(self, plugin_dir):
         """Initialize SAM2 model"""
         checkpoint_path = os.path.join(
-            plugin_dir, "sam2", "checkpoints", "sam2_hiera_tiny.pt")
+            plugin_dir, "sam2", "checkpoints", "sam2.1_hiera_tiny.pt")
 
         if not os.path.exists(checkpoint_path):
             if not auto_download_checkpoint():
@@ -507,7 +507,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         try:
             with initialize_config_module(config_module="sam2.configs"):
                 sam_model = build_sam2(
-                    "sam2/sam2_hiera_t", checkpoint_path, device=self.device)
+                    "sam2.1/sam2.1_hiera_t", checkpoint_path, device=self.device)
 
                 if self.device == "cuda":
                     sam_model = sam_model.cuda()

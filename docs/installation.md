@@ -321,7 +321,7 @@ if model_choice == "MobileSAM":
 else:
     import os
     plugin_dir = os.path.dirname(__file__)
-    model_path = os.path.join(plugin_dir, "plugins", "geo_osam", "sam2", "checkpoints", "sam2_hiera_tiny.pt")
+    model_path = os.path.join(plugin_dir, "plugins", "geo_osam", "sam2", "checkpoints", "sam2.1_hiera_tiny.pt")
     if os.path.exists(model_path):
         print(f"✅ SAM 2.1 model found: {os.path.getsize(model_path)/1024/1024:.1f}MB")
     else:
@@ -398,7 +398,7 @@ model = SAM('mobile_sam.pt')  # Should auto-download
 ```bash
 # Manual download for GPU systems:
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints
-wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt
+wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt
 ```
 
 #### Issue: "CUDA errors"

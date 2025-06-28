@@ -77,4 +77,4 @@ test/data/
 resources_rc.py
 
 # SAM2 Model
-sam2/checkpoints/sam2_hiera_tiny.pt
+*.pt
