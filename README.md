@@ -103,11 +103,14 @@ _Export segmented polygons as shapefiles with detailed attributes_
 3. Copy to QGIS plugins directory:
 
    ```bash
-   # Linux/Mac
-   cp -r geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
+   # Linux
+   cp -r . ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
+
+   # macOS
+   cp -r . ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 
    # Windows
-   xcopy geo_osam "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
+   xcopy . "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
    ```
 
 4. **Install dependencies** (see below)

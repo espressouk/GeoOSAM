@@ -149,22 +149,24 @@ cd geoOSAM
 
 ```powershell
 # Copy plugin to QGIS plugins folder:
-xcopy geo_osam "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
+xcopy . "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
 ```
 
 **macOS:**
 
 ```bash
 # Copy plugin to QGIS plugins folder:
-cp -r geo_osam ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/
+cp -r . ~/Library/Application\ Support/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 ```
 
 **Linux:**
 
 ```bash
 # Copy plugin to QGIS plugins folder:
-cp -r geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
+cp -r . ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 ```
+
+**Note:** The `.` copies the current directory contents (all the plugin files) into a new folder named `geo_osam` in the QGIS plugins directory.
 
 #### Install Dependencies
 
