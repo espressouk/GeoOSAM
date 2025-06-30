@@ -138,9 +138,7 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 import subprocess
 import sys
 packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
-for pkg in packages:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
-    print(f"✅ Installed {pkg}")
+for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 ```
 
 ### Model Download (Automatic)
