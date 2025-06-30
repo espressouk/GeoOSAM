@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/geo_osam" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>

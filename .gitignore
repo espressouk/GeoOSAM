@@ -51,7 +51,7 @@ coverage.xml
 .vscode/
 
 # Qt Designer .ui compilation
-*.qrc
+# *.qrc
 *.pyc
 
 # Mac OS
@@ -74,7 +74,7 @@ test/data/
 *.tiff
 
 # Ignore resource build artifacts
-resources_rc.py
+# resources_rc.py
 
 # SAM2 Model
 *.pt
