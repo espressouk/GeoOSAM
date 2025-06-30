@@ -434,7 +434,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         'Water'       : {'color': '30,144,255',  'description': 'Rivers, lakes, and ponds'}
     }
 
-
     EXTRA_COLORS = [
         '50,205,50', '255,20,147', '255,165,0', '186,85,211', '0,128,128',
         '255,192,203', '165,42,42', '0,250,154', '255,0,255', '127,255,212'
@@ -480,6 +479,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxTool = EnhancedBBoxClickTool(self.canvas, self._bbox_done)
         self.original_map_tool = None
         self._setup_ui()
+
+        # Connect to selection changes for remove button
+        self._connect_selection_signals()
 
     def _init_sam_model(self):
         """Initialize the selected SAM model"""
@@ -544,6 +546,40 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.mask_save_dir = pathlib.Path.home() / "GeoOSAM_masks"
         self.shapefile_save_dir.mkdir(exist_ok=True)
 
+    def _connect_selection_signals(self):
+        """Connect signals for layer management (simplified - no delete button)"""
+        # Connect to layer removals only (no selection tracking needed)
+        QgsProject.instance().layersAdded.connect(self._on_layers_added)
+        QgsProject.instance().layersRemoved.connect(self._on_layers_removed)
+
+    def _on_layers_added(self, layers):
+        """Handle when layers are added (simplified)"""
+        # No need to connect selection signals anymore
+        pass
+
+    def _on_layers_removed(self, layer_ids):
+        """Handle when layers are removed from the project"""
+        # Clean up our tracking dictionaries
+        layers_to_remove = []
+        for class_name, layer in self.result_layers.items():
+            try:
+                # Try to access layer to see if it still exists
+                if layer is None or layer.id() in layer_ids:
+                    layers_to_remove.append(class_name)
+            except RuntimeError:
+                # Layer has been deleted
+                layers_to_remove.append(class_name)
+
+        # Remove deleted layers from our tracking
+        for class_name in layers_to_remove:
+            if class_name in self.result_layers:
+                del self.result_layers[class_name]
+            if class_name in self.segment_counts:
+                del self.segment_counts[class_name]
+
+        # Update stats
+        self._update_stats()
+
     def _setup_ui(self):
         """Setup the control panel UI"""
         main_widget = QtWidgets.QWidget()
@@ -556,7 +592,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         device_icon = "🎮" if "cuda" in self.device else "🍎" if "mps" in self.device else "💻"
         title = QtWidgets.QLabel("GeoOSAM Control Panel")
         title.setStyleSheet(
-            "font-size: 14px; font-weight: bold; color: #2E86AB; padding: 5px;")
+            "font-size: 18px; font-weight: bold; color: #2E86AB; padding: 5px;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
@@ -566,7 +602,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         perf_label = QtWidgets.QLabel(perf_info)
         perf_label.setStyleSheet(
-            "font-size: 10px; color: #666; text-align: center; padding: 2px;")
+            "font-size: 15px; color: #666; text-align: center; padding: 2px;")
         perf_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(perf_label)
 
@@ -595,12 +631,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _setup_output_settings_section(self, layout):
         output_header = QtWidgets.QLabel("📁 Output Settings")
         output_header.setStyleSheet(
-            "font-size: 12px; font-weight: bold; color: #2E86AB;")
+            "font-size: 17px; font-weight: bold; color: #2E86AB;")
         layout.addWidget(output_header)
 
         folder_layout = QtWidgets.QHBoxLayout()
         self.outputFolderLabel = QtWidgets.QLabel("📂 Default folders")
-        self.outputFolderLabel.setStyleSheet("font-size: 10px; color: #666;")
+        self.outputFolderLabel.setStyleSheet("font-size: 15px; color: #666;")
         folder_layout.addWidget(self.outputFolderLabel)
 
         self.selectFolderBtn = QtWidgets.QPushButton("📁 Choose")
@@ -612,7 +648,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         debug_layout = QtWidgets.QHBoxLayout()
         self.saveDebugCheckbox = QtWidgets.QCheckBox("💾 Save debug masks")
         self.saveDebugCheckbox.setChecked(False)
-        self.saveDebugCheckbox.setStyleSheet("font-size: 10px;")
+        self.saveDebugCheckbox.setStyleSheet("font-size: 15px;")
         self.saveDebugCheckbox.toggled.connect(self._on_debug_toggle)
         debug_layout.addWidget(self.saveDebugCheckbox)
         layout.addLayout(debug_layout)
@@ -620,7 +656,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _setup_class_section(self, layout):
         class_header = QtWidgets.QLabel("📋 Class Selection")
         class_header.setStyleSheet(
-            "font-size: 12px; font-weight: bold; color: #2E86AB;")
+            "font-size: 17px; font-weight: bold; color: #2E86AB;")
         layout.addWidget(class_header)
 
         self.classComboBox = QtWidgets.QComboBox()
@@ -641,33 +677,33 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         class_btn_layout = QtWidgets.QHBoxLayout()
         self.addClassBtn = QtWidgets.QPushButton("➕ Add")
         self.addClassBtn.clicked.connect(self._add_new_class)
-        self.addClassBtn.setStyleSheet("font-size: 10px; padding: 4px;")
+        self.addClassBtn.setStyleSheet("font-size: 15px; padding: 4px;")
         class_btn_layout.addWidget(self.addClassBtn)
 
         self.editClassBtn = QtWidgets.QPushButton("✏️ Edit")
         self.editClassBtn.clicked.connect(self._edit_classes)
-        self.editClassBtn.setStyleSheet("font-size: 10px; padding: 4px;")
+        self.editClassBtn.setStyleSheet("font-size: 15px; padding: 4px;")
         class_btn_layout.addWidget(self.editClassBtn)
         layout.addLayout(class_btn_layout)
 
     def _setup_mode_section(self, layout):
         mode_header = QtWidgets.QLabel("🎯 Segmentation Mode")
         mode_header.setStyleSheet(
-            "font-size: 12px; font-weight: bold; color: #2E86AB;")
+            "font-size: 17px; font-weight: bold; color: #2E86AB;")
         layout.addWidget(mode_header)
 
         mode_layout = QtWidgets.QVBoxLayout()
         self.pointModeBtn = QtWidgets.QPushButton("🎯 Point Mode")
         self.pointModeBtn.clicked.connect(self._activate_point_tool)
         self.pointModeBtn.setStyleSheet(
-            "padding: 8px; font-size: 12px; font-weight: bold; "
+            "padding: 8px; font-size: 17px; font-weight: bold; "
             "background-color: #4CAF50; color: white; border-radius: 4px;")
         mode_layout.addWidget(self.pointModeBtn)
 
         self.bboxModeBtn = QtWidgets.QPushButton("📦 BBox Mode")
         self.bboxModeBtn.clicked.connect(self._activate_bbox_tool)
         self.bboxModeBtn.setStyleSheet(
-            "padding: 8px; font-size: 12px; font-weight: bold; "
+            "padding: 8px; font-size: 17px; font-weight: bold; "
             "background-color: #2196F3; color: white; border-radius: 4px;")
         self.bboxModeBtn.setVisible(False)  # Hidden for now
         mode_layout.addWidget(self.bboxModeBtn)
@@ -676,32 +712,32 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         self.currentModeLabel = QtWidgets.QLabel("Mode: None")
         self.currentModeLabel.setStyleSheet(
-            "padding: 4px; background-color: #f0f0f0; border-radius: 3px; font-size: 10px;")
+            "padding: 4px; background-color: #f0f0f0; border-radius: 3px; font-size: 15px;")
         self.currentModeLabel.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.currentModeLabel)
 
     def _setup_status_section(self, layout):
         status_header = QtWidgets.QLabel("📊 Status")
         status_header.setStyleSheet(
-            "font-size: 12px; font-weight: bold; color: #2E86AB;")
+            "font-size: 17px; font-weight: bold; color: #2E86AB;")
         layout.addWidget(status_header)
 
         self.statusLabel = QtWidgets.QLabel("Ready to segment")
         self.statusLabel.setStyleSheet(
             "padding: 6px; background-color: #e8f5e8; border-left: 4px solid #4CAF50; "
-            "font-size: 10px; border-radius: 3px;")
+            "font-size: 15px; border-radius: 3px;")
         self.statusLabel.setWordWrap(True)
         layout.addWidget(self.statusLabel)
 
         self.statsLabel = QtWidgets.QLabel("Total Segments: 0")
         self.statsLabel.setStyleSheet(
-            "font-size: 10px; color: #666; padding: 2px;")
+            "font-size: 15px; color: #666; padding: 2px;")
         layout.addWidget(self.statsLabel)
 
     def _setup_control_section(self, layout):
         control_header = QtWidgets.QLabel("⚙️ Controls")
         control_header.setStyleSheet(
-            "font-size: 12px; font-weight: bold; color: #2E86AB;")
+            "font-size: 17px; font-weight: bold; color: #2E86AB;")
         layout.addWidget(control_header)
 
         self.progressBar = QtWidgets.QProgressBar()
@@ -717,20 +753,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.cancelBtn.clicked.connect(self._cancel_segmentation)
         self.cancelBtn.setVisible(False)
         self.cancelBtn.setStyleSheet(
-            "padding: 6px; font-size: 10px; background-color: #f44336; color: white; border-radius: 3px;")
+            "padding: 6px; font-size: 15px; background-color: #f44336; color: white; border-radius: 3px;")
         control_layout.addWidget(self.cancelBtn)
 
         self.undoBtn = QtWidgets.QPushButton("↶ Undo Last Polygon")
         self.undoBtn.clicked.connect(self._undo_last_polygon)
         self.undoBtn.setEnabled(False)
         self.undoBtn.setStyleSheet(
-            "padding: 6px; font-size: 10px; background-color: #FF5722; color: white; border-radius: 3px;")
+            "padding: 6px; font-size: 15px; background-color: #FF5722; color: white; border-radius: 3px;")
         control_layout.addWidget(self.undoBtn)
 
         self.exportBtn = QtWidgets.QPushButton("💾 Export All")
         self.exportBtn.clicked.connect(self._export_all_classes)
         self.exportBtn.setStyleSheet(
-            "padding: 6px; font-size: 10px; background-color: #9C27B0; color: white; border-radius: 3px;")
+            "padding: 6px; font-size: 15px; background-color: #9C27B0; color: white; border-radius: 3px;")
         control_layout.addWidget(self.exportBtn)
 
         layout.addLayout(control_layout)
@@ -891,7 +927,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         self.currentModeLabel.setText("Mode: 🎯 Point Active")
         self.currentModeLabel.setStyleSheet(
-            "padding: 4px; background-color: #4CAF50; color: white; border-radius: 3px; font-size: 10px;")
+            "padding: 4px; background-color: #4CAF50; color: white; border-radius: 3px; font-size: 15px;")
 
         self._update_status(
             f"Point mode active for [{self.current_class}]. Click on map to segment.", "processing")
@@ -906,7 +942,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         self.currentModeLabel.setText("Mode: 📦 BBox Active")
         self.currentModeLabel.setStyleSheet(
-            "padding: 4px; background-color: #2196F3; color: white; border-radius: 3px; font-size: 10px;")
+            "padding: 4px; background-color: #2196F3; color: white; border-radius: 3px; font-size: 15px;")
 
         self._update_status(
             f"BBox mode active for [{self.current_class}]. Click and drag to segment.", "processing")
@@ -986,6 +1022,23 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         adaptive_crop_size = self._get_adaptive_crop_size()
 
         with rasterio.open(rpath) as src:
+            # Handle multi-band images
+            band_count = src.count
+
+            # Determine which bands to use
+            if band_count >= 3:
+                # Use first 3 bands for RGB
+                bands_to_read = [1, 2, 3]
+            elif band_count == 2:
+                # Duplicate first band to create pseudo-RGB
+                bands_to_read = [1, 1, 2]
+            elif band_count == 1:
+                # Grayscale - duplicate to create RGB
+                bands_to_read = [1, 1, 1]
+            else:
+                self._update_status("No bands found in raster", "error")
+                return None
+
             if self.point is not None:  # POINT MODE
                 row, col = src.index(self.point.x(), self.point.y())
                 center_pixel_x, center_pixel_y = col, row
@@ -1006,8 +1059,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     x_min, y_min, x_max - x_min, y_max - y_min)
 
                 try:
-                    arr = src.read([1, 2, 3], window=window,
-                                   out_dtype=np.uint8)
+                    # Read the determined bands
+                    arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
                     if arr.size == 0:
                         self._update_status("Empty crop area", "error")
                         return None
@@ -1015,8 +1068,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     self._update_status(f"Error reading raster: {e}", "error")
                     return None
 
+                # Handle different band configurations
+                if band_count == 1:
+                    # Grayscale - stack same band 3 times
+                    arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
+                elif band_count == 2:
+                    # Two bands - use [band1, band1, band2]
+                    arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
+                # band_count >= 3 already handled correctly
+
                 arr = np.moveaxis(arr, 0, -1)
 
+                # Normalize
                 if arr.max() > arr.min():
                     arr_min, arr_max = arr.min(), arr.max()
                     arr = ((arr.astype(np.float32) - arr_min) /
@@ -1038,6 +1101,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     'mode': 'POINT',
                     'class': self.current_class,
                     'actual_crop': f"{arr.shape[1]}x{arr.shape[0]}",
+                    'bands_used': f"{band_count} -> {len(bands_to_read)}",
                     'device': self.device
                 }
 
@@ -1049,8 +1113,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         src.transform
                     )
                 except Exception as e:
-                    self._update_status(
-                        f"Error creating bbox window: {e}", "error")
+                    self._update_status(f"Error creating bbox window: {e}", "error")
                     return None
 
                 if window.width <= 0 or window.height <= 0:
@@ -1058,15 +1121,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     return None
 
                 try:
-                    arr = src.read([1, 2, 3], window=window,
-                                   out_dtype=np.uint8)
+                    arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
                     if arr.size == 0:
                         self._update_status("Empty bbox crop area", "error")
                         return None
                 except Exception as e:
-                    self._update_status(
-                        f"Error reading bbox raster: {e}", "error")
+                    self._update_status(f"Error reading bbox raster: {e}", "error")
                     return None
+
+                # Handle different band configurations
+                if band_count == 1:
+                    arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
+                elif band_count == 2:
+                    arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
 
                 arr = np.moveaxis(arr, 0, -1)
                 if arr.max() > arr.min():
@@ -1087,6 +1154,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     'mode': 'BBOX',
                     'class': self.current_class,
                     'crop_size': f"{arr.shape[1]}x{arr.shape[0]}",
+                    'bands_used': f"{band_count} -> {len(bands_to_read)}",
                     'device': self.device
                 }
 
@@ -1142,6 +1210,44 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if hasattr(self, 'worker') and self.worker:
                 self.worker.deleteLater()
                 self.worker = None
+
+    def _get_next_segment_id(self, layer, class_name):
+        """Get the next available segment ID for a class"""
+        if layer.featureCount() == 0:
+            return 1
+
+        # Find the highest existing segment_id
+        max_id = 0
+        for feature in layer.getFeatures():
+            try:
+                segment_id = feature.attribute("segment_id")
+                if segment_id is not None and isinstance(segment_id, int):
+                    max_id = max(max_id, segment_id)
+            except:
+                pass
+
+        return max_id + 1
+
+    def _update_segment_count_for_class(self, layer, class_name):
+        """Update segment count based on actual highest segment_id in layer"""
+        try:
+            if not layer or not layer.isValid():
+                return
+
+            max_id = 0
+            for feature in layer.getFeatures():
+                try:
+                    segment_id = feature.attribute("segment_id")
+                    if segment_id is not None and isinstance(segment_id, int):
+                        max_id = max(max_id, segment_id)
+                except:
+                    pass
+
+            self.segment_counts[class_name] = max_id
+        except RuntimeError:
+            # Layer has been deleted
+            if class_name in self.segment_counts:
+                del self.segment_counts[class_name]
 
     def _process_segmentation_result(self, mask, mask_transform, debug_info):
         # Save mask image for traceability (ONLY if debug enabled)
@@ -1238,37 +1344,45 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if isinstance(current_layer, QgsRasterLayer):
             self.original_raster_layer = current_layer
 
-        result_layer = self._get_or_create_class_layer(self.current_class)
-
-        # Prepare attributes
-        timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        crop_info = debug_info.get(
-            'crop_size', 'unknown') if self.current_mode == 'bbox' else debug_info.get('actual_crop', 'unknown')
-        class_color = self.classes.get(
-            self.current_class, {}).get('color', '128,128,128')
-        canvas_scale = self.canvas.scale()
-
-        # Set attributes for features
-        for feat in feats:
-            self.segment_counts[self.current_class] += 1
-            feat.setAttributes([
-                self.segment_counts[self.current_class],
-                self.current_class,
-                class_color,
-                self.current_mode,
-                timestamp_str,
-                filename or "debug_disabled",
-                crop_info,
-                canvas_scale
-            ])
-
         try:
+            result_layer = self._get_or_create_class_layer(self.current_class)
+
+            # Verify layer is still valid
+            if not result_layer or not result_layer.isValid():
+                self._update_status("Failed to create or access layer", "error")
+                return
+
+            # Get the next available segment ID by checking existing features
+            next_segment_id = self._get_next_segment_id(result_layer, self.current_class)
+
+            # Prepare attributes
+            timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            crop_info = debug_info.get('crop_size', 'unknown') if self.current_mode == 'bbox' else debug_info.get('actual_crop', 'unknown')
+            class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
+            canvas_scale = self.canvas.scale()
+
+            # Set attributes for features
+            for i, feat in enumerate(feats):
+                feat.setAttributes([
+                    next_segment_id + i,  # Use calculated next ID
+                    self.current_class,
+                    class_color,
+                    self.current_mode,
+                    timestamp_str,
+                    filename or "debug_disabled",
+                    crop_info,
+                    canvas_scale
+                ])
+
             # Add features and track for undo
             result_layer.startEditing()
             success = result_layer.dataProvider().addFeatures(feats)
             result_layer.commitChanges()
 
             if success:
+                # Update segment count to highest ID
+                self.segment_counts[self.current_class] = next_segment_id + len(feats) - 1
+
                 # Track for undo functionality
                 all_features = list(result_layer.getFeatures())
                 new_feature_ids = [f.id() for f in all_features[-len(feats):]]
@@ -1282,6 +1396,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if self.keep_raster_selected and self.original_raster_layer:
                 self.iface.setActiveLayer(self.original_raster_layer)
 
+        except RuntimeError as e:
+            self._update_status(f"Layer access error: {e}", "error")
+            # Try to recreate the layer
+            if self.current_class in self.result_layers:
+                del self.result_layers[self.current_class]
+            # The method will create a new layer on next call
+            return
         except Exception as e:
             self._update_status(f"Error adding features: {e}", "error")
             return
@@ -1305,9 +1426,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._update_stats()
 
     def _get_or_create_class_layer(self, class_name):
-        if class_name in self.result_layers and self.result_layers[class_name]:
-            return self.result_layers[class_name]
+        # Check if we have a tracked layer for this class
+        if class_name in self.result_layers:
+            layer = self.result_layers[class_name]
+            try:
+                # Try to access the layer to see if it still exists
+                if layer and layer.isValid():
+                    return layer
+            except RuntimeError:
+                # Layer has been deleted, remove from tracking
+                del self.result_layers[class_name]
+                if class_name in self.segment_counts:
+                    del self.segment_counts[class_name]
 
+        # Create new layer since existing one doesn't exist or was deleted
         rlayer = self.iface.activeLayer()
         if isinstance(rlayer, QgsRasterLayer):
             self.original_raster_layer = rlayer
@@ -1390,20 +1522,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             layer.updateExtents()
             layer.triggerRepaint()
 
-            if class_name in self.segment_counts:
-                self.segment_counts[class_name] = max(
-                    0, self.segment_counts[class_name] - removed_count)
+            # Update segment count based on actual features (FIXED)
+            self._update_segment_count_for_class(layer, class_name)
 
             total_features = layer.featureCount()
-            class_color = self.classes.get(
-                class_name, {}).get('color', '128,128,128')
+            class_color = self.classes.get(class_name, {}).get('color', '128,128,128')
             color_info = f" [RGB:{class_color}]"
             new_layer_name = f"SAM_{class_name} ({total_features} parts){color_info}"
             layer.setName(new_layer_name)
 
             self._update_stats()
-            self._update_status(
-                f"↶ Undid {removed_count} polygons from [{class_name}]", "info")
+            self._update_status(f"↶ Undid {removed_count} polygons from [{class_name}]", "info")
 
             if not self.undo_stack:
                 self.undoBtn.setEnabled(False)
@@ -1451,12 +1580,30 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             return False
 
     def _update_stats(self):
-        total_segments = sum(layer.featureCount()
-                             for layer in self.result_layers.values() if layer)
-        total_classes = len(
-            [l for l in self.result_layers.values() if l and l.featureCount() > 0])
-        self.statsLabel.setText(
-            f"Total Segments: {total_segments} | Classes: {total_classes}")
+        """Update statistics display"""
+        total_segments = 0
+        total_classes = 0
+
+        try:
+            # Check all layers in project, not just tracked ones
+            all_layers = QgsProject.instance().mapLayers().values()
+            for layer in all_layers:
+                try:
+                    if (isinstance(layer, QgsVectorLayer) and 
+                        layer.isValid() and 
+                        layer.name().startswith("SAM_") and 
+                        layer.featureCount() > 0):
+                        total_segments += layer.featureCount()
+                        total_classes += 1
+                except RuntimeError:
+                    # Layer being deleted, skip
+                    continue
+
+            self.statsLabel.setText(
+                f"Total Segments: {total_segments} | Classes: {total_classes}")
+        except Exception as e:
+            # Fallback to simple display
+            self.statsLabel.setText("Total Segments: ? | Classes: ?")
 
     def _on_segmentation_progress(self, message):
         self._update_status(message, "processing")
@@ -1514,7 +1661,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         color_style = colors.get(status_type, colors["info"])
         self.statusLabel.setText(message)
         self.statusLabel.setStyleSheet(
-            f"padding: 6px; background-color: {color_style}; font-size: 10px; border-radius: 3px;")
+            f"padding: 6px; background-color: {color_style}; font-size: 15px; border-radius: 3px;")
 
 
 class SegSamDialog(QtWidgets.QDialog):
@@ -1526,7 +1673,7 @@ class SegSamDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         label = QtWidgets.QLabel("GeoOSAM Control Panel")
         label.setStyleSheet(
-            "font-size: 14px; font-weight: bold; padding: 10px;")
+            "font-size: 17px; font-weight: bold; padding: 10px;")
         layout.addWidget(label)
 
         show_panel_btn = QtWidgets.QPushButton("Show Control Panel")
