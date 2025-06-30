@@ -38,7 +38,7 @@ changelog=1.0.0 - Major Update with Intelligent Model Selection
     - Enhanced CPU performance with Ultralytics MobileSAM integration (5-30x speedup)
     - Automatic device detection (CUDA/Apple Silicon/CPU) with optimal model selection
     - SAM 2.1 support with improved accuracy for small objects and occlusion handling
-    - Intelligent threading optimization: High-core CPUs (16+) use 75% of cores for maximum throughput
+    - Intelligent threading optimization: High-core CPUs (16+) use 75%% of cores for maximum throughput
     - Multi-threaded processing for responsive UI during inference
     - Point and BBox segmentation modes with adaptive processing
     - 12 pre-defined classes + custom class creation with color coding
