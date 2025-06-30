@@ -81,16 +81,259 @@ print(f"CPU cores: {os.cpu_count()}")
 **Solution:**
 
 ```python
-# In QGIS Python Console:
+# Reduce thread count if system becomes unresponsive:
+import torch
+torch.set_num_threads(max(1, os.cpu_count() // 2))
+```
+
+---
+
+## 🔍 Advanced Debugging
+
+### Model Selection Debug
+
+```python
+# Complete model selection diagnostic:
+print("=== GeoOSAM Model Selection Debug ===")
+
+import os
+import torch
+
+# 1. Check force flags
+force_cpu = os.getenv("GEOOSAM_FORCE_CPU")
+force_gpu = os.getenv("GEOOSAM_FORCE_GPU")
+print(f"Force CPU: {force_cpu}")
+print(f"Force GPU: {force_gpu}")
+
+# 2. Hardware detection
+print("\n--- Hardware Detection ---")
+cuda_available = torch.cuda.is_available()
+mps_available = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+
+print(f"CUDA available: {cuda_available}")
+if cuda_available:
+    props = torch.cuda.get_device_properties(0)
+    print(f"  GPU: {torch.cuda.get_device_name(0)}")
+    print(f"  Memory: {props.total_memory / 1024**3:.1f}GB")
+    print(f"  Sufficient memory (≥4GB): {props.total_memory / 1024**3 >= 4}")
+
+print(f"MPS available: {mps_available}")
+
+# 3. Model availability
+print("\n--- Model Availability ---")
+try:
+    from ultralytics import SAM
+    test_model = SAM('mobile_sam.pt')
+    print("✅ MobileSAM available")
+    mobilesam_available = True
+except Exception as e:
+    print(f"❌ MobileSAM failed: {e}")
+    mobilesam_available = False
+
+sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
+sam2_available = os.path.exists(sam2_path)
+print(f"SAM 2.1 available: {sam2_available}")
+
+# 4. Final selection logic
+print("\n--- Final Selection ---")
+if force_cpu:
+    device = "cpu"
+    model = "MobileSAM" if mobilesam_available else "SAM2"
+    print(f"FORCED → {device}, {model}")
+elif cuda_available and not force_cpu:
+    gpu_props = torch.cuda.get_device_properties(0)
+    if gpu_props.total_memory / 1024**3 >= 4:
+        device = "cuda"
+        model = "SAM2"
+        print(f"AUTO → {device}, {model} (sufficient GPU memory)")
+    else:
+        device = "cpu"
+        model = "MobileSAM" if mobilesam_available else "SAM2"
+        print(f"AUTO → {device}, {model} (insufficient GPU memory)")
+elif mps_available:
+    device = "mps"
+    model = "SAM2"
+    print(f"AUTO → {device}, {model}")
+else:
+    device = "cpu"
+    model = "MobileSAM" if mobilesam_available else "SAM2"
+    print(f"AUTO → {device}, {model}")
+
+print(f"\nFinal: {model} on {device.upper()}")
+```
+
+### Performance Profiling
+
+```python
+# Profile segmentation performance:
+import time
+
+def profile_segmentation():
+    """Profile a complete segmentation cycle."""
+
+    print("=== Performance Profile ===")
+
+    # Setup timing
+    start_total = time.time()
+
+    # Mock preparation (replace with actual)
+    start_prep = time.time()
+    # ... preparation code ...
+    prep_time = time.time() - start_prep
+
+    # Mock inference (replace with actual)
+    start_inference = time.time()
+    # ... inference code ...
+    inference_time = time.time() - start_inference
+
+    # Mock post-processing (replace with actual)
+    start_post = time.time()
+    # ... post-processing code ...
+    post_time = time.time() - start_post
+
+    total_time = time.time() - start_total
+
+    print(f"Preparation: {prep_time:.3f}s ({prep_time/total_time*100:.1f}%)")
+    print(f"Inference: {inference_time:.3f}s ({inference_time/total_time*100:.1f}%)")
+    print(f"Post-process: {post_time:.3f}s ({post_time/total_time*100:.1f}%)")
+    print(f"Total: {total_time:.3f}s")
+
+    # Performance expectations
+    import os
+    cores = os.cpu_count()
+
+    if torch.cuda.is_available():
+        expected = "0.2-0.5s"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        expected = "1-2s"
+    elif cores >= 24:
+        expected = "<1s"
+    elif cores >= 16:
+        expected = "1-2s"
+    else:
+        expected = "2-4s"
+
+    print(f"Expected: {expected}")
+    print(f"Performance: {'✅ Good' if total_time <= 5 else '⚠️ Slow' if total_time <= 10 else '❌ Very Slow'}")
+
+# Run during actual segmentation:
+# profile_segmentation()
+```
+
+---
+
+## 📞 Getting Help
+
+### Enhanced Bug Reports
+
+When reporting issues, include this enhanced diagnostic:
+
+```python
+# Enhanced diagnostic script:
+print("=== GeoOSAM Enhanced Diagnostic ===")
+
+import os, sys, torch
+from qgis.core import QgsApplication
+
+# Basic info
+print(f"Python: {sys.version}")
+print(f"QGIS: {QgsApplication.version()}")
+print(f"OS: {os.name} {os.uname().sysname if hasattr(os, 'uname') else 'Windows'}")
+
+# Dependencies
+deps = {
+    "torch": torch.__version__,
+    "ultralytics": None,
+    "cv2": None,
+    "rasterio": None,
+    "shapely": None,
+    "hydra": None
+}
+
+for name in deps:
+    try:
+        if name == "torch":
+            continue  # Already have version
+        module = __import__(name)
+        deps[name] = getattr(module, '__version__', 'unknown')
+    except ImportError:
+        deps[name] = "MISSING"
+
+for name, version in deps.items():
+    print(f"{name}: {version}")
+
+# Hardware
+print(f"\nCPU cores: {os.cpu_count()}")
+print(f"PyTorch threads: {torch.get_num_threads()}")
+
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    print("GPU: Apple Silicon (MPS)")
+else:
+    print("GPU: None (CPU only)")
+
+# Model selection
+print(f"\nExpected device: ", end="")
+if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1024**3 >= 4:
+    print("CUDA → SAM 2.1")
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    print("MPS → SAM 2.1")
+else:
+    mobilesam = "MobileSAM" if deps["ultralytics"] != "MISSING" else "SAM 2.1 (fallback)"
+    print(f"CPU → {mobilesam}")
+
+# Plugin status
+plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam")
+print(f"\nPlugin installed: {os.path.exists(plugin_path)}")
+
+# Models
+sam2_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2.1_hiera_tiny.pt")
+if os.path.exists(sam2_path):
+    print(f"SAM 2.1 model: {os.path.getsize(sam2_path)/1024/1024:.1f}MB")
+else:
+    print("SAM 2.1 model: Missing")
+
+if deps["ultralytics"] != "MISSING":
+    print("MobileSAM: Available via Ultralytics")
+else:
+    print("MobileSAM: Not available")
+
+print("=== End Enhanced Diagnostic ===")
+```
+
+### Support Channels
+
+- **GitHub Issues:** https://github.com/espressouk/GeoOSAM/issues
+
+  - Include enhanced diagnostic output
+  - Specify which model was being used
+  - Note performance expectations vs. reality
+
+- **Email:** bkst.dev@gmail.com
+  - For complex performance issues
+  - Hardware-specific problems
+
+**Still having issues? The enhanced diagnostic output above will help us solve your problem quickly!** 📧 In QGIS Python Console:
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "ultralytics"])
 print("✅ Ultralytics installed - MobileSAM now available")
-```
+
+````
 
 #### Error: "No module named 'torch'"
 
-**Cause:** PyTorch not installed  
+**Cause:** PyTorch not installed
 **Solution:**
+
+**🎯 Windows (Recommended): Use OSGeo4W Shell**
+```bash
+# Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+````
+
+**🔧 Alternative: QGIS Python Console**
 
 ```python
 # In QGIS Python Console:

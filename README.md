@@ -91,7 +91,15 @@ _Export segmented polygons as shapefiles with detailed attributes_
 ### Option 2: Download from GitHub (Manual)
 
 1. Download ZIP from: https://github.com/espressouk/GeoOSAM
-2. Extract the plugin
+2. Extract the plugin:
+
+   ```bash
+   # Extract and rename to remove -main suffix
+   unzip GeoOSAM-main.zip
+   mv GeoOSAM-main geoOSAM
+   cd geoOSAM
+   ```
+
 3. Copy to QGIS plugins directory:
 
    ```bash
@@ -106,9 +114,21 @@ _Export segmented polygons as shapefiles with detailed attributes_
 
 ### Required Dependencies (Both Options)
 
-**Choose one method:**
+**🎯 Windows: Use OSGeo4W Shell (Recommended)**
 
-**Method A: QGIS Python Console (Recommended)**
+```bash
+# Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
+# This ensures you're using the same Python environment as QGIS
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+```
+
+**🍎 macOS/🐧 Linux: Use Terminal**
+
+```bash
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+```
+
+**🔧 Alternative: QGIS Python Console (All Platforms)**
 
 ```python
 # Open QGIS > Plugins > Python Console, paste and run:
@@ -118,12 +138,6 @@ packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", 
 for pkg in packages:
     subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
     print(f"✅ Installed {pkg}")
-```
-
-**Method B: System Terminal**
-
-```bash
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
 ```
 
 ### Model Download (Automatic)
@@ -149,11 +163,6 @@ pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-c
 - **Intelligent Threading**: Automatically uses 75% of available cores on high-end systems
 - **MobileSAM Scaling**: Exceptional multi-core efficiency compared to traditional models
 - **Memory Optimized**: Efficient processing even on large imagery datasets
-
-1. **Device Detection**: Plugin detects your hardware (GPU/CPU)
-2. **Smart Download**: Downloads only the model needed for your system
-3. **Background Process**: Models download automatically during first segmentation
-4. **One-time Setup**: Subsequent runs use cached models
 
 **🔧 Manual Download (if auto-download fails):**
 

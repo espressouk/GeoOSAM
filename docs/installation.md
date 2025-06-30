@@ -12,6 +12,21 @@
 
 ### Step 2: Install Dependencies
 
+**🎯 Windows Users: Use OSGeo4W Shell (Recommended)**
+
+```bash
+# Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+```
+
+**🍎 macOS/🐧 Linux Users: Use Terminal**
+
+```bash
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+```
+
+**🔧 Alternative: QGIS Python Console (All Platforms)**
+
 ```python
 # Open QGIS → Plugins → Python Console
 # Copy and paste this code:
@@ -59,12 +74,23 @@ for pkg in packages:
 
 #### Windows Installation
 
-```powershell
+**🎯 Recommended: Use OSGeo4W Shell (Most Reliable)**
+
+```bash
 # 1. Install plugin through QGIS interface
-# 2. Install dependencies via Command Prompt (as Administrator):
+# 2. Open OSGeo4W Shell (comes with QGIS installation)
+#    Start Menu → OSGeo4W → OSGeo4W Shell
+# 3. Install dependencies in the correct Python environment:
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+```
+
+**Alternative Methods:**
+
+```powershell
+# Method A: Command Prompt (may use different Python than QGIS)
 pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
 
-# Alternative: Use QGIS Python Console (recommended)
+# Method B: QGIS Python Console (always works but slower)
 # Open QGIS → Plugins → Python Console
 import subprocess, sys
 packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
@@ -109,11 +135,12 @@ pip3 install ultralytics opencv-python rasterio shapely hydra-core
 # 1. Download plugin from GitHub
 wget https://github.com/espressouk/geoOSAM/archive/main.zip
 unzip main.zip
-cd geo-osam-main
+mv GeoOSAM-main geoOSAM  # Remove -main suffix
+cd geoOSAM
 
 # Or clone with git:
 git clone https://github.com/espressouk/geoOSAM.git
-cd geo-osam
+cd geoOSAM
 ```
 
 #### Copy to QGIS Plugins Directory
@@ -240,7 +267,7 @@ print(f"CPU cores: {torch.get_num_interop_threads()}")
 ```bash
 # Clone repository:
 git clone https://github.com/espressouk/geoOSAM.git
-cd geo-osam
+cd geoOSAM
 
 # Create development environment:
 python3 -m venv venv
@@ -479,7 +506,7 @@ Include this information:
 # Plugins → Manage and Install Plugins → Upgradeable → Upgrade GeoOSAM
 
 # Manual update from GitHub:
-cd geo_osam
+cd geoOSAM
 git pull origin main
 # Or download new release
 ```
