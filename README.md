@@ -343,8 +343,8 @@ To be determined based on user feedback and usage patterns.
 
 - **Zoom wisely**: Try different zoom levels to get the best results for your selected class.
 - **Force CPU mode**: If GPU memory is limited
-<!-- - **Use 🧹 Clear Memory**: To release RAM/GPU memory during long sessions -->
-- **Close heavy apps**: To free resources for segmentation
+  <!-- - **Use 🧹 Clear Memory**: To release RAM/GPU memory during long sessions -->
+  <!-- - **Close heavy apps**: To free resources for segmentation -->
 
 ---
 
