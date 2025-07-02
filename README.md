@@ -128,13 +128,13 @@ For current limitations and upcoming fixes, see:
 ```bash
 # Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
 # This ensures you're using the same Python environment as QGIS
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **🍎 macOS/🐧 Linux: Use Terminal**
 
 ```bash
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **🔧 Alternative: QGIS Python Console (All Platforms)**
@@ -143,7 +143,7 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 # Open QGIS > Plugins > Python Console, paste and run:
 import subprocess
 import sys
-packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 ```
 
@@ -267,13 +267,13 @@ The following issues are acknowledged and will be addressed in the next version:
 #### 1. Single Raster Limitation
 
 - **Issue**: Only one raster layer is currently supported
-- **Current Behavior**: If multiple rasters are loaded, segmentation only works on the first raster. Selecting a second raster results in an exception (e.g., _“point is out of raster bounds”_)
+- **Current Behavior**: If multiple rasters are loaded, segmentation only works on the first raster. Selecting a second raster results in an exception (e.g., _"point is out of raster bounds"_)
 - **Planned Fix**: Allow multiple raster layers to be loaded while segmentation applies to the **selected** one
 - **Workaround**: Keep only one raster loaded or disable extra rasters before running segmentation
 
 #### 2. Panel Focus Management
 
-- **Issue**: Panel controls don’t lose focus after use
+- **Issue**: Panel controls don't lose focus after use
 - **Current Behavior**: Pressing **Space** can re-trigger the last clicked button
 - **Planned Fix**: Proper focus handling and keyboard event filtering
 - **Workaround**: Click the map canvas after using the panel
@@ -287,7 +287,7 @@ The following issues are acknowledged and will be addressed in the next version:
 
 #### 4. Font Size Scaling
 
-- **Issue**: Fixed font sizes don’t scale well on Hi-DPI screens
+- **Issue**: Fixed font sizes don't scale well on Hi-DPI screens
 - **Current Behavior**: UI text can appear too small
 - **Planned Fix**: Responsive font and DPI scaling
 - **Workaround**: Adjust system or QGIS font/DPI settings
@@ -332,6 +332,7 @@ Please check:
   - `rasterio`
   - `shapely`
   - `hydra-core`
+  - `iopath`
 
 Report issues at: [GitHub Issues](https://github.com/espressouk/GeoOSAM/issues)
 

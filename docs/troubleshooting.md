@@ -81,246 +81,11 @@ print(f"CPU cores: {os.cpu_count()}")
 **Solution:**
 
 ```python
-# Reduce thread count if system becomes unresponsive:
-import torch
-torch.set_num_threads(max(1, os.cpu_count() // 2))
-```
-
----
-
-## 🔍 Advanced Debugging
-
-### Model Selection Debug
-
-```python
-# Complete model selection diagnostic:
-print("=== GeoOSAM Model Selection Debug ===")
-
-import os
-import torch
-
-# 1. Check force flags
-force_cpu = os.getenv("GEOOSAM_FORCE_CPU")
-force_gpu = os.getenv("GEOOSAM_FORCE_GPU")
-print(f"Force CPU: {force_cpu}")
-print(f"Force GPU: {force_gpu}")
-
-# 2. Hardware detection
-print("\n--- Hardware Detection ---")
-cuda_available = torch.cuda.is_available()
-mps_available = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
-
-print(f"CUDA available: {cuda_available}")
-if cuda_available:
-    props = torch.cuda.get_device_properties(0)
-    print(f"  GPU: {torch.cuda.get_device_name(0)}")
-    print(f"  Memory: {props.total_memory / 1024**3:.1f}GB")
-    print(f"  Sufficient memory (≥4GB): {props.total_memory / 1024**3 >= 4}")
-
-print(f"MPS available: {mps_available}")
-
-# 3. Model availability
-print("\n--- Model Availability ---")
-try:
-    from ultralytics import SAM
-    test_model = SAM('mobile_sam.pt')
-    print("✅ MobileSAM available")
-    mobilesam_available = True
-except Exception as e:
-    print(f"❌ MobileSAM failed: {e}")
-    mobilesam_available = False
-
-sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
-sam2_available = os.path.exists(sam2_path)
-print(f"SAM 2.1 available: {sam2_available}")
-
-# 4. Final selection logic
-print("\n--- Final Selection ---")
-if force_cpu:
-    device = "cpu"
-    model = "MobileSAM" if mobilesam_available else "SAM2"
-    print(f"FORCED → {device}, {model}")
-elif cuda_available and not force_cpu:
-    gpu_props = torch.cuda.get_device_properties(0)
-    if gpu_props.total_memory / 1024**3 >= 4:
-        device = "cuda"
-        model = "SAM2"
-        print(f"AUTO → {device}, {model} (sufficient GPU memory)")
-    else:
-        device = "cpu"
-        model = "MobileSAM" if mobilesam_available else "SAM2"
-        print(f"AUTO → {device}, {model} (insufficient GPU memory)")
-elif mps_available:
-    device = "mps"
-    model = "SAM2"
-    print(f"AUTO → {device}, {model}")
-else:
-    device = "cpu"
-    model = "MobileSAM" if mobilesam_available else "SAM2"
-    print(f"AUTO → {device}, {model}")
-
-print(f"\nFinal: {model} on {device.upper()}")
-```
-
-### Performance Profiling
-
-```python
-# Profile segmentation performance:
-import time
-
-def profile_segmentation():
-    """Profile a complete segmentation cycle."""
-
-    print("=== Performance Profile ===")
-
-    # Setup timing
-    start_total = time.time()
-
-    # Mock preparation (replace with actual)
-    start_prep = time.time()
-    # ... preparation code ...
-    prep_time = time.time() - start_prep
-
-    # Mock inference (replace with actual)
-    start_inference = time.time()
-    # ... inference code ...
-    inference_time = time.time() - start_inference
-
-    # Mock post-processing (replace with actual)
-    start_post = time.time()
-    # ... post-processing code ...
-    post_time = time.time() - start_post
-
-    total_time = time.time() - start_total
-
-    print(f"Preparation: {prep_time:.3f}s ({prep_time/total_time*100:.1f}%)")
-    print(f"Inference: {inference_time:.3f}s ({inference_time/total_time*100:.1f}%)")
-    print(f"Post-process: {post_time:.3f}s ({post_time/total_time*100:.1f}%)")
-    print(f"Total: {total_time:.3f}s")
-
-    # Performance expectations
-    import os
-    cores = os.cpu_count()
-
-    if torch.cuda.is_available():
-        expected = "0.2-0.5s"
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        expected = "1-2s"
-    elif cores >= 24:
-        expected = "<1s"
-    elif cores >= 16:
-        expected = "1-2s"
-    else:
-        expected = "2-4s"
-
-    print(f"Expected: {expected}")
-    print(f"Performance: {'✅ Good' if total_time <= 5 else '⚠️ Slow' if total_time <= 10 else '❌ Very Slow'}")
-
-# Run during actual segmentation:
-# profile_segmentation()
-```
-
----
-
-## 📞 Getting Help
-
-### Enhanced Bug Reports
-
-When reporting issues, include this enhanced diagnostic:
-
-```python
-# Enhanced diagnostic script:
-print("=== GeoOSAM Enhanced Diagnostic ===")
-
-import os, sys, torch
-from qgis.core import QgsApplication
-
-# Basic info
-print(f"Python: {sys.version}")
-print(f"QGIS: {QgsApplication.version()}")
-print(f"OS: {os.name} {os.uname().sysname if hasattr(os, 'uname') else 'Windows'}")
-
-# Dependencies
-deps = {
-    "torch": torch.__version__,
-    "ultralytics": None,
-    "cv2": None,
-    "rasterio": None,
-    "shapely": None,
-    "hydra": None
-}
-
-for name in deps:
-    try:
-        if name == "torch":
-            continue  # Already have version
-        module = __import__(name)
-        deps[name] = getattr(module, '__version__', 'unknown')
-    except ImportError:
-        deps[name] = "MISSING"
-
-for name, version in deps.items():
-    print(f"{name}: {version}")
-
-# Hardware
-print(f"\nCPU cores: {os.cpu_count()}")
-print(f"PyTorch threads: {torch.get_num_threads()}")
-
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-    print("GPU: Apple Silicon (MPS)")
-else:
-    print("GPU: None (CPU only)")
-
-# Model selection
-print(f"\nExpected device: ", end="")
-if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1024**3 >= 4:
-    print("CUDA → SAM 2.1")
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-    print("MPS → SAM 2.1")
-else:
-    mobilesam = "MobileSAM" if deps["ultralytics"] != "MISSING" else "SAM 2.1 (fallback)"
-    print(f"CPU → {mobilesam}")
-
-# Plugin status
-plugin_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam")
-print(f"\nPlugin installed: {os.path.exists(plugin_path)}")
-
-# Models
-sam2_path = os.path.join(plugin_path, "sam2", "checkpoints", "sam2.1_hiera_tiny.pt")
-if os.path.exists(sam2_path):
-    print(f"SAM 2.1 model: {os.path.getsize(sam2_path)/1024/1024:.1f}MB")
-else:
-    print("SAM 2.1 model: Missing")
-
-if deps["ultralytics"] != "MISSING":
-    print("MobileSAM: Available via Ultralytics")
-else:
-    print("MobileSAM: Not available")
-
-print("=== End Enhanced Diagnostic ===")
-```
-
-### Support Channels
-
-- **GitHub Issues:** https://github.com/espressouk/GeoOSAM/issues
-
-  - Include enhanced diagnostic output
-  - Specify which model was being used
-  - Note performance expectations vs. reality
-
-- **Email:** bkst.dev@gmail.com
-  - For complex performance issues
-  - Hardware-specific problems
-
-**Still having issues? The enhanced diagnostic output above will help us solve your problem quickly!** 📧 In QGIS Python Console:
+# Install in QGIS Python Console:
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "ultralytics"])
 print("✅ Ultralytics installed - MobileSAM now available")
-
-````
+```
 
 #### Error: "No module named 'torch'"
 
@@ -328,19 +93,31 @@ print("✅ Ultralytics installed - MobileSAM now available")
 **Solution:**
 
 **🎯 Windows (Recommended): Use OSGeo4W Shell**
+
 ```bash
 # Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
-````
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+```
 
 **🔧 Alternative: QGIS Python Console**
 
 ```python
 # In QGIS Python Console:
 import subprocess, sys
-packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
+```
 
+#### Error: "No module named 'iopath'"
+
+**Cause:** iopath dependency missing (required for SAM2)  
+**Solution:**
+
+```python
+# Install iopath in QGIS Python Console:
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "iopath"])
+print("✅ iopath installed")
 ```
 
 #### Error: "Plugin could not be loaded"
@@ -357,7 +134,8 @@ deps = {
     "cv2": "opencv-python",
     "rasterio": "rasterio",
     "shapely": "shapely",
-    "hydra": "hydra-core"
+    "hydra": "hydra-core",
+    "iopath": "iopath"
 }
 
 missing = []
@@ -710,7 +488,7 @@ if cuda_available:
     props = torch.cuda.get_device_properties(0)
     print(f"  GPU: {torch.cuda.get_device_name(0)}")
     print(f"  Memory: {props.total_memory / 1024**3:.1f}GB")
-    print(f"  Sufficient memory (≥4GB): {props.total_memory / 1024**3 >= 4}")
+    print(f"  Sufficient memory (≥3GB): {props.total_memory / 1024**3 >= 3}")
 
 print(f"MPS available: {mps_available}")
 
@@ -737,7 +515,7 @@ if force_cpu:
     print(f"FORCED → {device}, {model}")
 elif cuda_available and not force_cpu:
     gpu_props = torch.cuda.get_device_properties(0)
-    if gpu_props.total_memory / 1024**3 >= 4:
+    if gpu_props.total_memory / 1024**3 >= 3:  # Changed from 4GB to 3GB
         device = "cuda"
         model = "SAM2"
         print(f"AUTO → {device}, {model} (sufficient GPU memory)")
@@ -815,6 +593,100 @@ def profile_segmentation():
 # profile_segmentation()
 ```
 
+### Memory Usage Analysis
+
+```python
+# Analyze memory usage patterns:
+import psutil
+import torch
+
+def analyze_memory():
+    """Analyze current memory usage."""
+
+    print("=== Memory Analysis ===")
+
+    # System memory
+    memory = psutil.virtual_memory()
+    print(f"System RAM: {memory.total / 1024**3:.1f}GB")
+    print(f"Available: {memory.available / 1024**3:.1f}GB")
+    print(f"Used: {memory.percent}%")
+
+    # GPU memory (if available)
+    if torch.cuda.is_available():
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        allocated = torch.cuda.memory_allocated(0)
+        cached = torch.cuda.memory_reserved(0)
+
+        print(f"\nGPU Memory: {gpu_memory / 1024**3:.1f}GB")
+        print(f"Allocated: {allocated / 1024**3:.1f}GB")
+        print(f"Cached: {cached / 1024**3:.1f}GB")
+        print(f"Free: {(gpu_memory - cached) / 1024**3:.1f}GB")
+
+    # Process memory
+    process = psutil.Process()
+    process_memory = process.memory_info()
+    print(f"\nProcess RSS: {process_memory.rss / 1024**3:.1f}GB")
+    print(f"Process VMS: {process_memory.vms / 1024**3:.1f}GB")
+
+# Call during processing to monitor:
+# analyze_memory()
+```
+
+### Dependency Conflict Detection
+
+```python
+# Detect dependency conflicts:
+def check_dependency_conflicts():
+    """Check for common dependency conflicts."""
+
+    print("=== Dependency Conflict Analysis ===")
+
+    import pkg_resources
+
+    # Check for multiple PyTorch versions
+    try:
+        torch_dist = pkg_resources.get_distribution("torch")
+        print(f"PyTorch version: {torch_dist.version}")
+        print(f"PyTorch location: {torch_dist.location}")
+    except:
+        print("❌ PyTorch not found via pkg_resources")
+
+    # Check for conflicting OpenCV versions
+    cv_packages = ["opencv-python", "opencv-contrib-python", "opencv-python-headless"]
+    cv_found = []
+    for pkg in cv_packages:
+        try:
+            dist = pkg_resources.get_distribution(pkg)
+            cv_found.append(f"{pkg}: {dist.version}")
+        except:
+            pass
+
+    if len(cv_found) > 1:
+        print("⚠️ Multiple OpenCV packages found:")
+        for cv in cv_found:
+            print(f"  {cv}")
+        print("Consider keeping only one OpenCV package")
+    elif cv_found:
+        print(f"✅ OpenCV: {cv_found[0]}")
+    else:
+        print("❌ No OpenCV package found")
+
+    # Check for path conflicts
+    import sys
+    python_paths = sys.path
+    qgis_paths = [p for p in python_paths if 'qgis' in p.lower()]
+
+    if qgis_paths:
+        print(f"\n✅ QGIS Python paths found:")
+        for path in qgis_paths[:3]:  # Show first 3
+            print(f"  {path}")
+    else:
+        print("\n⚠️ No QGIS-specific paths found in sys.path")
+
+# Run if experiencing import issues:
+# check_dependency_conflicts()
+```
+
 ---
 
 ## 📞 Getting Help
@@ -842,7 +714,8 @@ deps = {
     "cv2": None,
     "rasterio": None,
     "shapely": None,
-    "hydra": None
+    "hydra": None,
+    "iopath": None
 }
 
 for name in deps:
@@ -871,7 +744,7 @@ else:
 
 # Model selection
 print(f"\nExpected device: ", end="")
-if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1024**3 >= 4:
+if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1024**3 >= 3:
     print("CUDA → SAM 2.1")
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     print("MPS → SAM 2.1")
@@ -895,6 +768,12 @@ if deps["ultralytics"] != "MISSING":
 else:
     print("MobileSAM: Not available")
 
+# Check iopath specifically
+if deps["iopath"] != "MISSING":
+    print("iopath: Available")
+else:
+    print("iopath: MISSING (install with: pip install iopath)")
+
 print("=== End Enhanced Diagnostic ===")
 ```
 
@@ -909,5 +788,118 @@ print("=== End Enhanced Diagnostic ===")
 - **Email:** bkst.dev@gmail.com
   - For complex performance issues
   - Hardware-specific problems
+
+### Reporting New Issues
+
+When reporting a new issue, please include:
+
+1. **Enhanced diagnostic output** (from script above)
+2. **Steps to reproduce** the problem
+3. **Expected vs. actual behavior**
+4. **Error messages** (full traceback if available)
+5. **Hardware specs** (GPU model, CPU cores, RAM)
+6. **Data characteristics** (image size, format, resolution)
+
+### Common Issue Categories
+
+#### **Installation Problems**
+
+- Missing dependencies (torch, ultralytics, iopath, etc.)
+- Plugin not loading
+- Permission issues
+
+#### **Model Issues**
+
+- Wrong model selected
+- Download failures
+- Model loading errors
+
+#### **Performance Problems**
+
+- Slower than expected
+- High CPU/GPU usage
+- Memory issues
+
+#### **Segmentation Quality**
+
+- Poor results
+- No segments found
+- Incorrect boundaries
+
+#### **Export Issues**
+
+- Shapefile problems
+- Attribute errors
+- Projection issues
+
+### Quick Fixes Summary
+
+| Issue                  | Quick Fix                                    |
+| ---------------------- | -------------------------------------------- |
+| Plugin won't load      | Check dependencies with diagnostic script    |
+| MobileSAM missing      | `pip install ultralytics`                    |
+| SAM 2.1 won't download | Check internet, clear cache, manual download |
+| Wrong model selected   | Check force environment variables            |
+| Slow performance       | Check device detection, close other apps     |
+| iopath missing         | `pip install iopath`                         |
+| Threading issues       | Reduce thread count manually                 |
+| GPU out of memory      | Plugin auto-fallback to CPU                  |
+
+### Getting the Best Help
+
+1. **Run diagnostic first** - Most issues are revealed by the diagnostic script
+2. **Check existing issues** - Your problem might already be solved
+3. **Provide complete information** - More details = faster resolution
+4. **Test with minimal data** - Use small test images when possible
+5. **Note your workflow** - What steps led to the problem?
+
+### Environment Variable Overrides
+
+For testing and debugging, you can force specific behaviors:
+
+```python
+import os
+
+# Force specific model selection
+os.environ["GEOOSAM_FORCE_CPU"] = "1"          # Force CPU mode
+os.environ["GEOOSAM_FORCE_GPU"] = "1"          # Force GPU mode
+os.environ["GEOOSAM_FORCE_SAM2"] = "1"         # Force SAM2 (any device)
+os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"    # Force MobileSAM
+
+# Debug mode
+os.environ["GEOOSAM_DEBUG"] = "1"              # Enable debug output
+os.environ["GEOOSAM_VERBOSE"] = "1"            # Verbose logging
+
+# Performance tuning
+os.environ["OMP_NUM_THREADS"] = "8"            # Limit OpenMP threads
+os.environ["MKL_NUM_THREADS"] = "8"            # Limit MKL threads
+
+# Restart QGIS after setting environment variables
+```
+
+### Log File Locations
+
+Check these locations for additional debugging information:
+
+**Windows:**
+
+```
+C:\Users\%USERNAME%\AppData\Local\Temp\qgis_logs\
+C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam\logs\
+```
+
+**macOS:**
+
+```
+~/Library/Logs/QGIS/
+~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/logs/
+```
+
+**Linux:**
+
+```
+~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/logs/
+/tmp/qgis_logs/
+```
 
 **Still having issues? The enhanced diagnostic output above will help us solve your problem quickly!** 📧

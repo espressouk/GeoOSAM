@@ -325,7 +325,7 @@ Each polygon includes comprehensive metadata:
 #### **For GPU Systems**
 
 - **SAM 2.1 advantage**: Latest accuracy improvements
-- **VRAM**: 4GB+ recommended for best performance
+- **VRAM**: 3GB+ recommended for best performance
 - **Fallback**: Automatic CPU fallback if GPU memory insufficient
 
 ### Troubleshooting Performance

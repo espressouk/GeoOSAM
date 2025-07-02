@@ -27,7 +27,7 @@ GeoOSAM automatically selects the optimal model based on hardware:
 ```python
 def detect_best_device():
     """Detect best device and model combination."""
-    if torch.cuda.is_available() and gpu_memory >= 4GB:
+    if torch.cuda.is_available() and gpu_memory >= 3GB:
         return "cuda", "SAM2.1"
     elif torch.backends.mps.is_available():
         return "mps", "SAM2.1"
@@ -240,7 +240,7 @@ def detect_best_device():
         # 1. Check CUDA GPU
         if torch.cuda.is_available() and not os.getenv("GEOOSAM_FORCE_CPU"):
             gpu_props = torch.cuda.get_device_properties(0)
-            if gpu_props.total_memory / 1024**3 >= 4:  # 4GB minimum
+            if gpu_props.total_memory / 1024**3 >= 3:  # 3GB minimum
                 return "cuda", "SAM2", cores
 
         # 2. Check Apple Silicon
@@ -592,7 +592,7 @@ class TestModelSelection(unittest.TestCase):
              patch('torch.cuda.get_device_properties') as mock_props:
 
             # Mock sufficient GPU memory
-            mock_props.return_value.total_memory = 8 * 1024**3  # 8GB
+            mock_props.return_value.total_memory = 6 * 1024**3  # 6GB
 
             device, model, cores = detect_best_device()
 

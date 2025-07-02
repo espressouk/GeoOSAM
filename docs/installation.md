@@ -16,13 +16,13 @@
 
 ```bash
 # Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **🍎 macOS/🐧 Linux Users: Use Terminal**
 
 ```bash
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **🔧 Alternative: QGIS Python Console (All Platforms)**
@@ -31,7 +31,7 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 # Open QGIS → Plugins → Python Console
 # Copy and paste this code:
 import subprocess, sys
-packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 
 ```
@@ -39,10 +39,12 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 ### Step 3: First Use
 
 1. **Click GeoOSAM icon** 🛰️ in QGIS toolbar
-2. **Models auto-download** based on your hardware:
-   - **GPU Systems**: SAM 2.1 (~160MB, one-time)
-   - **CPU Systems**: MobileSAM (~40MB via Ultralytics, automatic)
-3. **Start segmenting!** 🚀
+2. **Automatic model selection** happens instantly:
+   - **🎮 GPU detected**: Downloads SAM 2.1 (~160MB, one-time)
+   - **💻 CPU detected**: Downloads MobileSAM (~40MB via Ultralytics)
+   - **⚡ High-core CPU**: Optimized for sub-second performance
+3. **Control panel opens** on the right side showing your hardware
+4. **Start segmenting!** 🚀
 
 ---
 
@@ -80,19 +82,19 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 # 2. Open OSGeo4W Shell (comes with QGIS installation)
 #    Start Menu → OSGeo4W → OSGeo4W Shell
 # 3. Install dependencies in the correct Python environment:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **Alternative Methods:**
 
 ```powershell
 # Method A: Command Prompt (may use different Python than QGIS)
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Method B: QGIS Python Console (always works but slower)
 # Open QGIS → Plugins → Python Console
 import subprocess, sys
-packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core"]
+packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
 ```
 
@@ -101,11 +103,11 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 ```bash
 # 1. Install plugin through QGIS interface
 # 2. Install dependencies via Terminal:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # For Apple Silicon Macs (automatic optimization):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip3 install ultralytics opencv-python rasterio shapely hydra-core
+pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Alternative: Use QGIS Python Console (recommended)
 ```
@@ -115,7 +117,7 @@ pip3 install ultralytics opencv-python rasterio shapely hydra-core
 ```bash
 # 1. Install plugin through QGIS interface
 # 2. Install dependencies:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Ubuntu/Debian additional dependencies:
 sudo apt update
@@ -123,7 +125,7 @@ sudo apt install python3-pip python3-dev
 
 # NVIDIA GPU support (auto-detected):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics opencv-python rasterio shapely hydra-core
+pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 ### Installation Method 2: Manual GitHub Installation
@@ -171,7 +173,7 @@ cp -r . ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 
 ```bash
 # Install required Python packages:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 #### Enable Plugin
@@ -230,7 +232,7 @@ nvidia-smi
 
 # Install PyTorch with CUDA support (auto-detected):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics
+pip3 install ultralytics iopath
 
 # Verify CUDA in QGIS Python Console:
 import torch
@@ -242,7 +244,7 @@ print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N
 
 ```bash
 # Install optimized PyTorch for Apple Silicon:
-pip3 install torch torchvision ultralytics
+pip3 install torch torchvision ultralytics iopath
 
 # Verify MPS support in QGIS Python Console:
 import torch
@@ -253,7 +255,7 @@ print(f"MPS available: {torch.backends.mps.is_available()}")
 
 ```bash
 # For 16+ core systems (auto-optimized):
-pip3 install torch torchvision ultralytics
+pip3 install torch torchvision ultralytics iopath
 
 # Verify threading in QGIS Python Console:
 import torch
@@ -276,7 +278,7 @@ source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
 # Install all dependencies:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Link to QGIS plugins directory:
 ln -s $(pwd)/geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
@@ -289,7 +291,7 @@ ln -s $(pwd)/geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
 FROM qgis/qgis:release-3_28
 
 # Install dependencies with Ultralytics
-RUN pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+RUN pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Copy plugin
 COPY geo_osam /root/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
@@ -322,7 +324,7 @@ except Exception as e:
     print(f"❌ Plugin import failed: {e}")
 
 # Test 2: All dependencies available
-deps = ["torch", "torchvision", "cv2", "rasterio", "shapely", "hydra"]
+deps = ["torch", "torchvision", "cv2", "rasterio", "shapely", "hydra", "iopath"]
 ultralytics_deps = ["ultralytics"]
 for dep in deps + ultralytics_deps:
     try:
@@ -389,7 +391,7 @@ else:
 pip install ultralytics
 
 # Or reinstall all dependencies:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 #### Issue: "Import error: torch"
@@ -399,7 +401,19 @@ pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-c
 ```bash
 # Reinstall PyTorch:
 pip uninstall torch torchvision
-pip install torch torchvision ultralytics
+pip install torch torchvision ultralytics iopath
+```
+
+#### Issue: "Import error: iopath"
+
+**Solution:**
+
+```bash
+# Install iopath separately:
+pip install iopath
+
+# Or reinstall all dependencies:
+pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 #### Issue: "Permission denied" (Windows)
@@ -455,6 +469,7 @@ os.environ["GEOOSAM_FORCE_CPU"] = "1"  # Force CPU/MobileSAM
 ```python
 # Check threading configuration:
 import torch
+import os
 print(f"PyTorch threads: {torch.get_num_threads()}")
 print(f"OMP threads: {os.environ.get('OMP_NUM_THREADS', 'not set')}")
 
@@ -466,7 +481,7 @@ print(f"OMP threads: {os.environ.get('OMP_NUM_THREADS', 'not set')}")
 ```bash
 # Ensure native ARM packages:
 pip uninstall torch torchvision ultralytics
-pip install torch torchvision ultralytics
+pip install torch torchvision ultralytics iopath
 ```
 
 ### Getting Help
@@ -516,7 +531,7 @@ git pull origin main
 
 ```bash
 # Update Python packages:
-pip install --upgrade torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip install --upgrade torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 ### Model Updates
@@ -532,7 +547,7 @@ pip install --upgrade torch torchvision ultralytics opencv-python rasterio shape
 # Plugins → Manage and Install Plugins → Installed → GeoOSAM → Uninstall
 
 # Remove dependencies (optional):
-pip uninstall torch torchvision ultralytics opencv-python rasterio shapely hydra-core
+pip uninstall torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 
 # Remove data (optional):
 rm -rf ~/GeoOSAM_shapefiles ~/GeoOSAM_masks
