@@ -64,7 +64,7 @@ _Export segmented polygons as shapefiles with detailed attributes_
 
 This plugin is still under active development. For current limitations and upcoming fixes, see:
 
-👉 [Known Issues](#known-issues--planned-fixes)
+👉 [Known Issues](#known-issues-and-planned-fixes)
 
 ## 📋 System Requirements
 
@@ -258,7 +258,7 @@ If you use GeoOSAM in your research, please cite:
 - **Improved Device Detection**: Better GPU/CPU/Apple Silicon handling
 - **Updated Dependencies**: Modern ML stack with automatic model downloads
 
-## Known Issues and Planned Fixes
+## 🛠 Known Issues and Planned Fixes
 
 The following issues are acknowledged and will be addressed in the next version:
 
