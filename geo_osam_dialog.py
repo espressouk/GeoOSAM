@@ -602,18 +602,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._update_stats()
 
     def _setup_ui(self):
-        # FIXED: Significantly larger base font sizes for better visibility
-        if hasattr(QtGui.QGuiApplication, 'devicePixelRatio'):
-            dpi_ratio = QtGui.QGuiApplication.primaryScreen().devicePixelRatio()
-            if dpi_ratio > 1.5:
-                base_font_size = 24  # Much larger for high-DPI
-            else:
-                base_font_size = 20  # Increased from 16
-        else:
-            base_font_size = 20
-
-        # Apply larger font to the entire widget
+        # Force small font size regardless of DPI detection
+        base_font_size = 9  # Normal size
         self.setFont(QtGui.QFont("Segoe UI", base_font_size))
+        print(f"UI setup using forced font size: {base_font_size}pt")
 
         # --- Dock features: standard QGIS close/float/move
         self.setFeatures(
@@ -625,23 +617,25 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # --- Scrollable, responsive area
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Disable horizontal scroll
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)     # Only show vertical when needed
         scroll_area.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
         self.setWidget(scroll_area)
 
         main_widget = QtWidgets.QWidget()
-        # FIXED: Much larger global font (affects all children)
-        main_widget.setFont(QtGui.QFont("Segoe UI", 16))  # Increased from 11 to 16
+        main_widget.setFont(QtGui.QFont("Segoe UI", base_font_size))
         scroll_area.setWidget(main_widget)
 
         main_layout = QtWidgets.QVBoxLayout(main_widget)
-        main_layout.setSpacing(16)
-        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(12)                    # Reduced spacing
+        main_layout.setContentsMargins(15, 15, 15, 15)  # Reduced margins
         main_widget.setStyleSheet("background: transparent; color: #344054;")
 
-        # FIXED: More flexible sizing - removed maximum width, increased minimum
-        self.setMinimumWidth(400)  # Increased from 350
-        # Removed setMaximumWidth to allow better resizing
-        self.setMinimumHeight(600)  # Add minimum height for better usability
+        # Allow flexible resizing
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(450)   # Add max width back
+        self.setMinimumHeight(500)
+        self.resize(350, 700)       # Set initial size
 
         # --- Card helper
         def create_card(title, icon=""):
@@ -660,14 +654,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             shadow.setOffset(0, 2)
             card.setGraphicsEffect(shadow)
             card_layout = QtWidgets.QVBoxLayout(card)
-            card_layout.setContentsMargins(15, 15, 15, 15)
-            card_layout.setSpacing(12)
+            card_layout.setContentsMargins(12, 12, 12, 12)  # Reduced from 15
+            card_layout.setSpacing(8)                        # Reduced from 12
             if title:
                 header_layout = QtWidgets.QHBoxLayout()
                 icon_label = QtWidgets.QLabel(icon)
-                icon_label.setStyleSheet("font-size: 22px; margin-top: 1px;")  # Increased from 18px
+                icon_label.setStyleSheet("font-size: 12px; margin-top: 1px;")  # Reduced from 22px
                 header_label = QtWidgets.QLabel(f"<b>{title}</b>")
-                header_label.setStyleSheet("font-size: 20px; color: #101828;")  # Increased from 17px
+                header_label.setStyleSheet("font-size: 13px; color: #101828;")  # Reduced from 20px
                 header_layout.addWidget(icon_label)
                 header_layout.addWidget(header_label)
                 header_layout.addStretch()
@@ -676,7 +670,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # --- Title and Device Header ---
         title_label = QtWidgets.QLabel("GeoOSAM Control Panel")
-        title_label.setStyleSheet("font-size: 26px; font-weight: bold; color: #1D2939; margin-bottom: 4px;")  # Increased from 22px
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1D2939; margin-bottom: 4px;")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
@@ -685,7 +679,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if getattr(self, "num_cores", None):
             device_info += f" ({self.num_cores} cores)"
         device_label = QtWidgets.QLabel(device_info)
-        device_label.setStyleSheet("font-size: 18px; color: #475467; margin-bottom: 12px;")  # Increased from 15px
+        device_label.setStyleSheet("font-size: 12px; color: #475467; margin-bottom: 12px;")  # Reduced from 18px
         device_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(device_label)
 
@@ -698,16 +692,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         output_card, output_layout = create_card("Output Settings", "📂")
         folder_layout = QtWidgets.QHBoxLayout()
         self.outputFolderLabel = QtWidgets.QLabel("Default folder")
-        self.outputFolderLabel.setStyleSheet("font-size: 18px; color: #475467;")  # Increased from 15px
+        self.outputFolderLabel.setStyleSheet("font-size: 11px; color: #475467;")  # Reduced from 18px
         self.selectFolderBtn = QtWidgets.QPushButton("Choose")
         self.selectFolderBtn.setCursor(Qt.PointingHandCursor)
         self.selectFolderBtn.setStyleSheet("""
             QPushButton {
-                font-size: 18px; padding: 8px 20px; border-radius: 8px;
+                font-size: 11px; padding: 6px 16px; border-radius: 8px;
                 background: #FFF; border: 1px solid #D0D5DD;
             }
             QPushButton:hover { background: #F9FAFB; }
-        """)  # Increased font-size and padding
+        """)  # Reduced font-size and padding
+        self.selectFolderBtn.setAutoDefault(False)
+        self.selectFolderBtn.setDefault(False)
+        self.selectFolderBtn.setFocusPolicy(Qt.NoFocus)
         folder_layout.addWidget(self.outputFolderLabel)
         folder_layout.addStretch()
         folder_layout.addWidget(self.selectFolderBtn)
@@ -715,7 +712,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         debug_layout = QtWidgets.QHBoxLayout()
         debug_label = QtWidgets.QLabel("Save debug masks")
-        debug_label.setStyleSheet("font-size: 18px;")  # Increased from 15px
+        debug_label.setStyleSheet("font-size: 11px;")  # Reduced from 18px
         self.saveDebugSwitch = Switch()
         debug_layout.addWidget(debug_label)
         debug_layout.addStretch()
@@ -733,23 +730,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.classComboBox.addItem(class_name, class_name)
         self.classComboBox.setStyleSheet("""
             QComboBox {
-                padding: 10px 12px; font-size: 18px; border-radius: 7px;
+                padding: 8px 10px; font-size: 11px; border-radius: 7px;
                 border: 1px solid #D0D5DD; background: #FFF;
             }
             QComboBox::drop-down { border: none; }
-        """)  # Increased padding and font-size
+        """)  # Reduced padding and font-size
+        self.classComboBox.setFocusPolicy(Qt.NoFocus)
         class_layout.addWidget(self.classComboBox)
 
         # Current class label
         self.currentClassLabel = QtWidgets.QLabel("No class selected")
         self.currentClassLabel.setWordWrap(True)
         self.currentClassLabel.setStyleSheet("""
-            font-weight: 600; padding: 16px; margin: 4px; 
+            font-weight: 600; padding: 12px; margin: 4px; 
             border: 2px solid #D0D5DD; 
             background-color: #F9FAFB; 
             color: #667085;
-            border-radius: 8px; font-size: 17px;
-        """)  # Increased padding and font-size
+            border-radius: 8px; font-size: 11px;
+        """)  # Reduced padding and font-size
         class_layout.addWidget(self.currentClassLabel)
 
         # Add/Edit buttons
@@ -758,13 +756,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.editClassBtn = QtWidgets.QPushButton("✏️ Edit")
         for btn in [self.addClassBtn, self.editClassBtn]:
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.NoFocus)
             btn.setStyleSheet("""
                 QPushButton {
-                    font-size: 18px; padding: 12px; border-radius: 8px;
+                    font-size: 11px; padding: 8px; border-radius: 8px;
                     background: #FFF; border: 1px solid #D0D5DD;
                 }
                 QPushButton:hover { background: #F9FAFB; }
-            """)  # Increased font-size and padding
+            """)  # Reduced font-size and padding
             class_btn_layout.addWidget(btn)
         class_layout.addLayout(class_btn_layout)
         main_layout.addWidget(class_card)
@@ -784,7 +785,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.mode_button_group.setExclusive(True)
         mode_btn_style = """
             QPushButton {
-                font-size: 19px; font-weight: 600; padding: 14px;
+                font-size: 12px; font-weight: 600; padding: 10px;
                 border-radius: 8px; border: 1px solid #D0D5DD;
                 background: #FFF;
             }
@@ -792,7 +793,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QPushButton[active="true"] {
                 color: #FFF; background: #1570EF; border: 1px solid #1570EF;
             }
-        """  # Increased font-size and padding
+        """  # Reduced font-size and padding
         self.pointModeBtn.setStyleSheet(mode_btn_style)
         self.bboxModeBtn.setStyleSheet(mode_btn_style)
         mode_layout.addWidget(self.pointModeBtn)
@@ -804,14 +805,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.statusLabel = QtWidgets.QLabel("Ready to segment")
         self.statusLabel.setWordWrap(True)
         self.statusLabel.setStyleSheet("""
-            padding: 14px; border-radius: 8px; font-size: 18px; font-weight: 500;
+            padding: 10px; border-radius: 8px; font-size: 11px; font-weight: 500;
             background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;
-        """)  # Increased padding and font-size
+        """)  # Reduced padding and font-size
         status_layout.addWidget(self.statusLabel)
 
         self.statsLabel = QtWidgets.QLabel("Total Segments: 0 | Classes: 0")
         self.statsLabel.setStyleSheet(
-            "font-size: 18px; color: #475467; margin-top: 3px; margin-bottom: 3px;")  # Increased from 15px
+            "font-size: 10px; color: #475467; margin-top: 3px; margin-bottom: 3px;")  # Reduced from 18px
         status_layout.addWidget(self.statsLabel)
 
         self.progressBar = QtWidgets.QProgressBar()
@@ -821,12 +822,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.progressBar.setStyleSheet("""
             QProgressBar {
                 border: 1px solid #D0D5DD; border-radius: 8px;
-                background-color: #F2F4F7; height: 12px;
+                background-color: #F2F4F7; height: 8px;
             }
             QProgressBar::chunk {
                 background-color: #1570EF; border-radius: 8px;
             }
-        """)  # Increased height
+        """)  # Reduced height
         status_layout.addWidget(self.progressBar)
 
         self.undoBtn = QtWidgets.QPushButton("⟲ Undo Last Polygon")
@@ -834,7 +835,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.undoBtn.setCursor(Qt.PointingHandCursor)
         self.undoBtn.setStyleSheet("""
             QPushButton {
-                font-size: 19px; font-weight: 600; padding: 14px;
+                font-size: 11px; font-weight: 600; padding: 10px;
                 border-radius: 8px; background: #DC2626; color: #FFF;
                 border: 1px solid #DC2626;
             }
@@ -842,25 +843,40 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QPushButton:disabled {
                 background: #F2F4F7; color: #98A2B3; border-color: #EAECF0;
             }
-        """)  # Increased font-size and padding
+        """)  # Reduced font-size and padding
+
+        self.undoBtn.setAutoDefault(False)
+        self.undoBtn.setDefault(False)
+        self.undoBtn.setFocusPolicy(Qt.NoFocus)
 
         self.exportBtn = QtWidgets.QPushButton("💾 Export All")
         self.exportBtn.setCursor(Qt.PointingHandCursor)
         self.exportBtn.setStyleSheet("""
             QPushButton {
-                font-size: 19px; font-weight: 600; padding: 14px;
+                font-size: 11px; font-weight: 600; padding: 10px;
                 border-radius: 8px; color: #FFF;
                 background: #027A48; border: 1px solid #027A48;
             }
             QPushButton:hover { background: #039855; }
-        """)  # Increased font-size and padding
+        """)  # Reduced font-size and padding
+
+        self.undoBtn.setAutoDefault(False)
+        self.undoBtn.setDefault(False)
+        self.undoBtn.setFocusPolicy(Qt.NoFocus)
 
         status_layout.addWidget(self.undoBtn)
         status_layout.addWidget(self.exportBtn)
         main_layout.addWidget(status_card)
 
         main_layout.addStretch()
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.ClickFocus)
+
+        # Enable proper resizing
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
+        main_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+
+        # Force initial layout
+        self.adjustSize()
 
         # Connect all the signals (keeping original connections)
         self.selectFolderBtn.clicked.connect(self._select_output_folder)
@@ -899,6 +915,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         else:
             self._update_status("🚫 Debug masks disabled", "info")
 
+    def _clear_widget_focus(self):
+        """Clear focus from all widgets and return it to map canvas"""
+        # Give focus back to the map canvas so space bar works for map tools
+        self.canvas.setFocus()
+        QtWidgets.QApplication.processEvents()
+
     def _on_class_changed(self):
         selected_data = self.classComboBox.currentData()
         if selected_data:
@@ -931,6 +953,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 color: #667085;
                 border-radius: 8px; font-size: 14px;
             """)
+        self._clear_widget_focus()
 
     def _add_new_class(self):
         class_name, ok = QtWidgets.QInputDialog.getText(
