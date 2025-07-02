@@ -62,7 +62,7 @@ _Export segmented polygons as shapefiles with detailed attributes_
 
 ## 🛠 Known Issues
 
-This plugin is still under active development. For current limitations and upcoming fixes, see:
+For current limitations and upcoming fixes, see:
 
 👉 [Known Issues](#known-issues-and-planned-fixes)
 
