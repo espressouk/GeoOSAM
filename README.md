@@ -250,64 +250,27 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
-### v1.0.0 - Latest
+### v1.1.0 - Latest (2025-07-03)
+
+- **FIXED**: Multiple raster layer support - segmentation now works with selected raster (same CRS)
+- **FIXED**: Panel focus management - controls properly lose focus after use
+- **FIXED**: Added close/minimize button to control panel header
+- **FIXED**: Font display issues on Hi-DPI screens
+- **FIXED**: Enabled bounding box selection mode for rectangular area prompts
+- **NEW**: Refined GUI with improved user interface design
+- **NEW**: Flexible panel width for better screen adaptation
+- Enhanced panel layout and control positioning
+- Improved keyboard event filtering and focus handling
+- Better multi-raster workflow support
+- General stability and usability improvements
+
+### v1.0.0 - Major Update with Intelligent Model Selection
 
 - **Intelligent Model Selection**: Automatic SAM 2.1 vs MobileSAM selection
 - **Enhanced CPU Performance**: MobileSAM integration for 5-10x CPU speedup
 - **Ultralytics Integration**: Professional computer vision library support
 - **Improved Device Detection**: Better GPU/CPU/Apple Silicon handling
 - **Updated Dependencies**: Modern ML stack with automatic model downloads
-
-## Known Issues and Planned Fixes
-
-The following issues are acknowledged and will be addressed in the next version:
-
-### 🔄 Version 1.1 (Next Release)
-
-#### 1. Single Raster Limitation
-
-- **Issue**: Only one raster layer is currently supported
-- **Current Behavior**: If multiple rasters are loaded, segmentation only works on the first raster. Selecting a second raster results in an exception (e.g., _"point is out of raster bounds"_)
-- **Planned Fix**: Allow multiple raster layers to be loaded while segmentation applies to the **selected** one
-- **Workaround**: Keep only one raster loaded or disable extra rasters before running segmentation
-
-#### 2. Panel Focus Management
-
-- **Issue**: Panel controls don't lose focus after use
-- **Current Behavior**: Pressing **Space** can re-trigger the last clicked button
-- **Planned Fix**: Proper focus handling and keyboard event filtering
-- **Workaround**: Click the map canvas after using the panel
-
-#### 3. Panel Close Button
-
-- **Issue**: No close/minimize button on the control panel
-- **Current Behavior**: Panel can be hidden only via menu or toolbar toggle
-- **Planned Fix**: Add a close (×) button to the panel header
-- **Workaround**: Use _Plugins → GeoOSAM → Toggle Panel_
-
-#### 4. Font Size Scaling
-
-- **Issue**: Fixed font sizes don't scale well on Hi-DPI screens
-- **Current Behavior**: UI text can appear too small
-- **Planned Fix**: Responsive font and DPI scaling
-- **Workaround**: Adjust system or QGIS font/DPI settings
-
-#### 5. Bounding Box Selection
-
-- **Issue**: Only point-based segmentation is available
-- **Current Behavior**: BBox Mode exists but is disabled
-- **Planned Fix**: Enable rectangular area prompts
-- **Workaround**: Use multiple point clicks to simulate area coverage
-
-### 🔧 Workarounds Summary
-
-| Issue           | Temporary Solution                              |
-| --------------- | ----------------------------------------------- |
-| Only one raster | Load only one raster layer                      |
-| Focus issues    | Click the map canvas after using buttons        |
-| No close button | Use menu: _Plugins → GeoOSAM → Toggle Panel_    |
-| Small fonts     | Increase system or QGIS DPI/font settings       |
-| No bbox mode    | Use multiple point prompts to cover larger area |
 
 ### ⚙️ Environment Options
 
@@ -349,6 +312,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2025-07-01
-**Plugin Version:** 1.0
+**Last updated:** 2025-07-03
+**Plugin Version:** 1.1.0
 **QGIS Compatibility:** 3.16+

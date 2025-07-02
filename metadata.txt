@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=Advanced segmentation tool with intelligent SAM 2.1/MobileSAM selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
 about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics MobileSAM to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and MobileSAM for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles MobileSAM downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
-version=1.0.0
+version=1.1.0
 author=Ofer Butbega
 email=bkst.dev@gmail.com
 
@@ -32,7 +32,24 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.0.0 - Major Update with Intelligent Model Selection
+changelog=1.1.0 - Major Bug Fixes and GUI Improvements
+    - FIXED: Multiple raster layer support - segmentation now works with selected raster layer
+    - FIXED: Resolved "point is out of raster bounds" exception with multiple rasters loaded (must be same CRS)
+    - FIXED: Panel focus management - controls properly lose focus after use
+    - FIXED: Space key no longer re-triggers last clicked button
+    - FIXED: Added close/minimize button to control panel header
+    - FIXED: Font display issues on Hi-DPI screens
+    - FIXED: Enabled bounding box selection mode for rectangular area prompts
+    - NEW: Refined GUI with improved user interface design
+    - NEW: Flexible panel width for better screen adaptation
+    - Enhanced panel layout and control positioning
+    - Improved keyboard event filtering and focus handling
+    - Better multi-raster workflow support
+    - Enhanced user experience with cleaner interface elements
+    - Improved cross-platform UI compatibility
+    - General stability and usability improvements
+    
+    1.0.0 - Major Update with Intelligent Model Selection
     - Intelligent model selection: SAM 2.1 for GPU, MobileSAM for CPU
     - Exceptional CPU performance: Sub-second segmentation on high-core systems (24+ cores)
     - Enhanced CPU performance with Ultralytics MobileSAM integration (5-30x speedup)
@@ -57,4 +74,4 @@ changelog=1.0.0 - Major Update with Intelligent Model Selection
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-06-28
+update_date=2025-07-03
