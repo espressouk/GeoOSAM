@@ -60,6 +60,12 @@ Select a class (Buildings, Water, etc.) and click on objects in your imagery
 ![Export Functionality](screenshots/export_shape.png)
 _Export segmented polygons as shapefiles with detailed attributes_
 
+## 🛠 Known Issues
+
+This plugin is still under active development. For current limitations and upcoming fixes, see:
+
+👉 [Known Issues](#known-issues--planned-fixes)
+
 ## 📋 System Requirements
 
 ### Minimum
@@ -251,3 +257,97 @@ If you use GeoOSAM in your research, please cite:
 - **Ultralytics Integration**: Professional computer vision library support
 - **Improved Device Detection**: Better GPU/CPU/Apple Silicon handling
 - **Updated Dependencies**: Modern ML stack with automatic model downloads
+
+## 🛠 Known Issues & Planned Fixes
+
+The following issues are acknowledged and will be addressed in the next version:
+
+### 🔄 Version 1.1 (Next Release)
+
+#### 1. Single Raster Limitation
+
+- **Issue**: Only one raster layer is currently supported
+- **Current Behavior**: If multiple rasters are loaded, segmentation only works on the first raster. Selecting a second raster results in an exception (e.g., _“point is out of raster bounds”_)
+- **Planned Fix**: Allow multiple raster layers to be loaded while segmentation applies to the **selected** one
+- **Workaround**: Keep only one raster loaded or disable extra rasters before running segmentation
+
+#### 2. Panel Focus Management
+
+- **Issue**: Panel controls don’t lose focus after use
+- **Current Behavior**: Pressing **Space** can re-trigger the last clicked button
+- **Planned Fix**: Proper focus handling and keyboard event filtering
+- **Workaround**: Click the map canvas after using the panel
+
+#### 3. Panel Close Button
+
+- **Issue**: No close/minimize button on the control panel
+- **Current Behavior**: Panel can be hidden only via menu or toolbar toggle
+- **Planned Fix**: Add a close (×) button to the panel header
+- **Workaround**: Use _Plugins → GeoOSAM → Toggle Panel_
+
+#### 4. Font Size Scaling
+
+- **Issue**: Fixed font sizes don’t scale well on Hi-DPI screens
+- **Current Behavior**: UI text can appear too small
+- **Planned Fix**: Responsive font and DPI scaling
+- **Workaround**: Adjust system or QGIS font/DPI settings
+
+#### 5. Bounding Box Selection
+
+- **Issue**: Only point-based segmentation is available
+- **Current Behavior**: BBox Mode exists but is disabled
+- **Planned Fix**: Enable rectangular area prompts
+- **Workaround**: Use multiple point clicks to simulate area coverage
+
+### 🔧 Workarounds Summary
+
+| Issue           | Temporary Solution                              |
+| --------------- | ----------------------------------------------- |
+| Only one raster | Keep one raster layer active                    |
+| Focus issues    | Click the map canvas after using buttons        |
+| No close button | Use menu: _Plugins → GeoOSAM → Toggle Panel_    |
+| Small fonts     | Increase system or QGIS DPI/font settings       |
+| No bbox mode    | Use multiple point prompts to cover larger area |
+
+### ⚙️ Environment Options
+
+To force **CPU-only mode**, set this environment variable **before launching QGIS**:
+
+```bash
+export GEOOSAM_FORCE_CPU=1
+```
+
+### 📋 Reporting Issues
+
+Please check:
+
+- Plugin version (latest preferred)
+- QGIS version (3.16+ required)
+- Dependencies installed:
+
+  - `torch`
+  - `torchvision`
+  - `ultralytics`
+  - `opencv-python`
+  - `rasterio`
+  - `shapely`
+  - `hydra-core`
+
+Report issues at: [GitHub Issues](https://github.com/espressouk/GeoOSAM/issues)
+
+### 🚀 Planned Features
+
+To be determined based on user feedback and usage patterns.
+
+### 💡 Performance Tips
+
+- **Zoom wisely**: Run segmentation at a zoom level that tightly frames your region of interest
+- **Force CPU mode**: If GPU memory is limited
+- **Use 🧹 Clear Memory**: To release RAM/GPU memory during long sessions
+- **Close heavy apps**: To free resources for segmentation
+
+---
+
+**Last updated:** 2025-07-01
+**Plugin Version:** 1.0
+**QGIS Compatibility:** 3.16+
