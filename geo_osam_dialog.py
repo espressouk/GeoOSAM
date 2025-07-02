@@ -244,7 +244,7 @@ def detect_best_device():
     try:
         if torch.cuda.is_available() and not os.getenv("GEOOSAM_FORCE_CPU"):
             gpu_props = torch.cuda.get_device_properties(0)
-            if gpu_props.total_memory / 1024**3 >= 3:  # 4GB minimum
+            if gpu_props.total_memory / 1024**3 >= 3:  # 3GB minimum
                 device = "cuda"
                 model_choice = "SAM2"
                 print(
@@ -306,8 +306,16 @@ class OptimizedSAM2Worker(QThread):
                 elif self.mode == "bbox":
                     masks, scores, logits = self.predictor.predict(
                         box=self.box,
-                        multimask_output=False
+                        multimask_output=True
                     )
+
+                    # Select best mask based on score
+                    if len(masks) > 1 and len(scores) > 1:
+                        best_idx = np.argmax(scores)
+                        masks = [masks[best_idx]]
+                        scores = [scores[best_idx]]
+                        if logits is not None:
+                            logits = [logits[best_idx]] if isinstance(logits, list) else logits[best_idx:best_idx+1]
                 else:
                     raise ValueError(f"Unknown mode: {self.mode}")
 
@@ -679,7 +687,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if getattr(self, "num_cores", None):
             device_info += f" ({self.num_cores} cores)"
         device_label = QtWidgets.QLabel(device_info)
-        device_label.setStyleSheet("font-size: 12px; color: #475467; margin-bottom: 12px;")  # Reduced from 18px
+        device_label.setStyleSheet("font-size: 12px; color: #475467; margin-bottom: 3px;")  # Reduced from 18px
         device_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(device_label)
 
@@ -778,7 +786,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.pointModeBtn.setProperty("active", True)
         self.bboxModeBtn = QtWidgets.QPushButton("BBox Mode")
         self.bboxModeBtn.setCheckable(True)
-        self.bboxModeBtn.setVisible(False)
+        self.bboxModeBtn.setVisible(True)
         self.mode_button_group = QtWidgets.QButtonGroup()
         self.mode_button_group.addButton(self.pointModeBtn)
         self.mode_button_group.addButton(self.bboxModeBtn)
@@ -805,7 +813,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.statusLabel = QtWidgets.QLabel("Ready to segment")
         self.statusLabel.setWordWrap(True)
         self.statusLabel.setStyleSheet("""
-            padding: 10px; border-radius: 8px; font-size: 11px; font-weight: 500;
+            padding: 10px; border-radius: 8px; font-size: 16px; font-weight: 500;
             background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;
         """)  # Reduced padding and font-size
         status_layout.addWidget(self.statusLabel)
@@ -1259,27 +1267,49 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     }
 
                 else:  # BBOX MODE
+                    # Calculate padding based on bbox size
+                    bbox_width = self.bbox.width()
+                    bbox_height = self.bbox.height()
+
+                    # Adaptive padding: smaller for large areas, larger for small areas
+                    if bbox_width * bbox_height > 100000:  # Large area
+                        padding_factor = 0.2
+                    elif bbox_width * bbox_height > 10000:   # Medium area  
+                        padding_factor = 0.3
+                    else:  # Small area
+                        padding_factor = 0.5
+
+                    # Create padded bbox for context
+                    padded_bbox = QgsRectangle(
+                        self.bbox.xMinimum() - bbox_width * padding_factor,
+                        self.bbox.yMinimum() - bbox_height * padding_factor,
+                        self.bbox.xMaximum() + bbox_width * padding_factor,
+                        self.bbox.yMaximum() + bbox_height * padding_factor
+                    )
+
                     try:
-                        window = rasterio.windows.from_bounds(
-                            self.bbox.xMinimum(), self.bbox.yMinimum(),
-                            self.bbox.xMaximum(), self.bbox.yMaximum(),
+                        # Create window from padded area
+                        padded_window = rasterio.windows.from_bounds(
+                            padded_bbox.xMinimum(), padded_bbox.yMinimum(),
+                            padded_bbox.xMaximum(), padded_bbox.yMaximum(),
                             src.transform
                         )
                     except Exception as e:
-                        self._update_status(f"Error creating bbox window: {e}", "error")
+                        self._update_status(f"Error creating padded bbox window: {e}", "error")
                         return None
 
-                    if window.width <= 0 or window.height <= 0:
-                        self._update_status("Invalid bbox dimensions", "error")
+                    if padded_window.width <= 0 or padded_window.height <= 0:
+                        self._update_status("Invalid padded bbox dimensions", "error")
                         return None
 
                     try:
-                        arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
+                        # Read the larger crop with context
+                        arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
                         if arr.size == 0:
-                            self._update_status("Empty bbox crop area", "error")
+                            self._update_status("Empty padded crop area", "error")
                             return None
                     except Exception as e:
-                        self._update_status(f"Error reading bbox raster: {e}", "error")
+                        self._update_status(f"Error reading padded raster: {e}", "error")
                         return None
 
                     # Handle different band configurations
@@ -1289,24 +1319,84 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
 
                     arr = np.moveaxis(arr, 0, -1)
+
+                    # Normalize
                     if arr.max() > arr.min():
                         arr_min, arr_max = arr.min(), arr.max()
                         arr = ((arr.astype(np.float32) - arr_min) /
-                               (arr_max - arr_min) * 255).astype(np.uint8)
+                            (arr_max - arr_min) * 255).astype(np.uint8)
                     else:
                         arr = np.zeros_like(arr, dtype=np.uint8)
 
-                    x0, y0 = 0, 0
-                    x1, y1 = arr.shape[1] - 1, arr.shape[0] - 1
-                    input_box = np.array([[x0, y0, x1, y1]])
+                    # Calculate original bbox coordinates within the padded crop
+                    padded_transform = src.window_transform(padded_window)
+
+                    try:
+                        # Convert all four corners of the bbox to pixel coordinates
+                        # Use consistent coordinate pairs
+                        top_left_x, top_left_y = ~padded_transform * (self.bbox.xMinimum(), self.bbox.yMaximum())
+                        bottom_right_x, bottom_right_y = ~padded_transform * (self.bbox.xMaximum(), self.bbox.yMinimum())
+
+                        # Ensure proper ordering (top-left to bottom-right)
+                        x1 = int(min(top_left_x, bottom_right_x))
+                        y1 = int(min(top_left_y, bottom_right_y))
+                        x2 = int(max(top_left_x, bottom_right_x))
+                        y2 = int(max(top_left_y, bottom_right_y))
+
+                        # Clamp to image bounds
+                        x1 = max(0, min(arr.shape[1]-1, x1))
+                        y1 = max(0, min(arr.shape[0]-1, y1))
+                        x2 = max(0, min(arr.shape[1]-1, x2))
+                        y2 = max(0, min(arr.shape[0]-1, y2))
+
+                        # Ensure minimum bbox size (at least 10 pixels)
+                        if (x2 - x1) < 10 or (y2 - y1) < 10:
+                            # Expand bbox to minimum size
+                            center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                            x1 = max(0, center_x - 5)
+                            y1 = max(0, center_y - 5)
+                            x2 = min(arr.shape[1]-1, center_x + 5)
+                            y2 = min(arr.shape[0]-1, center_y + 5)
+
+                            print(f"⚠️ Bbox too small, expanded to: ({x1},{y1})-({x2},{y2})")
+
+                    except Exception as e:
+                        self._update_status(f"Error converting bbox coordinates: {e}", "error")
+                        print(f"Debug info - bbox: {self.bbox.toString()}")
+                        print(f"Debug info - padded_transform: {padded_transform}")
+                        return None
+
+                    # Use the calculated coordinates as SAM prompt
+                    input_box = np.array([[x1, y1, x2, y2]])
                     input_coords = None
                     input_labels = None
-                    mask_transform = src.window_transform(window)
+                    mask_transform = padded_transform
 
                     debug_info = {
-                        'mode': 'BBOX',
+                        'mode': 'ENHANCED_BBOX',
                         'class': self.current_class,
-                        'crop_size': f"{arr.shape[1]}x{arr.shape[0]}",
+                        'original_bbox': f"{bbox_width:.1f}x{bbox_height:.1f}",
+                        'padded_crop': f"{arr.shape[1]}x{arr.shape[0]}",
+                        'padding_factor': f"{padding_factor:.1f}",
+                        'target_bbox': f"({x1},{y1})-({x2},{y2})",
+                        'target_size': f"{x2-x1}x{y2-y1}",
+                        'bands_used': f"{band_count} -> {len(bands_to_read)}",
+                        'device': self.device
+                    }
+
+                    # Use the original bbox coordinates as SAM prompt
+                    input_box = np.array([[x1, y1, x2, y2]])
+                    input_coords = None
+                    input_labels = None
+                    mask_transform = padded_transform
+
+                    debug_info = {
+                        'mode': 'ENHANCED_BBOX',
+                        'class': self.current_class,
+                        'original_bbox': f"{bbox_width:.1f}x{bbox_height:.1f}",
+                        'padded_crop': f"{arr.shape[1]}x{arr.shape[0]}",
+                        'padding_factor': f"{padding_factor:.1f}",
+                        'target_bbox': f"({x1},{y1})-({x2},{y2})",
                         'bands_used': f"{band_count} -> {len(bands_to_read)}",
                         'device': self.device
                     }
@@ -1464,6 +1554,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if shp_geom.is_empty:
                     continue
 
+                # Convert shapely geometry to QGIS geometry
                 if hasattr(shp_geom, 'exterior'):
                     coords = list(shp_geom.exterior.coords)
                     qgs_points = []
@@ -1479,6 +1570,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         wkt_str = shp_geom.wkt
                         qgs_geom = QgsGeometry.fromWkt(wkt_str)
                     except Exception as e:
+                        print(f"⚠️ WKT conversion failed: {e}")
                         continue
 
                 if not qgs_geom.isNull() and not qgs_geom.isEmpty():
@@ -1487,8 +1579,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     feats.append(f)
 
         except Exception as e:
-            self._update_status(
-                f"Error processing geometries: {str(e)}", "error")
+            self._update_status(f"Error processing geometries: {str(e)}", "error")
+            print(f"❌ Geometry conversion error: {e}")
+            print(f"   Mask transform: {mask_transform}")
             return
 
         if not feats:
@@ -1581,69 +1674,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         source_hint = f" on [{source_layer_name[:15]}]" if source_layer_name != 'unknown' else ""
         self._update_status(
             f"✅ Added {len(feats)} [{self.current_class}] polygons{source_hint}!{undo_hint}", "info")
-        self._update_stats()
-        # try:
-        #     result_layer = self._get_or_create_class_layer(self.current_class)
-
-        #     # Verify layer is still valid
-        #     if not result_layer or not result_layer.isValid():
-        #         self._update_status("Failed to create or access layer", "error")
-        #         return
-
-        #     # Get the next available segment ID by checking existing features
-        #     next_segment_id = self._get_next_segment_id(result_layer, self.current_class)
-
-        #     # Prepare attributes
-        #     timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        #     crop_info = debug_info.get('crop_size', 'unknown') if self.current_mode == 'bbox' else debug_info.get('actual_crop', 'unknown')
-        #     class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
-        #     canvas_scale = self.canvas.scale()
-
-        #     # Set attributes for features
-        #     for i, feat in enumerate(feats):
-        #         feat.setAttributes([
-        #             next_segment_id + i,  # Use calculated next ID
-        #             self.current_class,
-        #             class_color,
-        #             self.current_mode,
-        #             timestamp_str,
-        #             filename or "debug_disabled",
-        #             crop_info,
-        #             canvas_scale
-        #         ])
-
-        #     # Add features and track for undo
-        #     result_layer.startEditing()
-        #     success = result_layer.dataProvider().addFeatures(feats)
-        #     result_layer.commitChanges()
-
-        #     if success:
-        #         # Update segment count to highest ID
-        #         self.segment_counts[self.current_class] = next_segment_id + len(feats) - 1
-
-        #         # Track for undo functionality
-        #         all_features = list(result_layer.getFeatures())
-        #         new_feature_ids = [f.id() for f in all_features[-len(feats):]]
-        #         self.undo_stack.append((self.current_class, new_feature_ids))
-        #         self.undoBtn.setEnabled(True)
-
-        #     result_layer.updateExtents()
-        #     result_layer.triggerRepaint()
-
-        #     # Keep raster layer selected
-        #     if self.keep_raster_selected and self.original_raster_layer:
-        #         self.iface.setActiveLayer(self.original_raster_layer)
-
-        # except RuntimeError as e:
-        #     self._update_status(f"Layer access error: {e}", "error")
-        #     # Try to recreate the layer
-        #     if self.current_class in self.result_layers:
-        #         del self.result_layers[self.current_class]
-        #     # The method will create a new layer on next call
-        #     return
-        # except Exception as e:
-        #     self._update_status(f"Error adding features: {e}", "error")
-        #     return
+        self._update_stats()      
 
         # Update layer name
         total_features = result_layer.featureCount()
@@ -1913,7 +1944,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         color_style = color_styles.get(status_type, color_styles["info"])
         self.statusLabel.setText(message)
         self.statusLabel.setStyleSheet(f"""
-            padding: 14px; border-radius: 8px; font-size: 18px; font-weight: 500;
+            padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 500;
             {color_style}
         """) 
 
