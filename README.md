@@ -303,7 +303,7 @@ The following issues are acknowledged and will be addressed in the next version:
 
 | Issue           | Temporary Solution                              |
 | --------------- | ----------------------------------------------- |
-| Only one raster | Keep one raster layer active                    |
+| Only one raster | Load only one raster layer                      |
 | Focus issues    | Click the map canvas after using buttons        |
 | No close button | Use menu: _Plugins → GeoOSAM → Toggle Panel_    |
 | Small fonts     | Increase system or QGIS DPI/font settings       |
@@ -341,9 +341,9 @@ To be determined based on user feedback and usage patterns.
 
 ### 💡 Performance Tips
 
-- **Zoom wisely**: Run segmentation at a zoom level that tightly frames your region of interest
+- **Zoom wisely**: Try different zoom levels to get the best results for your selected class.
 - **Force CPU mode**: If GPU memory is limited
-- **Use 🧹 Clear Memory**: To release RAM/GPU memory during long sessions
+<!-- - **Use 🧹 Clear Memory**: To release RAM/GPU memory during long sessions -->
 - **Close heavy apps**: To free resources for segmentation
 
 ---
