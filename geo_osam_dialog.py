@@ -678,7 +678,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # --- Title and Device Header ---
         title_label = QtWidgets.QLabel("GeoOSAM Control Panel")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1D2939; margin-bottom: 4px;")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1D2939;")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
@@ -687,7 +687,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if getattr(self, "num_cores", None):
             device_info += f" ({self.num_cores} cores)"
         device_label = QtWidgets.QLabel(device_info)
-        device_label.setStyleSheet("font-size: 12px; color: #475467; margin-bottom: 3px;")  # Reduced from 18px
+        device_label.setStyleSheet("font-size: 12px; color: #475467;")  # Reduced from 18px
         device_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(device_label)
 
@@ -813,7 +813,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.statusLabel = QtWidgets.QLabel("Ready to segment")
         self.statusLabel.setWordWrap(True)
         self.statusLabel.setStyleSheet("""
-            padding: 10px; border-radius: 8px; font-size: 16px; font-weight: 500;
+            padding: 10px; border-radius: 8px; font-size: 14px; font-weight: 500;
             background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;
         """)  # Reduced padding and font-size
         status_layout.addWidget(self.statusLabel)
@@ -1944,7 +1944,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         color_style = color_styles.get(status_type, color_styles["info"])
         self.statusLabel.setText(message)
         self.statusLabel.setStyleSheet(f"""
-            padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 500;
+            padding: 14px; border-radius: 8px; font-size: 14px; font-weight: 500;
             {color_style}
         """) 
 
