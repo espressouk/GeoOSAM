@@ -1184,13 +1184,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                 # Determine which bands to use
                 if band_count >= 3:
-                    # Use first 3 bands for RGB
                     bands_to_read = [1, 2, 3]
                 elif band_count == 2:
-                    # Duplicate first band to create pseudo-RGB
                     bands_to_read = [1, 1, 2]
                 elif band_count == 1:
-                    # Grayscale - duplicate to create RGB
                     bands_to_read = [1, 1, 1]
                 else:
                     self._update_status("No bands found in raster", "error")
@@ -1220,7 +1217,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         x_min, y_min, x_max - x_min, y_max - y_min)
 
                     try:
-                        # Read the determined bands
                         arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
                         if arr.size == 0:
                             self._update_status("Empty crop area", "error")
@@ -1231,12 +1227,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                     # Handle different band configurations
                     if band_count == 1:
-                        # Grayscale - stack same band 3 times
                         arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
                     elif band_count == 2:
-                        # Two bands - use [band1, band1, band2]
                         arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
-                    # band_count >= 3 already handled correctly
 
                     arr = np.moveaxis(arr, 0, -1)
 
@@ -1244,7 +1237,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     if arr.max() > arr.min():
                         arr_min, arr_max = arr.min(), arr.max()
                         arr = ((arr.astype(np.float32) - arr_min) /
-                               (arr_max - arr_min) * 255).astype(np.uint8)
+                            (arr_max - arr_min) * 255).astype(np.uint8)
                     else:
                         arr = np.zeros_like(arr, dtype=np.uint8)
 
@@ -1266,18 +1259,25 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'device': self.device
                     }
 
-                else:  # BBOX MODE
-                    # Calculate padding based on bbox size
+                else:  # BBOX MODE - FIXED VERSION
+                    # Calculate bbox dimensions in geographic coordinates
                     bbox_width = self.bbox.width()
                     bbox_height = self.bbox.height()
+                    bbox_area = bbox_width * bbox_height
 
-                    # Adaptive padding: smaller for large areas, larger for small areas
-                    if bbox_width * bbox_height > 100000:  # Large area
+                    # FIXED: Smarter padding calculation for large areas
+                    if bbox_area > 1000000:  # Very large area (1M map units²)
+                        padding_factor = 0.05  # Minimal padding
+                        max_crop_size = 2048
+                    elif bbox_area > 100000:   # Large area 
+                        padding_factor = 0.1
+                        max_crop_size = 1536
+                    elif bbox_area > 10000:    # Medium area
                         padding_factor = 0.2
-                    elif bbox_width * bbox_height > 10000:   # Medium area  
-                        padding_factor = 0.3
+                        max_crop_size = 1024
                     else:  # Small area
-                        padding_factor = 0.5
+                        padding_factor = 0.3
+                        max_crop_size = 768
 
                     # Create padded bbox for context
                     padded_bbox = QgsRectangle(
@@ -1288,28 +1288,59 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     )
 
                     try:
-                        # Create window from padded area
+                        # FIXED: Use from_bounds correctly
                         padded_window = rasterio.windows.from_bounds(
                             padded_bbox.xMinimum(), padded_bbox.yMinimum(),
                             padded_bbox.xMaximum(), padded_bbox.yMaximum(),
                             src.transform
                         )
+
+                        # FIXED: Ensure window is within raster bounds
+                        padded_window = padded_window.intersection(
+                            rasterio.windows.Window(0, 0, src.width, src.height)
+                        )
+
                     except Exception as e:
-                        self._update_status(f"Error creating padded bbox window: {e}", "error")
+                        self._update_status(f"Error creating bbox window: {e}", "error")
                         return None
 
                     if padded_window.width <= 0 or padded_window.height <= 0:
-                        self._update_status("Invalid padded bbox dimensions", "error")
+                        self._update_status("Invalid bbox dimensions", "error")
                         return None
 
-                    try:
-                        # Read the larger crop with context
-                        arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
-                        if arr.size == 0:
-                            self._update_status("Empty padded crop area", "error")
+                    # FIXED: Check if crop would be too large and downsample if needed
+                    if padded_window.width > max_crop_size or padded_window.height > max_crop_size:
+                        # Calculate downsampling factor
+                        scale_factor = min(
+                            max_crop_size / padded_window.width,
+                            max_crop_size / padded_window.height
+                        )
+
+                        # Read with downsampling
+                        out_width = int(padded_window.width * scale_factor)
+                        out_height = int(padded_window.height * scale_factor)
+
+                        try:
+                            arr = src.read(
+                                bands_to_read, 
+                                window=padded_window, 
+                                out_shape=(len(bands_to_read), out_height, out_width),
+                                out_dtype=np.uint8
+                            )
+                            print(f"🔽 Downsampled large bbox: {padded_window.width}x{padded_window.height} -> {out_width}x{out_height}")
+                        except Exception as e:
+                            self._update_status(f"Error reading downsampled raster: {e}", "error")
                             return None
-                    except Exception as e:
-                        self._update_status(f"Error reading padded raster: {e}", "error")
+                    else:
+                        # Read at full resolution
+                        try:
+                            arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
+                        except Exception as e:
+                            self._update_status(f"Error reading raster: {e}", "error")
+                            return None
+
+                    if arr.size == 0:
+                        self._update_status("Empty crop area", "error")
                         return None
 
                     # Handle different band configurations
@@ -1328,45 +1359,57 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     else:
                         arr = np.zeros_like(arr, dtype=np.uint8)
 
-                    # Calculate original bbox coordinates within the padded crop
+                    # FIXED: Calculate bbox coordinates in the cropped image
                     padded_transform = src.window_transform(padded_window)
 
+                    # Account for downsampling in transform
+                    if 'scale_factor' in locals():
+                        from affine import Affine
+                        # Adjust transform for downsampling
+                        a, b, c, d, e, f = padded_transform[:6]
+                        padded_transform = Affine(a/scale_factor, b, c, d, e/scale_factor, f)
+
                     try:
-                        # Convert all four corners of the bbox to pixel coordinates
-                        # Use consistent coordinate pairs
-                        top_left_x, top_left_y = ~padded_transform * (self.bbox.xMinimum(), self.bbox.yMaximum())
-                        bottom_right_x, bottom_right_y = ~padded_transform * (self.bbox.xMaximum(), self.bbox.yMinimum())
+                        # FIXED: Convert bbox corners to pixel coordinates correctly
+                        # Transform all corners and find the bounding rectangle
+                        corners = [
+                            (self.bbox.xMinimum(), self.bbox.yMinimum()),  # bottom-left
+                            (self.bbox.xMaximum(), self.bbox.yMinimum()),  # bottom-right  
+                            (self.bbox.xMaximum(), self.bbox.yMaximum()),  # top-right
+                            (self.bbox.xMinimum(), self.bbox.yMaximum())   # top-left
+                        ]
 
-                        # Ensure proper ordering (top-left to bottom-right)
-                        x1 = int(min(top_left_x, bottom_right_x))
-                        y1 = int(min(top_left_y, bottom_right_y))
-                        x2 = int(max(top_left_x, bottom_right_x))
-                        y2 = int(max(top_left_y, bottom_right_y))
+                        pixel_coords = []
+                        for x, y in corners:
+                            px, py = ~padded_transform * (x, y)
+                            pixel_coords.append((px, py))
 
-                        # Clamp to image bounds
-                        x1 = max(0, min(arr.shape[1]-1, x1))
-                        y1 = max(0, min(arr.shape[0]-1, y1))
-                        x2 = max(0, min(arr.shape[1]-1, x2))
-                        y2 = max(0, min(arr.shape[0]-1, y2))
+                        # Find bounding rectangle of all transformed corners
+                        xs, ys = zip(*pixel_coords)
+                        x1, x2 = min(xs), max(xs)
+                        y1, y2 = min(ys), max(ys)
 
-                        # Ensure minimum bbox size (at least 10 pixels)
-                        if (x2 - x1) < 10 or (y2 - y1) < 10:
-                            # Expand bbox to minimum size
+                        # Convert to integers and clamp to image bounds
+                        x1 = max(0, min(arr.shape[1]-1, int(x1)))
+                        y1 = max(0, min(arr.shape[0]-1, int(y1))) 
+                        x2 = max(0, min(arr.shape[1]-1, int(x2)))
+                        y2 = max(0, min(arr.shape[0]-1, int(y2)))
+
+                        # Ensure minimum bbox size
+                        if (x2 - x1) < 5 or (y2 - y1) < 5:
                             center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
-                            x1 = max(0, center_x - 5)
-                            y1 = max(0, center_y - 5)
-                            x2 = min(arr.shape[1]-1, center_x + 5)
-                            y2 = min(arr.shape[0]-1, center_y + 5)
-
-                            print(f"⚠️ Bbox too small, expanded to: ({x1},{y1})-({x2},{y2})")
+                            x1 = max(0, center_x - 10)
+                            y1 = max(0, center_y - 10)
+                            x2 = min(arr.shape[1]-1, center_x + 10)
+                            y2 = min(arr.shape[0]-1, center_y + 10)
 
                     except Exception as e:
                         self._update_status(f"Error converting bbox coordinates: {e}", "error")
-                        print(f"Debug info - bbox: {self.bbox.toString()}")
-                        print(f"Debug info - padded_transform: {padded_transform}")
+                        print(f"Debug - bbox: {self.bbox.toString()}")
+                        print(f"Debug - transform: {padded_transform}")
                         return None
 
-                    # Use the calculated coordinates as SAM prompt
+                    # Set SAM inputs
                     input_box = np.array([[x1, y1, x2, y2]])
                     input_coords = None
                     input_labels = None
@@ -1376,32 +1419,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'mode': 'ENHANCED_BBOX',
                         'class': self.current_class,
                         'original_bbox': f"{bbox_width:.1f}x{bbox_height:.1f}",
-                        'padded_crop': f"{arr.shape[1]}x{arr.shape[0]}",
-                        'padding_factor': f"{padding_factor:.1f}",
+                        'crop_size': f"{arr.shape[1]}x{arr.shape[0]}",
+                        'padding_factor': f"{padding_factor:.2f}",
                         'target_bbox': f"({x1},{y1})-({x2},{y2})",
                         'target_size': f"{x2-x1}x{y2-y1}",
                         'bands_used': f"{band_count} -> {len(bands_to_read)}",
-                        'device': self.device
-                    }
-
-                    # Use the original bbox coordinates as SAM prompt
-                    input_box = np.array([[x1, y1, x2, y2]])
-                    input_coords = None
-                    input_labels = None
-                    mask_transform = padded_transform
-
-                    debug_info = {
-                        'mode': 'ENHANCED_BBOX',
-                        'class': self.current_class,
-                        'original_bbox': f"{bbox_width:.1f}x{bbox_height:.1f}",
-                        'padded_crop': f"{arr.shape[1]}x{arr.shape[0]}",
-                        'padding_factor': f"{padding_factor:.1f}",
-                        'target_bbox': f"({x1},{y1})-({x2},{y2})",
-                        'bands_used': f"{band_count} -> {len(bands_to_read)}",
+                        'downsampled': 'scale_factor' in locals(),
                         'device': self.device
                     }
 
                 return arr, mask_transform, debug_info, input_coords, input_labels, input_box
+
         except Exception as e:
             self._update_status(f"Error accessing raster data: {e}", "error")
             return None
@@ -1409,23 +1437,29 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _get_adaptive_crop_size(self):
         canvas_scale = self.canvas.scale()
 
+        # Base sizes based on device capability
         if self.device == "cuda":
-            base_size = 768
+            base_size = 1024  # Increased for CUDA
         elif self.device == "mps":
-            base_size = 512
+            base_size = 768   # Good for Apple Silicon
         else:
-            base_size = 384 if self.model_choice == "MobileSAM" else 512
+            base_size = 512 if self.model_choice == "MobileSAM" else 640
 
-        if canvas_scale > 100000:
-            crop_size = min(base_size * 1.5, 1024)
-        elif canvas_scale > 50000:
-            crop_size = int(base_size * 1.2)
-        elif canvas_scale < 1000:
-            crop_size = base_size // 2
-        else:
+        # Adjust based on map scale for better context
+        if canvas_scale > 500000:      # Very zoomed out - use larger crops
+            crop_size = min(base_size * 2, 2048)
+        elif canvas_scale > 100000:    # Zoomed out
+            crop_size = int(base_size * 1.5)
+        elif canvas_scale > 10000:     # Medium zoom
             crop_size = base_size
+        elif canvas_scale > 1000:      # Zoomed in
+            crop_size = int(base_size * 0.8)
+        else:                          # Very zoomed in
+            crop_size = max(256, int(base_size * 0.6))
 
-        crop_size = max(256, crop_size)
+        # Ensure reasonable bounds
+        crop_size = max(256, min(crop_size, 2048))
+
         return crop_size
 
     def _on_segmentation_finished(self, result):
