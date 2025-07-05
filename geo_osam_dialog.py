@@ -33,6 +33,7 @@ from qgis.PyQt import QtWidgets, QtCore, QtGui
 # fmt: off
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(plugin_dir)
+from helpers import create_detection_helper
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
@@ -137,6 +138,116 @@ Copyright (C) 2025 by Ofer Butbega
 # Global threading configuration
 _THREADS_CONFIGURED = False
 
+def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
+    """Class-aware merging with different strategies per class"""
+
+    if class_name in ['Buildings', 'Residential']:
+        # For buildings: NO merging - each detection should stay separate
+        return masks
+
+    elif class_name in ['Vessels', 'Vehicle']:
+        # For vehicles: minimal merging (1-2px buffer)
+        buffer_px = 1
+
+    elif class_name in ['Water', 'Agriculture', 'Vegetation']:
+        # For large areas: allow more aggressive merging
+        buffer_px = 5
+
+    # Original merging logic with class-aware buffer
+    kernel = np.ones((buffer_px*2+1, buffer_px*2+1), np.uint8)
+    bins      = [cv2.threshold(m,127,255,cv2.THRESH_BINARY)[1] for m in masks]
+    dilated   = [cv2.dilate(b, kernel, iterations=1) for b in bins]
+    used      = [False]*len(bins)
+    merged    = []
+
+    for i in range(len(bins)):
+        if used[i]: 
+            continue
+        group_mask = bins[i].copy()
+        # merge in any dilated-overlap neighbors
+        for j in range(i+1, len(bins)):
+            if used[j]:
+                continue
+            # if dilated masks touch at all…
+            if np.any(cv2.bitwise_and(dilated[i], dilated[j]) == 255):
+                used[j] = True
+                # union the original shapes
+                group_mask = cv2.bitwise_or(group_mask, bins[j])
+        merged.append(group_mask)
+    return merged
+
+def dedupe_or_merge_masks_smart(masks, class_name, iou_thresh=0.3, merge=True):
+    """Smart deduplication based on class type"""
+
+    if class_name in ['Buildings', 'Residential']:
+        # For buildings: Only merge if VERY high overlap (likely same building)
+        iou_thresh = 0.7  # Much higher threshold
+        merge = False     # Don't merge, just remove duplicates
+
+    elif class_name in ['Vehicle', 'Vessels']:
+        # For vehicles: Moderate overlap allowed
+        iou_thresh = 0.4
+        merge = True
+
+    elif class_name in ['Water', 'Agriculture', 'Vegetation']:
+        # For large areas: Allow merging of adjacent areas
+        iou_thresh = 0.1
+        merge = True
+
+    # Original logic with class-aware parameters
+    bins   = [cv2.threshold(m,127,255,cv2.THRESH_BINARY)[1] for m in masks]
+    used   = [False]*len(masks)
+    result = []
+
+    for i in range(len(bins)):
+        if used[i]: continue
+        mi = bins[i]
+        union_mask = mi.copy()
+
+        for j in range(i+1, len(bins)):
+            if used[j]: continue
+            mj = bins[j]
+            inter = cv2.bitwise_and(mi, mj)
+            uni   = cv2.bitwise_or(mi, mj)
+            # IoU = area(inter) / area(union)
+            if np.sum(uni==255) > 0:
+                iou = np.sum(inter==255)/np.sum(uni==255)
+                if iou >= iou_thresh:
+                    used[j] = True
+                    if merge:
+                        union_mask = cv2.bitwise_or(union_mask, mj)
+                    else:
+                        # keep only the bigger mask by area
+                        if np.sum(mj==255) > np.sum(mi==255):
+                            union_mask = mj.copy()
+
+        result.append(union_mask)
+    return result
+
+def filter_contained_masks(masks):
+    keep = []
+    masks_bin = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
+    used = [False] * len(masks)
+
+    for i in range(len(masks)):
+        if used[i]:
+            continue
+        mi = masks_bin[i]
+        contained = False
+        for j in range(len(masks)):
+            if i == j or used[j]:
+                continue
+            mj = masks_bin[j]
+            intersection = cv2.bitwise_and(mi, mj)
+            # If all of mi's mask is inside mj, it's contained
+            if np.sum(intersection == 255) == np.sum(mi == 255):
+                contained = True
+                break
+        if not contained:
+            keep.append(masks[i])
+        else:
+            used[i] = True
+    return keep
 
 def setup_pytorch_performance():
     global _THREADS_CONFIGURED
@@ -158,7 +269,6 @@ def setup_pytorch_performance():
 
     _THREADS_CONFIGURED = True
     return optimal_threads
-
 
 def auto_download_checkpoint():
     """Download SAM2 checkpoint if missing"""
@@ -200,7 +310,6 @@ def auto_download_checkpoint():
         print(f"❌ Download failed: {e}")
         return False
 
-
 def show_checkpoint_dialog(parent=None):
     """Show download dialog for SAM2 checkpoint"""
     from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog
@@ -236,7 +345,6 @@ def show_checkpoint_dialog(parent=None):
             QMessageBox.critical(parent, "Error", f"Download error: {e}")
             return False
     return False
-
 
 def detect_best_device():
     """Detect best available device and model"""
@@ -276,7 +384,8 @@ class OptimizedSAM2Worker(QThread):
     progress = pyqtSignal(str)
 
     def __init__(self, predictor, arr, mode, model_choice="SAM2", point_coords=None,
-                 point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu"):
+                 point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu",
+                 min_object_size=50, max_objects=20):
         super().__init__()
         self.predictor = predictor
         self.arr = arr
@@ -288,63 +397,584 @@ class OptimizedSAM2Worker(QThread):
         self.mask_transform = mask_transform
         self.debug_info = debug_info or {}
         self.device = device
+        self.min_object_size = min_object_size
+        self.max_objects = max_objects
 
     def run(self):
         try:
             self.progress.emit(f"🖼️ Setting image for {self.model_choice}...")
+
+            # SAFETY: Check if thread should continue
+            if self.isInterruptionRequested():
+                return
+
             self.predictor.set_image(self.arr)
 
-            self.progress.emit(f"🧠 Running {self.model_choice} inference...")
+            if self.mode == "bbox_batch":
+                self._run_batch_segmentation()
+            else:
+                self._run_single_segmentation()
 
-            with torch.no_grad():
-                if self.mode == "point":
-                    masks, scores, logits = self.predictor.predict(
-                        point_coords=self.point_coords,
-                        point_labels=self.point_labels,
-                        multimask_output=False
-                    )
-                elif self.mode == "bbox":
-                    masks, scores, logits = self.predictor.predict(
-                        box=self.box,
-                        multimask_output=True
-                    )
+        except Exception as e:
+            import traceback
+            error_msg = f"{self.model_choice} inference failed: {str(e)}\n"
 
-                    # Select best mask based on score
-                    if len(masks) > 1 and len(scores) > 1:
-                        best_idx = np.argmax(scores)
-                        masks = [masks[best_idx]]
-                        scores = [scores[best_idx]]
-                        if logits is not None:
-                            logits = [logits[best_idx]] if isinstance(logits, list) else logits[best_idx:best_idx+1]
-                else:
-                    raise ValueError(f"Unknown mode: {self.mode}")
+            # Add more specific error context
+            if "truth value" in str(e).lower():
+                error_msg += "\n🔧 Tip: This might be a mask array format issue. Try switching to single bbox mode first."
+            elif "cuda" in str(e).lower():
+                error_msg += "\n🔧 Tip: Try switching to CPU mode in device settings."
 
-            self.progress.emit("⚡ Processing mask...")
+            error_msg += f"\nFull traceback:\n{traceback.format_exc()}"
+            self.error.emit(error_msg)
 
-            mask = masks[0]
-            if hasattr(mask, 'cpu'):
-                mask = mask.cpu().numpy()
-            elif torch.is_tensor(mask):
-                mask = mask.detach().cpu().numpy()
+    def _cancel_segmentation_safely(self):
+        """Safely cancel running segmentation"""
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            print("🛑 Requesting worker interruption...")
+            self.worker.requestInterruption()  # Request graceful stop
 
-            if mask.dtype != np.uint8:
-                mask = (mask * 255).astype(np.uint8)
+            # Give it a moment to stop gracefully
+            if not self.worker.wait(2000):  # Wait 2 seconds
+                print("⚠️ Worker didn't stop gracefully, terminating...")
+                self.worker.terminate()
+                self.worker.wait()  # Wait for termination
+
+            self.worker.deleteLater()
+            self.worker = None
+            self._update_status("Segmentation cancelled", "warning")
+            self._set_ui_enabled(True)
+
+    def _run_single_segmentation(self):
+        """Original single object segmentation"""
+        self.progress.emit(f"🧠 Running {self.model_choice} inference...")
+
+        with torch.no_grad():
+            if self.mode == "point":
+                masks, scores, logits = self.predictor.predict(
+                    point_coords=self.point_coords,
+                    point_labels=self.point_labels,
+                    multimask_output=False
+                )
+            elif self.mode == "bbox":
+                masks, scores, logits = self.predictor.predict(
+                    box=self.box,
+                    multimask_output=True
+                )
+
+                # Select best mask based on score
+                if len(masks) > 1 and len(scores) > 1:
+                    best_idx = np.argmax(scores)
+                    masks = [masks[best_idx]]
+                    scores = [scores[best_idx]]
+                    if logits is not None:
+                        logits = [logits[best_idx]] if isinstance(logits, list) else logits[best_idx:best_idx+1]
+            else:
+                raise ValueError(f"Unknown mode: {self.mode}")
+
+        self._process_single_mask(masks[0], scores, logits)
+
+    def _detect_object_candidates(self, image, bbox, class_name):
+        """Detect potential object locations within bbox based on class type"""
+        x1, y1, x2, y2 = bbox
+
+        # Crop image to bbox region
+        bbox_image = image[y1:y2, x1:x2].copy()
+
+        print(f"🔍 Detecting {class_name} candidates in {bbox_image.shape} region")
+
+        # Use helper for detection
+        helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+        return helper.detect_candidates(bbox_image, bbox)
+
+
+
+
+    def _validate_mask_for_class(self, mask, class_name, center_point):
+        """Validate segmented mask based on class-specific criteria"""
+        try:
+            # Use helper for validation
+            helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+            valid_masks = helper.process_sam_mask(mask)
+            return len(valid_masks) > 0
+
+        except Exception as e:
+            print(f"Validation error: {e}")
+            return False
+
+    def _validate_object_shape(self, mask, area):
+        """Validate if the detected object has a reasonable shape"""
+        try:
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return False
+
+            # Get the largest contour
+            main_contour = max(contours, key=cv2.contourArea)
+
+            # Basic shape validation
+            x, y, w, h = cv2.boundingRect(main_contour)
+            if w == 0 or h == 0:
+                return False
+
+            aspect_ratio = max(w, h) / min(w, h)
+
+            # Calculate solidity (area / convex hull area)
+            hull = cv2.convexHull(main_contour)
+            hull_area = cv2.contourArea(hull)
+            solidity = area / hull_area if hull_area > 0 else 0
+
+            # Apply validation criteria
+            return (
+                aspect_ratio <= 10.0 and  # Not too elongated
+                solidity >= 0.15 and     # Not too irregular
+                area >= self.min_object_size  # Large enough
+            )
+
+        except Exception as e:
+            print(f"Shape validation error: {e}")
+            return False
+
+    def _run_batch_segmentation(self):
+        """Point-guided batch segmentation - detect objects then segment each individually"""
+        try:
+            self.progress.emit(f"🔄 Running POINT-GUIDED batch {self.model_choice} inference...")
+
+            # Set the image ONCE for the entire process
+            self.predictor.set_image(self.arr)
+
+            # Get bbox coordinates from self.box
+            bbox = self.box[0] if isinstance(self.box, list) and len(self.box) else self.box
+            if bbox is None:
+                self.progress.emit("❌ No bbox provided")
+                result = {'individual_masks': [], 'mask_transform': self.mask_transform, 'debug_info': self.debug_info}
+                self.finished.emit(result)
+                return
+
+            bbox = np.array(bbox).flatten().tolist()
+            x1, y1, x2, y2 = [int(round(float(x))) for x in bbox]
+
+            # Ensure bbox is within image bounds
+            h, w = self.arr.shape[:2]
+            x1 = max(0, min(w-1, x1))
+            y1 = max(0, min(h-1, y1))
+            x2 = max(x1+1, min(w, x2))
+            y2 = max(y1+1, min(h, y2))
+
+            print(f"🎯 Point-guided batch processing bbox: ({x1},{y1}) to ({x2},{y2}) in {w}x{h} image")
+
+            # Detect potential object locations within bbox
+            current_class = self.debug_info.get('class', 'Other')
+            candidate_points = self._detect_object_candidates(self.arr, [x1, y1, x2, y2], current_class)
+
+            print(f"🔍 Found {len(candidate_points)} candidate objects for class '{current_class}'")
+
+            if not candidate_points:
+                self.progress.emit("❌ No object candidates detected")
+                result = {'individual_masks': [], 'mask_transform': self.mask_transform, 'debug_info': self.debug_info}
+                self.finished.emit(result)
+                return
+
+            # Segment each candidate point individually
+            individual_masks = []
+            successful_detections = 0
+
+            # Limit to max_objects to prevent too many detections
+            candidates_to_process = candidate_points[:self.max_objects]
+
+            for i, (px, py) in enumerate(candidates_to_process):
+                try:
+                    self.progress.emit(f"🎯 Segmenting object {i+1}/{len(candidates_to_process)}...")
+
+                    print(f"🔍 Processing candidate {i+1}: point ({px}, {py})")
+
+                    # Run point segmentation using existing SAM2 pipeline
+                    point_coords = np.array([[px, py]])
+                    point_labels = np.array([1])
+
+                    with torch.no_grad():
+                        masks, scores, logits = self.predictor.predict(
+                            point_coords=point_coords,
+                            point_labels=point_labels,
+                            multimask_output=False
+                        )
+
+                    if isinstance(masks, np.ndarray):
+                        if len(masks.shape) > 2:
+                            mask = masks[0]
+                        else:
+                            mask = masks
+                    elif isinstance(masks, (list, tuple)) and len(masks) > 0:
+                        mask = masks[0]
+                    else:
+                        print(f"  ❌ No valid mask returned for point {i+1}")
+                        continue
+
+                    # Convert mask to proper format
+                    if hasattr(mask, 'cpu'):
+                        mask = mask.cpu().numpy()
+                    elif hasattr(mask, 'detach'):
+                        mask = mask.detach().cpu().numpy()
+
+                    # Ensure 2D and binary
+                    if mask.ndim > 2:
+                        mask = mask.squeeze()
+
+                    if mask.dtype == bool:
+                        mask = mask.astype(np.uint8) * 255
+                    elif mask.max() <= 1.0:
+                        mask = (mask * 255).astype(np.uint8)
+                    else:
+                        mask = mask.astype(np.uint8)
+
+                    # Validate mask quality and size
+                    pixel_count = np.sum(mask > 0)
+                    print(f"  📊 Mask {i+1}: {pixel_count} pixels")
+
+                    if pixel_count >= self.min_object_size:
+                        print(f"  🎯 Processing class: {current_class}")
+
+                        # Validate the mask for the current class
+                        if self._validate_mask_for_class(mask, current_class, [px, py]):
+                            individual_masks.append(mask)
+                            successful_detections += 1
+                            print(f"  ✅ ACCEPTED: {current_class} mask {i+1} ({pixel_count} pixels)")
+                        else:
+                            print(f"  ❌ REJECTED: {current_class} mask {i+1} failed validation")
+                    else:
+                        print(f"  ❌ REJECTED: Object {i+1} too small ({pixel_count} < {self.min_object_size})")
+
+                except Exception as e:
+                    print(f"  ❌ Error processing candidate {i+1}: {e}")
+                    continue
+
+            # Remove any masks completely contained inside another mask
+            individual_masks = filter_contained_masks(individual_masks)
+
+            # Class-aware processing
+            current_class = self.debug_info.get('class', 'Other')
+
+            # Class-aware processing - use existing logic for all classes
+            individual_masks = merge_nearby_masks_class_aware(individual_masks, current_class, buffer_px=1)
+            individual_masks = dedupe_or_merge_masks_smart(individual_masks, current_class)
+
+            print(f"🎯 Point-guided batch complete: {successful_detections}/{len(candidates_to_process)} objects successfully segmented")
+
+            # Return results
+            self.progress.emit(f"📦 Found {len(individual_masks)} individual objects (point-guided batch)")
 
             result = {
-                'mask': mask,
-                'scores': scores,
-                'logits': logits,
+                'individual_masks': individual_masks,
                 'mask_transform': self.mask_transform,
-                'debug_info': {**self.debug_info, 'model': self.model_choice}
+                'debug_info': {
+                    **self.debug_info,
+                    'model': self.model_choice,
+                    'batch_count': len(individual_masks),
+                    'individual_processing': True,
+                    'detection_method': 'point_guided',
+                    'candidates_found': len(candidate_points),
+                    'candidates_processed': len(candidates_to_process),
+                    'successful_segmentations': successful_detections,
+                    'target_class': current_class,
+                    'min_size_used': self.min_object_size,
+                    'max_objects_used': self.max_objects
+                }
             }
+
+            print(f"   Result keys: {list(result.keys())}")
+            print(f"   Final individual_processing: {result['debug_info'].get('individual_processing')}")
 
             self.finished.emit(result)
 
         except Exception as e:
             import traceback
-            error_msg = f"{self.model_choice} inference failed: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"Point-guided batch segmentation failed: {str(e)}\n{traceback.format_exc()}"
+            print(f"❌ BATCH ERROR: {error_msg}")
             self.error.emit(error_msg)
 
+    def _get_background_threshold(self, bbox_area, class_name):
+        """Get class-specific background threshold"""
+        if class_name in ['Vessels', 'Vehicle']:
+            return bbox_area * 0.4  # Smaller threshold - reject large water areas
+        elif class_name in ['Buildings', 'Industrial']:
+            return bbox_area * 0.6  # Medium threshold
+        elif class_name in ['Water', 'Agriculture']:
+            return bbox_area * 0.9  # Large threshold - allow big areas
+        else:
+            return bbox_area * 0.5  # Default
+
+    def _apply_class_specific_morphology(self, mask, class_name):
+        """Apply class-specific morphological operations using helper"""
+        helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+        return helper.apply_morphology(mask)
+
+    def _validate_object_for_class(self, component_mask, component_area, class_name):
+        """Class-aware object validation"""
+        # Basic size filter
+        if component_area < self.min_object_size:
+            return False
+
+        # Get contour properties
+        contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return False
+
+        main_contour = max(contours, key=cv2.contourArea)
+        if len(main_contour) < 4:
+            return False
+
+        x, y, w, h = cv2.boundingRect(main_contour)
+        contour_area = cv2.contourArea(main_contour)
+
+        if w == 0 or h == 0:
+            return False
+
+        aspect_ratio = w / h
+
+        # Shape analysis
+        hull = cv2.convexHull(main_contour)
+        hull_area = cv2.contourArea(hull)
+        solidity = contour_area / hull_area if hull_area > 0 else 0
+
+        perimeter = cv2.arcLength(main_contour, True)
+        compactness = 4 * np.pi * contour_area / (perimeter * perimeter) if perimeter > 0 else 0
+
+        # CLASS-SPECIFIC VALIDATION
+        if class_name in ['Vessels', 'Vehicle']:
+            # Boats/vehicles: Prefer compact, reasonably-sized objects
+            return (
+                0.2 <= aspect_ratio <= 8.0 and      # Boat/car-like aspect ratio
+                solidity >= 0.3 and                 # Reasonably solid
+                compactness >= 0.05 and             # Not too elongated
+                contour_area < 8000 and             # Not too large (reject water)
+                contour_area >= self.min_object_size * 0.6  # Size validation
+            )
+
+        elif class_name in ['Buildings', 'Industrial']:
+            # Buildings: Allow larger, more rectangular objects
+            return (
+                0.1 <= aspect_ratio <= 15.0 and     # Building-like ratios
+                solidity >= 0.5 and                 # More solid than vehicles
+                contour_area >= self.min_object_size * 0.8
+            )
+
+        elif class_name in ['Water', 'Agriculture']:
+            # Large areas: Allow big, irregular shapes
+            return (
+                solidity >= 0.2 and                 # Can be irregular
+                contour_area >= self.min_object_size
+            )
+
+        elif class_name == 'Vegetation':
+            # Trees: Can be irregular, various sizes
+            return (
+                0.1 <= aspect_ratio <= 10.0 and
+                solidity >= 0.15 and                # Can be very irregular
+                contour_area >= self.min_object_size * 0.5
+            )
+
+        else:
+            # Default validation
+            return (
+                0.1 <= aspect_ratio <= 20.0 and
+                solidity >= 0.15 and
+                compactness >= 0.02 and
+                contour_area >= self.min_object_size * 0.6
+            )
+
+    def _apply_class_specific_preprocessing(self, mask, class_name):
+        """Apply class-specific preprocessing to improve detection"""
+        if class_name in ['Vessels', 'Vehicle']:
+            # For boats/vehicles: Use opening to separate touching objects
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+        elif class_name in ['Buildings', 'Industrial']:
+            # For buildings: Use closing to fill gaps, less aggressive separation
+            kernel = np.ones((5, 5), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        elif class_name in ['Vegetation', 'Agriculture']:
+            # For vegetation: Use gradient to find edges, then close
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_GRADIENT, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        elif class_name == 'Water':
+            # For water: Minimal processing to preserve large areas
+            kernel = np.ones((7, 7), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        return mask
+
+    def _extract_individual_objects(self, mask):
+        """Class-aware individual object extraction with smart filtering"""
+        try:
+            # Convert to binary with proper array handling
+            if hasattr(mask, 'cpu'):
+                binary_mask = mask.cpu().numpy()
+            elif torch.is_tensor(mask):
+                binary_mask = mask.detach().cpu().numpy()
+            else:
+                binary_mask = np.array(mask)
+
+            # Handle different data types
+            if binary_mask.dtype == bool:
+                binary_mask = binary_mask.astype(np.uint8) * 255
+            elif binary_mask.dtype != np.uint8:
+                if binary_mask.max() <= 1.0:
+                    binary_mask = (binary_mask * 255).astype(np.uint8)
+                else:
+                    binary_mask = binary_mask.astype(np.uint8)
+
+            # Ensure 2D array
+            if binary_mask.ndim > 2:
+                binary_mask = binary_mask.squeeze()
+
+            if binary_mask.size == 0:
+                return []
+
+            print(f"\n🔍 CLASS-AWARE MASK ANALYSIS:")
+            print(f"   Mask shape: {binary_mask.shape}")
+            print(f"   Non-zero pixels: {np.sum(binary_mask > 0)}")
+
+            # Get current class from debug info
+            current_class = self.debug_info.get('class', 'Other')
+            print(f"   Target class: {current_class}")
+
+            # GET TARGET BBOX COORDINATES
+            if hasattr(self, 'debug_info') and 'target_bbox' in self.debug_info:
+                bbox_str = self.debug_info['target_bbox']
+                import re
+                bbox_match = re.match(r'\((\d+),(\d+)\)-\((\d+),(\d+)\)', bbox_str)
+                if bbox_match:
+                    bbox_x1, bbox_y1, bbox_x2, bbox_y2 = map(int, bbox_match.groups())
+                    print(f"   Target bbox: ({bbox_x1},{bbox_y1}) to ({bbox_x2},{bbox_y2})")
+                else:
+                    print("   ERROR: Could not parse bbox coordinates")
+                    return []
+            else:
+                print("   ERROR: No bbox coordinates available")
+                return []
+
+            # CROP MASK TO BBOX AREA ONLY
+            print(f"   🔲 Cropping mask to bbox area only...")
+            binary_mask = self._crop_mask_to_bbox(binary_mask, [bbox_x1, bbox_y1, bbox_x2, bbox_y2])
+            print(f"   After bbox crop: {np.sum(binary_mask > 0)} non-zero pixels")
+
+            if np.sum(binary_mask > 0) == 0:
+                print("   No pixels within bbox area")
+                return []
+
+            # CLASS-SPECIFIC PREPROCESSING
+            binary_mask = self._apply_class_specific_preprocessing(binary_mask, current_class)
+
+            # Remove large background regions
+            bbox_area = (bbox_x2 - bbox_x1) * (bbox_y2 - bbox_y1)
+            background_threshold = self._get_background_threshold(bbox_area, current_class)
+
+            num_labels_initial, labels_initial, stats_initial, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
+            print(f"   Initial components in bbox: {num_labels_initial-1}")
+
+            # Filter out background regions
+            filtered_mask = np.zeros_like(binary_mask)
+            background_removed_count = 0
+
+            for label_id in range(1, num_labels_initial):
+                component_area = stats_initial[label_id, cv2.CC_STAT_AREA]
+                if component_area > background_threshold:
+                    print(f"   Removing background component: {component_area}px (> {background_threshold:.0f}px)")
+                    background_removed_count += 1
+                else:
+                    component_mask = (labels_initial == label_id).astype(np.uint8) * 255
+                    filtered_mask = cv2.bitwise_or(filtered_mask, component_mask)
+
+            print(f"   Removed {background_removed_count} background regions")
+
+            # CLASS-SPECIFIC MORPHOLOGICAL OPERATIONS
+            final_mask = self._apply_class_specific_morphology(filtered_mask, current_class)
+
+            print(f"   After class-specific morphology: {np.sum(final_mask > 0)} non-zero pixels")
+
+            # Find individual objects with class-aware filtering
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(final_mask, connectivity=8)
+            print(f"   Final objects in bbox: {num_labels-1}")
+
+            individual_masks = []
+            rejected_count = 0
+
+            for label_id in range(1, num_labels):
+                try:
+                    component_mask = (labels == label_id).astype(np.uint8) * 255
+                    component_area = stats[label_id, cv2.CC_STAT_AREA]
+
+                    print(f"   Object {label_id}: {component_area}px", end="")
+
+                    # CLASS-AWARE VALIDATION
+                    if self._validate_object_for_class(component_mask, component_area, current_class):
+                        individual_masks.append(component_mask)
+                        print(" → ACCEPTED ✅")
+                    else:
+                        print(" → REJECTED")
+                        rejected_count += 1
+
+                except Exception as e:
+                    print(f" → ERROR: {e}")
+                    rejected_count += 1
+                    continue
+
+            print(f"   🎯 RESULT: {len(individual_masks)} {current_class} objects, {rejected_count} rejected")
+            print(f"   ✅ Class-aware filtering applied\n")
+
+            return individual_masks
+
+        except Exception as e:
+            print(f"❌ Error in _extract_individual_objects: {e}")
+            return []
+
+    def _crop_mask_to_bbox(self, mask, bbox_coords):
+        """Crop mask to only show results within the target bbox"""
+        try:
+            x1, y1, x2, y2 = bbox_coords
+
+            # Create a bbox mask - only area within selection
+            bbox_mask = np.zeros_like(mask)
+            bbox_mask[y1:y2+1, x1:x2+1] = 255
+
+            # Keep only the parts of the segmentation that are within bbox
+            cropped_mask = cv2.bitwise_and(mask, bbox_mask)
+
+            return cropped_mask
+
+        except Exception as e:
+            print(f"Error cropping mask to bbox: {e}")
+            return mask
+
+    def _process_single_mask(self, mask, scores, logits, batch_count=None):
+        """Process the final mask"""
+        self.progress.emit("⚡ Processing mask...")
+
+        if hasattr(mask, 'cpu'):
+            mask = mask.cpu().numpy()
+        elif torch.is_tensor(mask):
+            mask = mask.detach().cpu().numpy()
+
+        if mask.dtype != np.uint8:
+            mask = (mask * 255).astype(np.uint8)
+
+        result = {
+            'mask': mask,
+            'scores': scores,
+            'logits': logits,
+            'mask_transform': self.mask_transform,
+            'debug_info': {
+                **self.debug_info, 
+                'model': self.model_choice,
+                'batch_count': batch_count
+            }
+        }
+
+        self.finished.emit(result)
 
 class EnhancedPointClickTool(QgsMapTool):
     def __init__(self, canvas, cb):
@@ -373,7 +1003,6 @@ class EnhancedPointClickTool(QgsMapTool):
     def clear_feedback(self):
         self.point_rubber.reset(QgsWkbTypes.PointGeometry)
         self.canvas.refresh()
-
 
 class EnhancedBBoxClickTool(QgsMapTool):
     def __init__(self, canvas, cb):
@@ -423,7 +1052,6 @@ class EnhancedBBoxClickTool(QgsMapTool):
         self.bbox_rubber.reset(QgsWkbTypes.PolygonGeometry)
         self.canvas.refresh()
 
-
 class Switch(QtWidgets.QAbstractButton):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -444,23 +1072,70 @@ class Switch(QtWidgets.QAbstractButton):
     def sizeHint(self):
         return self.minimumSizeHint()
 
-
 class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     """Enhanced SAM segmentation control panel for QGIS"""
 
     DEFAULT_CLASSES = {
-        'Agriculture' : {'color': '255,215,0',   'description': 'Farmland and crops'},
-        'Buildings'   : {'color': '220,20,60',   'description': 'Residential & commercial structures'},
-        'Commercial'  : {'color': '135,206,250', 'description': 'Shopping and business districts'},
-        'Industrial'  : {'color': '128,0,128',   'description': 'Factories and warehouses'},
-        'Other'       : {'color': '148,0,211',   'description': 'Unclassified objects'},
-        'Parking'     : {'color': '255,140,0',   'description': 'Parking lots and areas'},
-        'Residential' : {'color': '255,105,180', 'description': 'Housing areas'},
-        'Roads'       : {'color': '105,105,105', 'description': 'Streets, highways, and pathways'},
-        'Vessels'     : {'color': '0,206,209',   'description': 'Boats, ship'},
-        'Vehicle'     : {'color': '255,69,0',    'description': 'Cars, trucks, and buses'},
-        'Vegetation'  : {'color': '34,139,34',   'description': 'Trees, grass, and parks'},
-        'Water'       : {'color': '30,144,255',  'description': 'Rivers, lakes, and ponds'}
+        'Agriculture' : {
+            'color': '255,215,0',   
+            'description': 'Farmland and crops',
+            'batch_defaults': {'min_size': 200, 'max_objects': 10}
+        },
+        'Buildings'   : {
+            'color': '220,20,60',   
+            'description': 'Residential & commercial structures',
+            'batch_defaults': {'min_size': 150, 'max_objects': 20}
+        },
+        'Commercial'  : {
+            'color': '135,206,250', 
+            'description': 'Shopping and business districts',
+            'batch_defaults': {'min_size': 200, 'max_objects': 15}
+        },
+        'Industrial'  : {
+            'color': '128,0,128',   
+            'description': 'Factories and warehouses',
+            'batch_defaults': {'min_size': 400, 'max_objects': 8}
+        },
+        'Other'       : {
+            'color': '148,0,211',   
+            'description': 'Unclassified objects',
+            'batch_defaults': {'min_size': 50, 'max_objects': 25}
+        },
+        'Parking'     : {
+            'color': '255,140,0',   
+            'description': 'Parking lots and areas',
+            'batch_defaults': {'min_size': 150, 'max_objects': 15}
+        },
+        'Residential' : {
+            'color': '255,105,180', 
+            'description': 'Housing areas',
+            'batch_defaults': {'min_size': 75, 'max_objects': 40}
+        },
+        'Roads'       : {
+            'color': '105,105,105', 
+            'description': 'Streets, highways, and pathways',
+            'batch_defaults': {'min_size': 200, 'max_objects': 10}
+        },
+        'Vessels'     : {
+            'color': '0,206,209',   
+            'description': 'Boats, ships',
+            'batch_defaults': {'min_size': 40, 'max_objects': 35}
+        },
+        'Vehicle'     : {
+            'color': '255,69,0',    
+            'description': 'Cars, trucks, and buses',
+            'batch_defaults': {'min_size': 20, 'max_objects': 50}
+        },
+        'Vegetation'  : {
+            'color': '34,139,34',   
+            'description': 'Trees, grass, and parks',
+            'batch_defaults': {'min_size': 30, 'max_objects': 40}
+        },
+        'Water'       : {
+            'color': '30,144,255',  
+            'description': 'Rivers, lakes, and ponds',
+            'batch_defaults': {'min_size': 500, 'max_objects': 8}   # Large areas
+        }
     }
 
     EXTRA_COLORS = [
@@ -507,10 +1182,26 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.pointTool = EnhancedPointClickTool(self.canvas, self._point_done)
         self.bboxTool = EnhancedBBoxClickTool(self.canvas, self._bbox_done)
         self.original_map_tool = None
+
+        # Batch mode settings
+        self.batch_mode_enabled = False
+        self.min_object_size = 50  # Minimum pixels for valid object
+        self.max_objects = 20  # Prevent too many small objects
+        self.duplicate_threshold = 0.5  # Spatial overlap threshold for duplicates
+
         self._setup_ui()
 
         # Connect to selection changes for remove button
         self._connect_selection_signals()
+
+    def _debug_current_settings(self):
+        """Debug current batch settings"""
+        print(f"\n🔧 CURRENT SETTINGS:")
+        print(f"   Batch mode enabled: {self.batch_mode_enabled}")
+        print(f"   Min object size: {self.min_object_size}px")
+        print(f"   Max objects: {self.max_objects}")
+        print(f"   Current class: {self.current_class}")
+        print(f"   Current mode: {self.current_mode}")
 
     def _init_sam_model(self):
         """Initialize the selected SAM model"""
@@ -778,19 +1469,26 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         class_layout.addLayout(class_btn_layout)
         main_layout.addWidget(class_card)
 
-        # --- Segmentation Mode ---
+        # --- Enhanced Segmentation Mode ---
         mode_card, mode_layout = create_card("Segmentation Mode", "🎯")
+
+        # Point mode button (existing)
         self.pointModeBtn = QtWidgets.QPushButton("Point Mode")
         self.pointModeBtn.setCheckable(True)
         self.pointModeBtn.setChecked(True)
         self.pointModeBtn.setProperty("active", True)
+
+        # Enhanced BBox mode button
         self.bboxModeBtn = QtWidgets.QPushButton("BBox Mode")
         self.bboxModeBtn.setCheckable(True)
         self.bboxModeBtn.setVisible(True)
+
+        # Button group for mutual exclusion
         self.mode_button_group = QtWidgets.QButtonGroup()
         self.mode_button_group.addButton(self.pointModeBtn)
         self.mode_button_group.addButton(self.bboxModeBtn)
         self.mode_button_group.setExclusive(True)
+
         mode_btn_style = """
             QPushButton {
                 font-size: 12px; font-weight: 600; padding: 10px;
@@ -801,11 +1499,103 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QPushButton[active="true"] {
                 color: #FFF; background: #1570EF; border: 1px solid #1570EF;
             }
-        """  # Reduced font-size and padding
+        """
         self.pointModeBtn.setStyleSheet(mode_btn_style)
         self.bboxModeBtn.setStyleSheet(mode_btn_style)
+
+        # NEW: Batch mode toggle
+        batch_layout = QtWidgets.QHBoxLayout()
+        batch_label = QtWidgets.QLabel("Batch Segmentation")
+        batch_label.setStyleSheet("font-size: 11px;")
+        batch_label.setToolTip("Find multiple objects in bbox area")
+        self.batchModeSwitch = Switch()
+        self.batchModeSwitch.setToolTip("Enable to find multiple objects in bbox")
+        batch_layout.addWidget(batch_label)
+        batch_layout.addStretch()
+        batch_layout.addWidget(self.batchModeSwitch)
+
+        # NEW: Batch settings (initially hidden) - ENHANCED WITH TOOLTIPS
+        self.batchSettingsFrame = QtWidgets.QFrame()
+        self.batchSettingsFrame.setStyleSheet("""
+            QFrame {
+                background: #F9FAFB; 
+                border: 1px solid #E5E7EB; 
+                border-radius: 6px; 
+                margin: 2px;
+            }
+        """)
+        self.batchSettingsFrame.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, 
+            QtWidgets.QSizePolicy.Maximum
+        )
+
+        batch_settings_layout = QtWidgets.QVBoxLayout(self.batchSettingsFrame)
+        batch_settings_layout.setContentsMargins(8, 6, 8, 6)  # Reduced margins
+        batch_settings_layout.setSpacing(3)  # Reduced spacing
+
+        # Min object size setting - ENHANCED WITH TOOLTIPS
+        size_layout = QtWidgets.QHBoxLayout()
+        size_layout.setSpacing(4)
+        size_label = QtWidgets.QLabel("Min size:")
+        size_label.setStyleSheet("font-size: 10px; color: #667085;")
+        size_label.setFixedWidth(50)  # Fixed width to prevent layout shift
+        self.minSizeSpinBox = QtWidgets.QSpinBox()
+        self.minSizeSpinBox.setRange(10, 500)
+        self.minSizeSpinBox.setValue(50)
+        self.minSizeSpinBox.setSuffix("px")
+        self.minSizeSpinBox.setFixedWidth(70)  # Fixed width
+        self.minSizeSpinBox.setStyleSheet("""
+            QSpinBox { 
+                font-size: 10px; padding: 2px; 
+                border: 1px solid #D0D5DD; border-radius: 3px; 
+            }
+        """)
+        # ENHANCED: Add helpful tooltip with class recommendations
+        self.minSizeSpinBox.setToolTip("Minimum object size in pixels\n• Buildings: ~100px\n• Vehicles: ~15px\n• Vessels: ~30px\n• Trees: ~25px")
+        size_layout.addWidget(size_label)
+        size_layout.addWidget(self.minSizeSpinBox)
+        size_layout.addStretch()
+
+        # Max objects setting - ENHANCED WITH TOOLTIPS
+        max_layout = QtWidgets.QHBoxLayout()
+        max_layout.setSpacing(4)
+        max_label = QtWidgets.QLabel("Max obj:")
+        max_label.setStyleSheet("font-size: 10px; color: #667085;")
+        max_label.setFixedWidth(50)  # Fixed width
+        self.maxObjectsSpinBox = QtWidgets.QSpinBox()
+        self.maxObjectsSpinBox.setRange(1, 50)
+        self.maxObjectsSpinBox.setValue(20)
+        self.maxObjectsSpinBox.setFixedWidth(50)  # Fixed width
+        self.maxObjectsSpinBox.setStyleSheet("""
+            QSpinBox { 
+                font-size: 10px; padding: 2px; 
+                border: 1px solid #D0D5DD; border-radius: 3px; 
+            }
+        """)
+        # ENHANCED: Add helpful tooltip with class recommendations
+        self.maxObjectsSpinBox.setToolTip("Maximum objects to detect\n• Vehicles: ~40\n• Vessels: ~30\n• Trees: ~35\n• Buildings: ~15")
+        max_layout.addWidget(max_label)
+        max_layout.addWidget(self.maxObjectsSpinBox)
+        max_layout.addStretch()
+
+        batch_settings_layout.addLayout(size_layout)
+        batch_settings_layout.addLayout(max_layout)
+
+        # ENHANCED: Add helpful hints label
+        self.classHintsLabel = QtWidgets.QLabel("Auto-adjusts based on selected class")
+        self.classHintsLabel.setStyleSheet("font-size: 9px; color: #9CA3AF; font-style: italic;")
+        self.classHintsLabel.setAlignment(Qt.AlignCenter)
+        batch_settings_layout.addWidget(self.classHintsLabel)
+
+        # Initially hidden and properly sized
+        self.batchSettingsFrame.setVisible(False)
+        self.batchSettingsFrame.setMaximumHeight(80)  # Slightly increased for hints label
+
+        # Add all to mode layout
         mode_layout.addWidget(self.pointModeBtn)
         mode_layout.addWidget(self.bboxModeBtn)
+        mode_layout.addLayout(batch_layout)
+        mode_layout.addWidget(self.batchSettingsFrame)
         main_layout.addWidget(mode_card)
 
         # --- Status & Controls Card ---
@@ -868,9 +1658,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QPushButton:hover { background: #039855; }
         """)  # Reduced font-size and padding
 
-        self.undoBtn.setAutoDefault(False)
-        self.undoBtn.setDefault(False)
-        self.undoBtn.setFocusPolicy(Qt.NoFocus)
+        self.exportBtn.setAutoDefault(False)
+        self.exportBtn.setDefault(False)
+        self.exportBtn.setFocusPolicy(Qt.NoFocus)
 
         status_layout.addWidget(self.undoBtn)
         status_layout.addWidget(self.exportBtn)
@@ -896,6 +1686,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxModeBtn.clicked.connect(self._activate_bbox_tool)
         self.undoBtn.clicked.connect(self._undo_last_polygon)
         self.exportBtn.clicked.connect(self._export_all_classes)
+        self.batchModeSwitch.toggled.connect(self._on_batch_mode_toggle)
+        self.minSizeSpinBox.valueChanged.connect(self._on_batch_settings_changed)
+        self.maxObjectsSpinBox.valueChanged.connect(self._on_batch_settings_changed)
 
     def _select_output_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(
@@ -929,6 +1722,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.canvas.setFocus()
         QtWidgets.QApplication.processEvents()
 
+    def _reset_batch_defaults(self):
+        """Reset to generic batch defaults when no class is selected"""
+        default_min_size = 50
+        default_max_objects = 20
+
+        self.minSizeSpinBox.setValue(default_min_size)
+        self.maxObjectsSpinBox.setValue(default_max_objects)
+        self.min_object_size = default_min_size
+        self.max_objects = default_max_objects
+
     def _on_class_changed(self):
         selected_data = self.classComboBox.currentData()
         if selected_data:
@@ -950,6 +1753,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     f"font-weight: 600; padding: 12px; border: 2px solid rgb({color}); "
                     f"background-color: rgba({color}, 50); font-size: 14px;")
 
+            # NEW: Apply class-specific batch defaults
+            self._apply_class_batch_defaults(class_info)
+
             self._activate_point_tool()
         else:
             self.current_class = None
@@ -961,7 +1767,33 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 color: #667085;
                 border-radius: 8px; font-size: 14px;
             """)
+
+            # Reset to default values when no class selected
+            self._reset_batch_defaults()
+
         self._clear_widget_focus()
+
+    def _apply_class_batch_defaults(self, class_info):
+        """Apply recommended batch settings for the selected class"""
+        if 'batch_defaults' in class_info:
+            defaults = class_info['batch_defaults']
+
+            # Update spinbox values
+            self.minSizeSpinBox.setValue(defaults.get('min_size', 50))
+            self.maxObjectsSpinBox.setValue(defaults.get('max_objects', 20))
+
+            # Update internal settings
+            self.min_object_size = defaults.get('min_size', 50)
+            self.max_objects = defaults.get('max_objects', 20)
+
+            # Show helpful message about applied defaults
+            class_name = self.current_class
+            min_size = defaults.get('min_size', 50)
+            max_objects = defaults.get('max_objects', 20)
+
+            if self.batch_mode_enabled:
+                self._update_status(
+                    f"🎯 Applied {class_name} defaults: {min_size}px min, {max_objects} max objects", "info")
 
     def _add_new_class(self):
         class_name, ok = QtWidgets.QInputDialog.getText(
@@ -978,11 +1810,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 color = f"{random.randint(100,255)},{random.randint(100,255)},{random.randint(100,255)}"
 
             description = f'Custom class: {class_name}'
+
+            # NEW: Add default batch settings for new classes
             self.classes[class_name] = {
-                'color': color, 'description': description}
+                'color': color, 
+                'description': description,
+                'batch_defaults': {'min_size': 50, 'max_objects': 20}  # Generic defaults
+            }
+
             self.classComboBox.addItem(class_name, class_name)
             self._update_status(
-                f"Added class: {class_name} (RGB:{color})", "info")
+                f"Added class: {class_name} (RGB:{color}) with default batch settings", "info")
 
     def _edit_classes(self):
         class_list = list(self.classes.keys())
@@ -1023,6 +1861,38 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     except ValueError:
                         self._update_status(
                             "Invalid color format! Use R,G,B (0-255)", "error")
+
+    def _on_batch_mode_toggle(self, checked):
+        """Handle batch mode toggle with class-aware defaults"""
+        self.batch_mode_enabled = checked
+        self.batchSettingsFrame.setVisible(checked)
+
+        if checked:
+            self.bboxModeBtn.setText("BBox Batch Mode")
+
+            # Apply current class defaults if a class is selected
+            if self.current_class and self.current_class in self.classes:
+                class_info = self.classes[self.current_class]
+                self._apply_class_batch_defaults(class_info)
+
+            self._update_status("🔄 Batch mode: Will find multiple objects in bbox", "info")
+        else:
+            self.bboxModeBtn.setText("BBox Mode") 
+            self._update_status("📦 Single mode: Will segment entire bbox", "info")
+
+        # Better layout handling
+        QtWidgets.QApplication.processEvents()
+        if hasattr(self, 'widget') and self.widget():
+            self.widget().adjustSize()
+            self.widget().updateGeometry()
+        self.updateGeometry()
+        self._clear_widget_focus()
+
+    def _on_batch_settings_changed(self):
+        """Update batch settings"""
+        self.min_object_size = self.minSizeSpinBox.value()
+        self.max_objects = self.maxObjectsSpinBox.value()
+        self._clear_widget_focus()
 
     def _refresh_class_combo(self):
         current_class = self.current_class
@@ -1110,6 +1980,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _run_segmentation(self):
         """Enhanced segmentation that ensures current layer is used"""
+        # DEBUG: Verify settings are correct
+        if self.batch_mode_enabled and self.current_mode == 'bbox':
+            self._debug_current_settings()
+
         if not self.current_class:
             self._update_status("No class selected", "error")
             return
@@ -1131,8 +2005,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         start_time = time.time()
 
         self._set_ui_enabled(False)
-        self._update_status(
-            f"🚀 Processing on layer: {current_layer.name()[:30]}...", "processing")
+
+        # Update status based on mode
+        if self.current_mode == 'bbox' and self.batch_mode_enabled:
+            self._update_status(f"🔄 Batch processing on layer: {current_layer.name()[:30]}...", "processing")
+        else:
+            self._update_status(f"🚀 Processing on layer: {current_layer.name()[:30]}...", "processing")
 
         try:
             # Use the current_layer (not self.original_raster_layer)
@@ -1147,14 +2025,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Add layer info to debug
             debug_info['source_layer'] = current_layer.name()
             debug_info['layer_crs'] = current_layer.crs().authid()
+            debug_info['batch_mode'] = self.batch_mode_enabled and self.current_mode == 'bbox'
 
         except Exception as e:
             self._update_status(f"Error preparing data from {current_layer.name()}: {e}", "error")
             self._set_ui_enabled(True)
             return
 
-        # Continue with worker thread...
+        # Determine processing mode
         mode = "point" if self.point is not None else "bbox"
+        if mode == "bbox" and self.batch_mode_enabled:
+            mode = "bbox_batch"
+
+        # Continue with worker thread...
         self.worker = OptimizedSAM2Worker(
             predictor=self.predictor,
             arr=arr,
@@ -1165,13 +2048,174 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             box=input_box,
             mask_transform=mask_transform,
             debug_info={**debug_info, 'prep_time': prep_time},
-            device=self.device
+            device=self.device,
+            # Pass batch settings
+            min_object_size=self.min_object_size,
+            max_objects=self.max_objects
         )
 
         self.worker.finished.connect(self._on_segmentation_finished)
         self.worker.error.connect(self._on_segmentation_error)
         self.worker.progress.connect(self._on_segmentation_progress)
         self.worker.start()
+
+    def _convert_mask_to_features(self, mask, mask_transform):
+        """Convert a single mask to QgsFeature objects"""
+        try:
+            # Threshold mask to binary and clean it up
+            _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+            # Morphological operations to clean up the mask
+            open_kernel = np.ones((3, 3), np.uint8)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, open_kernel)
+
+            close_kernel = np.ones((7, 7), np.uint8)
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
+
+            # Remove small objects
+            nlabels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+            min_size = 20
+            cleaned = np.zeros(binary.shape, dtype=np.uint8)
+            for i in range(1, nlabels):
+                if stats[i, cv2.CC_STAT_AREA] >= min_size:
+                    cleaned[labels == i] = 255
+            binary = cleaned
+
+        except Exception as e:
+            print(f"Error thresholding/refining mask: {e}")
+            return []
+
+        # Convert mask to features
+        features = []
+        try:
+            for geom, _ in shapes(binary, mask=binary > 0, transform=mask_transform):
+                shp_geom = shape(geom)
+                if not shp_geom.is_valid:
+                    shp_geom = shp_geom.buffer(0)
+                if shp_geom.is_empty:
+                    continue
+
+                # Convert shapely geometry to QGIS geometry
+                if hasattr(shp_geom, 'exterior'):
+                    coords = list(shp_geom.exterior.coords)
+                    qgs_points = []
+                    for coord in coords:
+                        if len(coord) >= 2:
+                            qgs_points.append(QgsPointXY(coord[0], coord[1]))
+                    if len(qgs_points) >= 3:
+                        qgs_geom = QgsGeometry.fromPolygonXY([qgs_points])
+                    else:
+                        continue
+                else:
+                    try:
+                        wkt_str = shp_geom.wkt
+                        qgs_geom = QgsGeometry.fromWkt(wkt_str)
+                    except Exception as e:
+                        print(f"⚠️ WKT conversion failed: {e}")
+                        continue
+
+                if not qgs_geom.isNull() and not qgs_geom.isEmpty():
+                    f = QgsFeature()
+                    f.setGeometry(qgs_geom)
+                    features.append(f)
+
+        except Exception as e:
+            print(f"Error processing geometries: {str(e)}")
+            return []
+
+        return features
+
+    def _get_adaptive_bbox_padding(self, bbox_area):
+        """Calculate adaptive padding based on bbox size to reduce background inclusion"""
+        # For large areas, use minimal padding to avoid including too much background
+        if bbox_area > 500000:      # Very large area
+            return 0.02             # 2% padding
+        elif bbox_area > 100000:    # Large area  
+            return 0.05             # 5% padding
+        elif bbox_area > 50000:     # Medium area
+            return 0.1              # 10% padding
+        else:                       # Small area
+            return 0.2              # 20% padding
+
+    def _add_features_to_layer(self, features, debug_info, object_count, filename=None):
+        """Add features to the appropriate class layer"""
+        current_raster = self.iface.activeLayer()
+        if isinstance(current_raster, QgsRasterLayer):
+            self.original_raster_layer = current_raster
+
+        try:
+            result_layer = self._get_or_create_class_layer(self.current_class)
+            if not result_layer or not result_layer.isValid():
+                self._update_status("Failed to create or access layer", "error")
+                return
+
+            # Get the next available segment ID
+            next_segment_id = self._get_next_segment_id(result_layer, self.current_class)
+
+            # Enhanced attributes with layer tracking
+            timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            crop_info = debug_info.get('crop_size', 'unknown') if self.current_mode == 'bbox' else debug_info.get('actual_crop', 'unknown')
+            class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
+            canvas_scale = self.canvas.scale()
+            source_layer_name = debug_info.get('source_layer', 'unknown')
+            layer_crs = debug_info.get('layer_crs', 'unknown')
+
+            # Add batch info
+            batch_info = f"batch_{object_count}_objects" if debug_info.get('individual_processing') else "single"
+
+            # Set enhanced attributes for features
+            for i, feat in enumerate(features):
+                feat.setAttributes([
+                    next_segment_id + i,
+                    self.current_class,
+                    class_color,
+                    batch_info,  # Use batch_info instead of just mode
+                    timestamp_str,
+                    filename or "debug_disabled",
+                    crop_info,
+                    canvas_scale,
+                    source_layer_name,
+                    layer_crs
+                ])
+
+            # Add features and track for undo
+            result_layer.startEditing()
+            success = result_layer.dataProvider().addFeatures(features)
+            result_layer.commitChanges()
+
+            if success:
+                # Update tracking
+                self.segment_counts[self.current_class] = next_segment_id + len(features) - 1
+
+                # Enhanced undo tracking with layer info
+                all_features = list(result_layer.getFeatures())
+                new_feature_ids = [f.id() for f in all_features[-len(features):]]
+                self.undo_stack.append((self.current_class, new_feature_ids))
+                self.undoBtn.setEnabled(True)
+
+            result_layer.updateExtents()
+            result_layer.triggerRepaint()
+
+            # Keep the source raster selected
+            if self.keep_raster_selected and self.original_raster_layer:
+                self.iface.setActiveLayer(self.original_raster_layer)
+
+            # Update layer name with source info
+            total_features = result_layer.featureCount()
+            color_info = f" [RGB:{class_color}]"
+            source_info = f" [{source_layer_name[:10]}]" if source_layer_name != 'unknown' else ""
+            new_layer_name = f"SAM_{self.current_class}{source_info} ({total_features}){color_info}"
+            result_layer.setName(new_layer_name)
+
+            # Clear visual feedback
+            if self.current_mode == 'point':
+                self.pointTool.clear_feedback()
+            elif self.current_mode == 'bbox':
+                self.bboxTool.clear_feedback()
+
+        except Exception as e:
+            self._update_status(f"Error adding features: {e}", "error")
+            return
 
     def _prepare_optimized_segmentation_data(self, rlayer):
         rpath = rlayer.source()
@@ -1259,25 +2303,43 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'device': self.device
                     }
 
-                else:  # BBOX MODE - FIXED VERSION
+                else:  # BBOX MODE - SMART HYBRID VERSION
                     # Calculate bbox dimensions in geographic coordinates
                     bbox_width = self.bbox.width()
                     bbox_height = self.bbox.height()
                     bbox_area = bbox_width * bbox_height
 
-                    # FIXED: Smarter padding calculation for large areas
+                    # SMART HYBRID: Adaptive padding based on area size
+                    if bbox_area > 50000:  # Large areas get adaptive padding
+                        padding_factor = self._get_adaptive_bbox_padding(bbox_area)
+                        print(f"🎯 LARGE area ({bbox_area:.0f}): adaptive padding {padding_factor*100:.1f}%")
+
+                        # Extra reduction for batch mode on large areas
+                        if hasattr(self, 'batch_mode_enabled') and self.batch_mode_enabled:
+                            padding_factor *= 0.6
+                            print(f"🔄 Batch mode: further reduced to {padding_factor*100:.1f}%")
+
+                    else:  # Small areas use original fixed logic
+                        padding_factor = 0.3  # 30% for small areas
+                        print(f"📍 SMALL area ({bbox_area:.0f}): fixed padding {padding_factor*100:.1f}%")
+
+                    # FIXED: Define max_crop_size based on area and device
                     if bbox_area > 1000000:  # Very large area (1M map units²)
-                        padding_factor = 0.05  # Minimal padding
                         max_crop_size = 2048
                     elif bbox_area > 100000:   # Large area 
-                        padding_factor = 0.1
                         max_crop_size = 1536
                     elif bbox_area > 10000:    # Medium area
-                        padding_factor = 0.2
                         max_crop_size = 1024
                     else:  # Small area
-                        padding_factor = 0.3
                         max_crop_size = 768
+
+                    # Adjust max_crop_size based on device capability
+                    if self.device == "cuda":
+                        max_crop_size = min(max_crop_size * 1.5, 2048)  # Increase for GPU
+                    elif self.device == "cpu" and self.model_choice == "MobileSAM":
+                        max_crop_size = min(max_crop_size, 1024)  # Limit for CPU MobileSAM
+
+                    print(f"📐 Max crop size: {max_crop_size}px (device: {self.device})")
 
                     # Create padded bbox for context
                     padded_bbox = QgsRectangle(
@@ -1288,14 +2350,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     )
 
                     try:
-                        # FIXED: Use from_bounds correctly
+                        # Use from_bounds correctly
                         padded_window = rasterio.windows.from_bounds(
                             padded_bbox.xMinimum(), padded_bbox.yMinimum(),
                             padded_bbox.xMaximum(), padded_bbox.yMaximum(),
                             src.transform
                         )
 
-                        # FIXED: Ensure window is within raster bounds
+                        # Ensure window is within raster bounds
                         padded_window = padded_window.intersection(
                             rasterio.windows.Window(0, 0, src.width, src.height)
                         )
@@ -1308,7 +2370,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         self._update_status("Invalid bbox dimensions", "error")
                         return None
 
-                    # FIXED: Check if crop would be too large and downsample if needed
+                    # Check if crop would be too large and downsample if needed
                     if padded_window.width > max_crop_size or padded_window.height > max_crop_size:
                         # Calculate downsampling factor
                         scale_factor = min(
@@ -1359,7 +2421,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     else:
                         arr = np.zeros_like(arr, dtype=np.uint8)
 
-                    # FIXED: Calculate bbox coordinates in the cropped image
+                    # Calculate bbox coordinates in the cropped image
                     padded_transform = src.window_transform(padded_window)
 
                     # Account for downsampling in transform
@@ -1370,8 +2432,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         padded_transform = Affine(a/scale_factor, b, c, d, e/scale_factor, f)
 
                     try:
-                        # FIXED: Convert bbox corners to pixel coordinates correctly
-                        # Transform all corners and find the bounding rectangle
+                        # Convert bbox corners to pixel coordinates correctly
                         corners = [
                             (self.bbox.xMinimum(), self.bbox.yMinimum()),  # bottom-left
                             (self.bbox.xMaximum(), self.bbox.yMinimum()),  # bottom-right  
@@ -1416,15 +2477,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     mask_transform = padded_transform
 
                     debug_info = {
-                        'mode': 'ENHANCED_BBOX',
+                        'mode': 'SMART_HYBRID_BBOX',
                         'class': self.current_class,
                         'original_bbox': f"{bbox_width:.1f}x{bbox_height:.1f}",
+                        'bbox_area': bbox_area,
+                        'padding_strategy': 'adaptive' if bbox_area > 50000 else 'fixed',
                         'crop_size': f"{arr.shape[1]}x{arr.shape[0]}",
-                        'padding_factor': f"{padding_factor:.2f}",
+                        'padding_factor': f"{padding_factor:.3f}",
                         'target_bbox': f"({x1},{y1})-({x2},{y2})",
                         'target_size': f"{x2-x1}x{y2-y1}",
                         'bands_used': f"{band_count} -> {len(bands_to_read)}",
                         'downsampled': 'scale_factor' in locals(),
+                        'max_crop_size': max_crop_size,
                         'device': self.device
                     }
 
@@ -1469,22 +2533,45 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             self._update_status("✨ Processing results...", "processing")
 
-            mask = result['mask']
-            mask_transform = result['mask_transform']
             debug_info = result['debug_info']
 
-            self._process_segmentation_result(mask, mask_transform, debug_info)
+            # FIXED: Better detection of batch vs single results
+            # Check for 'individual_masks' key instead of just debug flag
+            if 'individual_masks' in result:
+                # This is batch processing - result structure: {'individual_masks': [...], 'mask_transform': ..., 'debug_info': ...}
+                print(f"🔄 BATCH: Processing {len(result['individual_masks'])} individual masks")
+                self._process_individual_batch_results(result, result['mask_transform'], debug_info)
+            elif 'mask' in result:
+                # This is single processing - result structure: {'mask': array, 'mask_transform': ..., 'debug_info': ...}
+                print(f"📦 SINGLE: Processing single mask")
+                mask = result['mask']
+                mask_transform = result['mask_transform']
+                self._process_single_mask_result(mask, mask_transform, debug_info)
+            else:
+                # Error case - unexpected result structure
+                raise KeyError(f"Unexpected result structure. Expected 'mask' or 'individual_masks', got keys: {list(result.keys())}")
 
             process_time = time.time() - start_process_time
             prep_time = debug_info.get('prep_time', 0)
             total_time = prep_time + process_time
 
             model_info = f"({debug_info.get('model', 'SAM')} on {self.device.upper()})"
+            batch_info = ""
+            if debug_info.get('batch_count'):
+                if 'individual_masks' in result:
+                    batch_info = f" - {debug_info['batch_count']} individual objects found"
+                else:
+                    batch_info = f" - {debug_info['batch_count']} objects found"
             self._update_status(
-                f"✅ Completed in {total_time:.1f}s {model_info}! Click again to add more.", "info")
+                f"✅ Completed in {total_time:.1f}s {model_info}{batch_info}! Click again to add more.", "info")
 
         except Exception as e:
-            self._update_status(f"Error processing results: {e}", "error")
+            import traceback
+            error_msg = f"Error processing results: {str(e)}\n"
+            error_msg += f"Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}\n"
+            error_msg += f"Debug info: {debug_info if 'debug_info' in locals() else 'None'}\n"
+            error_msg += f"Full traceback:\n{traceback.format_exc()}"
+            self._update_status(error_msg, "error")
         finally:
             self._set_ui_enabled(True)
             if hasattr(self, 'worker') and self.worker:
@@ -1529,111 +2616,158 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if class_name in self.segment_counts:
                 del self.segment_counts[class_name]
 
-    def _process_segmentation_result(self, mask, mask_transform, debug_info):
-        # Save mask image for traceability (ONLY if debug enabled)
-        filename = None
+    def _process_segmentation_result(self, mask_or_result, mask_transform, debug_info):
+        """Enhanced to handle both single and individual batch results"""
+
+        # Check if this is individual batch processing
+        if debug_info.get('individual_processing', False):
+            # FIXED: Handle batch result object correctly
+            if isinstance(mask_or_result, dict) and 'individual_masks' in mask_or_result:
+                return self._process_individual_batch_results(mask_or_result, mask_transform, debug_info)
+            else:
+                raise ValueError(f"Expected batch result with 'individual_masks', got: {type(mask_or_result)}")
+
+        # Original single mask processing
+        return self._process_single_mask_result(mask_or_result, mask_transform, debug_info)
+
+    def _check_spatial_duplicates(self, new_features, existing_layer, overlap_threshold=0.5):
+        """Check for spatial duplicates against existing features in the layer"""
+        if not existing_layer or not existing_layer.isValid():
+            return new_features
+
+        # Get existing features in the area
+        filtered_features = []
+
+        for new_feature in new_features:
+            new_geom = new_feature.geometry()
+            is_duplicate = False
+
+            # Check against existing features
+            for existing_feature in existing_layer.getFeatures():
+                existing_geom = existing_feature.geometry()
+
+                # Calculate intersection
+                if new_geom.intersects(existing_geom):
+                    intersection = new_geom.intersection(existing_geom)
+                    intersection_area = intersection.area()
+                    new_area = new_geom.area()
+
+                    # If overlap is significant, consider it a duplicate
+                    if new_area > 0 and (intersection_area / new_area) > overlap_threshold:
+                        is_duplicate = True
+                        break
+
+            if not is_duplicate:
+                filtered_features.append(new_feature)
+
+        removed_count = len(new_features) - len(filtered_features)
+        if removed_count > 0:
+            print(f"🚫 Removed {removed_count} spatial duplicates (overlap > {overlap_threshold*100}%)")
+
+        return filtered_features
+
+
+    def _process_individual_batch_results(self, result_data, mask_transform, debug_info):
+        """Process multiple individual masks from batch segmentation - INDIVIDUAL OBJECTS ONLY"""
+        print(f"🔍 _process_individual_batch_results called")
+        print(f"  📊 Result data keys: {list(result_data.keys())}")
+        print(f"  📊 Current class: {self.current_class}")
+
+        individual_masks = result_data.get('individual_masks', [])
+        print(f"  📊 Individual masks found: {len(individual_masks)}")
+
+        if not individual_masks:
+            print(f"❌ No individual masks found in result_data")
+            self._update_status("No individual objects found", "warning")
+            return
+
+        print(f"✅ Processing {len(individual_masks)} individual masks")
+
+        # Initialize batch undo tracking
+        self._current_batch_undo = []
+
+        # Save debug info
+        filename_base = None
         if self.save_debug_masks:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             class_prefix = f"{self.current_class}_" if self.current_class else ""
+            filename_base = f"batch_{class_prefix}bbox_{self.bbox.width():.1f}x{self.bbox.height():.1f}_{timestamp}"
 
-            if self.current_mode == 'point':
-                filename = f"mask_{class_prefix}point_{self.point.x():.1f}_{self.point.y():.1f}_{timestamp}.png"
-            else:
-                filename = f"mask_{class_prefix}bbox_{self.bbox.width():.1f}x{self.bbox.height():.1f}_{timestamp}.png"
+        # Process each individual mask SEPARATELY - NO COMBINING
+        successful_objects = 0
 
-            filename = "".join(
-                c for c in filename if c.isalnum() or c in "._-")
-            mask_path = self.mask_save_dir / filename
-
+        for obj_idx, mask in enumerate(individual_masks):
             try:
-                cv2.imwrite(str(mask_path), mask)
-            except Exception as e:
-                self._update_status(
-                    f"Failed to save debug mask: {e}", "warning")
-                filename = "save_failed"
-
-        # Threshold mask to binary and clean it up
-        try:
-            _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-            # Morphological operations to clean up the mask
-            open_kernel = np.ones((3, 3), np.uint8)
-            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, open_kernel)
-
-            close_kernel = np.ones((7, 7), np.uint8)
-            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
-
-            # Remove small objects
-            nlabels, labels, stats, _ = cv2.connectedComponentsWithStats(
-                binary, connectivity=8)
-            min_size = 20
-            cleaned = np.zeros(binary.shape, dtype=np.uint8)
-            for i in range(1, nlabels):
-                if stats[i, cv2.CC_STAT_AREA] >= min_size:
-                    cleaned[labels == i] = 255
-            binary = cleaned
-
-        except Exception as e:
-            self._update_status(
-                f"Error thresholding/refining mask: {e}", "error")
-            return
-
-        # Convert mask to features
-        feats = []
-        try:
-            for geom, _ in shapes(binary, mask=binary > 0, transform=mask_transform):
-                shp_geom = shape(geom)
-                if not shp_geom.is_valid:
-                    shp_geom = shp_geom.buffer(0)
-                if shp_geom.is_empty:
-                    continue
-
-                # Convert shapely geometry to QGIS geometry
-                if hasattr(shp_geom, 'exterior'):
-                    coords = list(shp_geom.exterior.coords)
-                    qgs_points = []
-                    for coord in coords:
-                        if len(coord) >= 2:
-                            qgs_points.append(QgsPointXY(coord[0], coord[1]))
-                    if len(qgs_points) >= 3:
-                        qgs_geom = QgsGeometry.fromPolygonXY([qgs_points])
-                    else:
-                        continue
-                else:
+                # Save individual debug mask if enabled
+                if self.save_debug_masks and filename_base:
+                    individual_filename = f"{filename_base}_obj{obj_idx+1}.png"
+                    individual_filename = "".join(c for c in individual_filename if c.isalnum() or c in "._-")
+                    mask_path = self.mask_save_dir / individual_filename
                     try:
-                        wkt_str = shp_geom.wkt
-                        qgs_geom = QgsGeometry.fromWkt(wkt_str)
+                        cv2.imwrite(str(mask_path), mask)
                     except Exception as e:
-                        print(f"⚠️ WKT conversion failed: {e}")
-                        continue
+                        print(f"Failed to save debug mask for object {obj_idx+1}: {e}")
 
-                if not qgs_geom.isNull() and not qgs_geom.isEmpty():
-                    f = QgsFeature()
-                    f.setGeometry(qgs_geom)
-                    feats.append(f)
+                # FIXED: Process this individual mask and add directly to layer
+                print(f"🔍 Converting mask {obj_idx+1} to features...")
+                features = self._convert_mask_to_features(mask, mask_transform)
+                print(f"  📊 Generated {len(features) if features else 0} features")
 
-        except Exception as e:
-            self._update_status(f"Error processing geometries: {str(e)}", "error")
-            print(f"❌ Geometry conversion error: {e}")
-            print(f"   Mask transform: {mask_transform}")
+                if features:
+                    # 🚫 Check for spatial duplicates before adding
+                    print(f"  🚫 Checking for spatial duplicates...")
+                    result_layer = self._get_or_create_class_layer(self.current_class)
+                    print(f"  📋 Result layer: {result_layer.name() if result_layer else 'None'}")
+
+                    features = self._check_spatial_duplicates(features, result_layer, self.duplicate_threshold)
+                    print(f"  ✅ After duplicate check: {len(features)} features remain")
+
+                    if features:  # Only add if not duplicates
+                        print(f"  📍 Adding {len(features)} features to layer...")
+                        # Add each individual object immediately to avoid combining
+                        self._add_individual_features_to_layer(features, debug_info, obj_idx + 1)
+                        successful_objects += 1
+                        print(f"  ✅ Successfully added object {obj_idx+1}")
+                    else:
+                        print(f"  ❌ No features to add after duplicate filtering")
+                else:
+                    print(f"  ❌ No features generated from mask {obj_idx+1}")
+
+            except Exception as e:
+                print(f"Error processing individual object {obj_idx+1}: {e}")
+                continue
+
+
+        if successful_objects == 0:
+            self._update_status("No valid features generated from objects", "warning")
             return
 
-        if not feats:
-            self._update_status("No segments found", "warning")
-            return
+        # Clear visual feedback after batch processing completes
+        if self.current_mode == 'point':
+            self.pointTool.clear_feedback()
+        elif self.current_mode == 'bbox':
+            self.bboxTool.clear_feedback()
 
-        # Store current raster layer reference
-        current_layer = self.iface.activeLayer()
-        if isinstance(current_layer, QgsRasterLayer):
-            self.original_raster_layer = current_layer
-        # Get the current raster layer that was used for segmentation
+        # Add batch results to undo stack
+        if hasattr(self, '_current_batch_undo') and self._current_batch_undo:
+            self.undo_stack.append((self.current_class, self._current_batch_undo))
+            self.undoBtn.setEnabled(True)
+
+        # Update status
+        undo_hint = " (↶ Undo available)" if successful_objects > 0 else ""
+        source_info = debug_info.get('source_layer', 'unknown')[:15]
+        self._update_status(
+            f"✅ Added {successful_objects} individual [{self.current_class}] objects from {source_info}!{undo_hint}", "info")
+        self._update_stats()
+
+    def _add_individual_features_to_layer(self, features, debug_info, object_number):
+        """Add individual features to layer separately to avoid combining"""
         current_raster = self.iface.activeLayer()
         if isinstance(current_raster, QgsRasterLayer):
             self.original_raster_layer = current_raster
 
         try:
             result_layer = self._get_or_create_class_layer(self.current_class)
-
             if not result_layer or not result_layer.isValid():
                 self._update_status("Failed to create or access layer", "error")
                 return
@@ -1649,35 +2783,42 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             source_layer_name = debug_info.get('source_layer', 'unknown')
             layer_crs = debug_info.get('layer_crs', 'unknown')
 
+            # Add batch info with object number
+            batch_info = f"batch_obj_{object_number}"
+
             # Set enhanced attributes for features
-            for i, feat in enumerate(feats):
+            for i, feat in enumerate(features):
                 feat.setAttributes([
                     next_segment_id + i,
                     self.current_class,
                     class_color,
-                    self.current_mode,
+                    batch_info,  # Individual object identifier
                     timestamp_str,
-                    filename or "debug_disabled",
+                    f"batch_obj_{object_number}.png" if self.save_debug_masks else "debug_disabled",
                     crop_info,
                     canvas_scale,
-                    source_layer_name,  # Track which raster was used
-                    layer_crs           # Track CRS
+                    source_layer_name,
+                    layer_crs
                 ])
 
             # Add features and track for undo
             result_layer.startEditing()
-            success = result_layer.dataProvider().addFeatures(feats)
+            success = result_layer.dataProvider().addFeatures(features)
             result_layer.commitChanges()
 
             if success:
                 # Update tracking
-                self.segment_counts[self.current_class] = next_segment_id + len(feats) - 1
+                self.segment_counts[self.current_class] = next_segment_id + len(features) - 1
 
-                # Enhanced undo tracking with layer info
+                # Track for undo - INDIVIDUAL TRACKING
                 all_features = list(result_layer.getFeatures())
-                new_feature_ids = [f.id() for f in all_features[-len(feats):]]
-                self.undo_stack.append((self.current_class, new_feature_ids))
-                self.undoBtn.setEnabled(True)
+                new_feature_ids = [f.id() for f in all_features[-len(features):]]
+
+                # Store individual object for undo (not combined)
+                if hasattr(self, '_current_batch_undo'):
+                    self._current_batch_undo.extend(new_feature_ids)
+                else:
+                    self._current_batch_undo = new_feature_ids
 
             result_layer.updateExtents()
             result_layer.triggerRepaint()
@@ -1686,46 +2827,53 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if self.keep_raster_selected and self.original_raster_layer:
                 self.iface.setActiveLayer(self.original_raster_layer)
 
+            # Update layer name with source info
+            total_features = result_layer.featureCount()
+            color_info = f" [RGB:{class_color}]"
+            source_info = f" [{source_layer_name[:10]}]" if source_layer_name != 'unknown' else ""
+            new_layer_name = f"SAM_{self.current_class}{source_info} ({total_features}){color_info}"
+            result_layer.setName(new_layer_name)
+
         except Exception as e:
-            self._update_status(f"Error adding features: {e}", "error")
+            self._update_status(f"Error adding individual features: {e}", "error")
             return
 
-        # Update layer name with source info
-        total_features = result_layer.featureCount()
-        color_info = f" [RGB:{class_color}]"
-        source_info = f" [{source_layer_name[:10]}]" if source_layer_name != 'unknown' else ""
-        new_layer_name = f"SAM_{self.current_class}{source_info} ({total_features}){color_info}"
-        result_layer.setName(new_layer_name)
+    def _process_single_mask_result(self, mask, mask_transform, debug_info):
+        """Process a single combined mask (original behavior)"""
+        # Save mask image for traceability (ONLY if debug enabled)
+        filename = None
+        if self.save_debug_masks:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            class_prefix = f"{self.current_class}_" if self.current_class else ""
 
-        # Clear visual feedback
-        if self.current_mode == 'point':
-            self.pointTool.clear_feedback()
-        elif self.current_mode == 'bbox':
-            self.bboxTool.clear_feedback()
+            if self.current_mode == 'point':
+                filename = f"mask_{class_prefix}point_{self.point.x():.1f}_{self.point.y():.1f}_{timestamp}.png"
+            else:
+                filename = f"mask_{class_prefix}bbox_{self.bbox.width():.1f}x{self.bbox.height():.1f}_{timestamp}.png"
 
-        # Update status and stats
-        undo_hint = " (↶ Undo available)" if len(feats) > 0 else ""
-        source_hint = f" on [{source_layer_name[:15]}]" if source_layer_name != 'unknown' else ""
+            filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+            mask_path = self.mask_save_dir / filename
+
+            try:
+                cv2.imwrite(str(mask_path), mask)
+            except Exception as e:
+                self._update_status(f"Failed to save debug mask: {e}", "warning")
+                filename = "save_failed"
+
+        # Convert mask to features
+        features = self._convert_mask_to_features(mask, mask_transform)
+        if not features:
+            self._update_status("No segments found", "warning")
+            return
+
+        # Add features to layer
+        self._add_features_to_layer(features, debug_info, 1, filename)
+
+        # Update status
+        undo_hint = " (↶ Undo available)" if len(features) > 0 else ""
+        source_info = debug_info.get('source_layer', 'unknown')[:15]
         self._update_status(
-            f"✅ Added {len(feats)} [{self.current_class}] polygons{source_hint}!{undo_hint}", "info")
-        self._update_stats()      
-
-        # Update layer name
-        total_features = result_layer.featureCount()
-        color_info = f" [RGB:{class_color}]"
-        new_layer_name = f"SAM_{self.current_class} ({total_features} parts){color_info}"
-        result_layer.setName(new_layer_name)
-
-        # Clear visual feedback
-        if self.current_mode == 'point':
-            self.pointTool.clear_feedback()
-        elif self.current_mode == 'bbox':
-            self.bboxTool.clear_feedback()
-
-        # Update status and stats
-        undo_hint = " (↶ Undo available)" if len(feats) > 0 else ""
-        self._update_status(
-            f"✅ Added {len(feats)} [{self.current_class}] polygons!{undo_hint}", "info")
+            f"✅ Added {len(features)} [{self.current_class}] polygons from {source_info}!{undo_hint}", "info")
         self._update_stats()
 
     def _get_or_create_class_layer(self, class_name):
@@ -1999,7 +3147,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             print(f"Error during cleanup: {e}")
 
         super().closeEvent(event)
-
 
 class SegSamDialog(QtWidgets.QDialog):
     def __init__(self, iface, parent=None):
