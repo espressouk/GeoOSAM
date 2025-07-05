@@ -42,7 +42,7 @@ MOBILESAM_AVAILABLE = False
 
 try:
     from ultralytics import SAM
-    test_model = SAM('mobile_sam.pt') # sam2.1_b.pt
+    test_model = SAM('sam2.1_b.pt') # mobile_sam.pt
     MOBILESAM_AVAILABLE = True
     print("✅ Ultralytics MobileSAM available")
 
