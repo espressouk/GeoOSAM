@@ -11,8 +11,10 @@
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
 - **🧠 Intelligent Model Selection**: Automatically chooses the best AI model for your hardware
 - **🚀 Optimized Performance**: SAM 2.1 for GPU, MobileSAM for CPU
-- **🎯 Dual Modes**: Point-click and bounding box segmentation
+- **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
+- **🎯 Dual Modes**: Point-click and bounding box segmentation with batch processing
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Ship, and more
+- **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **↶ Undo Support**: Mistake correction with polygon-level undo
 - **📁 Custom Output**: User-selectable output folders
 - **🎨 Class Management**: Custom classes with color coding
@@ -26,16 +28,16 @@
 | -------------- | ---------- | ------------- | ------------- | ----------------- |
 | NVIDIA RTX GPU | SAM 2.1    | ~160MB        | 0.2-0.5s      | **10-50x faster** |
 | Apple M1/M2    | SAM 2.1    | ~160MB        | 1-2s          | **5-15x faster**  |
-| 24+ Core CPU   | MobileSAM  | ~40MB         | **<1s**       | **20-30x faster** |
-| 8-16 Core CPU  | MobileSAM  | ~40MB         | 1-2s          | **10-15x faster** |
-| 4-8 Core CPU   | MobileSAM  | ~40MB         | 2-4s          | **5-10x faster**  |
+| 24+ Core CPU   | SAM2.1_B   | ~160MB        | **<1s**       | **20-30x faster** |
+| 8-16 Core CPU  | SAM2.1_B   | ~160MB        | 1-2s          | **10-15x faster** |
+| 4-8 Core CPU   | SAM2.1_B   | ~160MB        | 2-4s          | **5-10x faster**  |
 
 **🎯 Smart Model Selection:**
 
 - **GPU Available** (CUDA/Apple Silicon) → **SAM 2.1** (latest accuracy)
-- **High-Core CPU** (16+ cores) → **MobileSAM** (optimized threading, <1s performance)
-- **Standard CPU** → **MobileSAM** (efficient multi-threading)
-- **Automatic Fallback** → SAM 2 if other models unavailable
+- **High-Core CPU** (16+ cores) → **SAM2.1_B** (Ultralytics, optimized threading, <1s performance)
+- **Standard CPU** → **SAM2.1_B** (Ultralytics, efficient multi-threading)
+- **Automatic Fallback** → SAM 2.1 if Ultralytics unavailable
 
 ## 🚀 Quick Start
 
@@ -153,9 +155,9 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 
 **🔄 Download Process:**
 
-- **CPU Systems**: Ultralytics automatically downloads MobileSAM (~40MB) on first use
+- **CPU Systems**: Ultralytics automatically downloads SAM2.1_B (~160MB) on first use
 - **GPU Systems**: Plugin auto-downloads SAM 2.1 checkpoint (~160MB) on first use
-- **Total Size**: ~40MB (CPU only) or ~160MB (GPU systems)
+- **Total Size**: ~160MB for all systems (unified model approach)
 
 **📥 What happens automatically:**
 
@@ -168,7 +170,7 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 
 - **24+ Core CPUs**: Sub-second segmentation rivals GPU performance
 - **Intelligent Threading**: Automatically uses 75% of available cores on high-end systems
-- **MobileSAM Scaling**: Exceptional multi-core efficiency compared to traditional models
+- **SAM2.1_B Scaling**: Exceptional multi-core efficiency via Ultralytics optimization
 - **Memory Optimized**: Efficient processing even on large imagery datasets
 
 **🔧 Manual Download (if auto-download fails):**
@@ -178,31 +180,80 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
 bash download_sam2_checkpoints.sh
 
-# For MobileSAM (CPU users) - handled automatically by Ultralytics
+# For SAM2.1_B (CPU users) - handled automatically by Ultralytics
 # No manual download needed - Ultralytics manages this automatically
 ```
 
 ## 🎯 Use Cases
 
 - **🏙️ Urban Planning**: Building and infrastructure mapping
-- **🌱 Environmental Monitoring**: Vegetation and land cover analysis
+- **🌱 Environmental Monitoring**: Vegetation and land cover analysis with NDVI
+- **🛰️ UAV/Drone Mapping**: Multi-spectral imagery analysis and processing
 - **🚗 Transportation**: Vehicle and traffic analysis
 - **🌊 Coastal Studies**: Ship detection and water body mapping
 - **🏗️ Construction**: Site monitoring and progress tracking
-- **📡 Remote Sensing**: Large-scale imagery analysis
+- **📡 Remote Sensing**: Large-scale multi-spectral imagery analysis
+- **🌾 Agriculture**: Crop monitoring with spectral vegetation indices
+
+## 🛰️ Multi-spectral UAV/Satellite Support
+
+### **Advanced Spectral Analysis**
+
+GeoOSAM now provides native support for high-resolution multi-spectral imagery:
+
+| Feature | Capability | Benefit |
+|---------|------------|---------|
+| **5+ Band Support** | Automatic NDVI calculation | Superior vegetation detection |
+| **Reflectance Values** | 0-1 range preservation | Accurate spectral analysis |
+| **High Resolution** | UAV imagery (0.08m/pixel) | Fine-scale object detection |
+| **Batch Processing** | Up to 200 objects per selection | Efficient large-area mapping |
+| **Shape Filtering** | Road/track rejection | Clean vegetation results |
+
+### **Supported Image Types**
+
+- **Multi-spectral UAV**: 5+ band imagery (Blue, Green, Red, NIR, RedEdge)
+- **Satellite Imagery**: Landsat, Sentinel, Planet, etc.
+- **Reflectance Data**: Automatically handles 0-1 reflectance values
+- **High-Resolution**: Optimized for 0.05-0.1m pixel size UAV imagery
+- **Standard RGB**: Backward compatible with 3-band imagery
+
+### **Intelligent Band Processing**
+
+🔹 **5+ Bands**: Automatic NDVI calculation using NIR/Red bands  
+🔹 **3-4 Bands**: Enhanced green channel processing  
+🔹 **RGB**: Standard texture analysis  
+🔹 **Single Band**: Grayscale texture detection  
+
+### **Vegetation Detection Excellence**
+
+For vegetation mapping, GeoOSAM automatically:
+
+- **Calculates NDVI** from NIR and Red bands
+- **Filters linear features** (roads, tracks) with shape analysis
+- **Processes up to 200 objects** in batch mode
+- **Validates object geometry** (aspect ratio, solidity)
+- **Preserves spectral fidelity** throughout processing
+
+### **Workflow for UAV/Satellite Data**
+
+1. **Load multi-spectral raster** → Automatic band detection
+2. **Select Vegetation class** → NDVI processing activated  
+3. **Batch mode** → Processes large areas efficiently
+4. **Shape validation** → Filters out roads/tracks automatically
+5. **Export results** → Professional shapefiles with spectral attributes
 
 ## ⚙️ Technical Details
 
 ### Model Architecture
 
 - **SAM 2.1**: Latest from Meta AI with improved accuracy for small objects
-- **MobileSAM**: Lightweight version with Tiny-ViT encoder (5M vs 632M parameters)
+- **SAM2.1_B**: Ultralytics optimized version with enhanced CPU performance
 - **Automatic Selection**: Based on available GPU memory and compute capability
 
 ### Performance Optimization
 
 - **Intelligent Threading**: High-core CPUs (16+) use 75% of cores for optimal performance
-- **MobileSAM Efficiency**: 5x smaller model with exceptional multi-core scaling
+- **SAM2.1_B Efficiency**: Ultralytics optimization with exceptional multi-core scaling
 - **Adaptive Crop Sizes**: Zoom-level aware processing
 - **Memory Management**: Efficient handling of large imagery
 - **Device Detection**: Automatic CUDA/MPS/CPU optimization with core-count awareness
@@ -249,6 +300,21 @@ If you use GeoOSAM in your research, please cite:
 ```
 
 ## 🔄 Changelog
+
+### v1.2.0 - Multi-spectral UAV Support (2025-07-06)
+
+- **🛰️ NEW**: Native multi-spectral UAV/satellite imagery support (5+ bands)
+- **🌿 NEW**: Automatic NDVI calculation for vegetation detection using NIR/Red bands
+- **🔧 FIXED**: High-resolution reflectance value preservation (0-1 range)
+- **🔧 FIXED**: Data type truncation issues with multi-spectral imagery
+- **🚀 NEW**: Enhanced batch processing with up to 200 objects for vegetation
+- **🎯 NEW**: Intelligent shape filtering to reject roads/tracks in vegetation detection
+- **🔧 FIXED**: SAM2 tensor mismatch errors with multi-spectral input
+- **🔧 FIXED**: Oversized mask validation (rejects masks >10% of image area)
+- **🔧 FIXED**: Mathematical warnings in texture calculation
+- **🌿 ENHANCED**: Vegetation detection with aspect ratio and solidity filtering
+- **📊 NEW**: Comprehensive logging for debugging high-resolution imagery issues
+- **🛰️ NEW**: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
 
 ### v1.1.0 - Latest (2025-07-03)
 

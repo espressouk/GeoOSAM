@@ -74,7 +74,7 @@ GeoOSAM includes 12 ready-to-use classes optimized for various use cases:
 | --------------- | ---------- | ----------------------------------- | ------------ |
 | **Buildings**   | Red        | Residential & commercial structures | Point        |
 | **Roads**       | Gray       | Streets, highways, pathways         | BBox         |
-| **Vegetation**  | Green      | Trees, grass, parks                 | BBox         |
+| **Vegetation**  | Green      | Trees, grass, parks (NDVI-enhanced) | BBox         |
 | **Water**       | Blue       | Rivers, lakes, ponds                | BBox         |
 | **Agriculture** | Gold       | Farmland, crops                     | BBox         |
 | **Vehicle**     | Red-Orange | Cars, trucks, buses                 | Point        |
@@ -256,6 +256,92 @@ Each polygon includes comprehensive metadata:
 
 ---
 
+## 🛰️ Multi-spectral UAV/Satellite Workflows
+
+### **Working with UAV Multi-spectral Imagery**
+
+GeoOSAM provides advanced support for high-resolution multi-spectral imagery from UAVs and satellites.
+
+#### **Supported Image Types**
+
+| Image Type | Bands | Pixel Size | Processing |
+|------------|-------|------------|------------|
+| **UAV Multi-spectral** | 5+ bands | 0.05-0.1m | NDVI calculation |
+| **Satellite Imagery** | 4+ bands | 0.3-30m | Spectral indices |
+| **High-res RGB** | 3 bands | <1m | Enhanced texture |
+| **Reflectance Data** | Any | Any | Auto-normalization |
+
+#### **Automatic Band Detection**
+
+When you load multi-spectral imagery, GeoOSAM automatically:
+
+🔹 **Detects band count** (3, 4, 5+ bands)  
+🔹 **Preserves reflectance values** (0-1 range)  
+🔹 **Calculates NDVI** for vegetation when NIR available  
+🔹 **Normalizes data** for optimal processing  
+
+#### **Enhanced Vegetation Detection**
+
+For **5+ band imagery**, vegetation detection uses:
+
+- **NDVI Calculation**: `(NIR - Red) / (NIR + Red)` using bands 4 and 3
+- **Shape Filtering**: Rejects roads/tracks (aspect ratio ≤ 2.0, solidity ≥ 0.5)
+- **Batch Processing**: Up to 200 vegetation objects per selection
+- **Size Validation**: Rejects oversized masks (>10% of image)
+
+#### **Multi-spectral Workflow Steps**
+
+1. **Load Multi-spectral Raster**
+   - Plugin detects band count automatically
+   - Shows: `📡 Multi-spectral mode: reading all 5 bands`
+
+2. **Select Vegetation Class**
+   - NDVI processing activates automatically
+   - Max objects increases to 200 for dense areas
+
+3. **Use Batch Mode** (Recommended for vegetation)
+   - Draw bounding box around vegetation area
+   - Plugin processes all vegetation patches automatically
+   - Shape filtering removes roads/tracks
+
+4. **Review Results**
+   - Individual vegetation patches detected
+   - Roads and linear features filtered out
+   - Clean vegetation-only results
+
+#### **Expected Output Messages**
+
+```
+📡 Multi-spectral mode: reading all 5 bands
+🔍 NORM: Value range: 0.012023 to 0.536193
+🔧 NORM: Scaled reflectance to 0-255
+📡 BANDS: Processing 5-band image
+🌿 BANDS: Using NDVI calculation (NIR-Red bands)
+🔍 BANDS: NDVI range: -0.4000 to 0.8000
+🎯 CONTOURS: Found 150 vegetation candidates
+❌ CONTOUR 15: too elongated (road rejected)
+✅ CONTOUR 23: area=156px, AR=1.8, sol=0.65
+🌿 FINAL: Found 85 clean vegetation candidates
+```
+
+### **Troubleshooting Multi-spectral Issues**
+
+#### **"Found 0 vegetation candidates"**
+- Check if bands contain data (not all zeros)
+- Verify image has NIR band (band 4)
+- Try point mode on obvious vegetation
+
+#### **"Too many road detections"**
+- Shape filtering automatically rejects linear features
+- Check aspect ratio and solidity in logs
+- Consider smaller bounding boxes
+
+#### **"Tensor size mismatch"**
+- Should not occur - plugin automatically handles RGB conversion for SAM
+- If persistent, check error logs for details
+
+---
+
 ## 🚀 Advanced Workflows
 
 ### Urban Analysis Project
@@ -270,16 +356,23 @@ Each polygon includes comprehensive metadata:
 5. **Quality Control:** Use Undo for any imprecise segments
 6. **Export:** Professional shapefiles with full attribute data
 
-### Environmental Monitoring
+### Environmental Monitoring with Multi-spectral Data
 
 **Hardware**: CPU systems excellent for this workflow
 **Expected Time**: Large areas processed efficiently with MobileSAM
+**Image Type**: Multi-spectral UAV/satellite preferred for vegetation analysis
 
-1. **Setup:** Load multispectral or high-res RGB imagery
-2. **Water Bodies:** Select "Water" class, works great with Point mode
-3. **Vegetation:** "Vegetation" class for forest patches and parks
-4. **Agriculture:** "Agriculture" class for field boundaries
-5. **Analysis:** Export for change detection and temporal studies
+1. **Setup:** Load multi-spectral imagery (5+ bands for best results)
+   - Plugin automatically detects bands and enables NDVI
+   - Reflectance values (0-1) handled automatically
+2. **Vegetation Mapping:** Select "Vegetation" class
+   - Batch mode processes up to 200 vegetation patches
+   - NDVI calculation provides superior detection
+   - Automatic filtering removes roads/tracks
+3. **Water Bodies:** Select "Water" class for water body mapping
+4. **Agriculture:** "Agriculture" class with spectral enhancement
+5. **Quality Control:** Shape filtering ensures clean results
+6. **Analysis:** Export with spectral attributes for temporal studies
 
 ### Disaster Response Mapping
 
@@ -406,6 +499,15 @@ import torch
 print(f"PyTorch: {torch.__version__}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
+
+# QGIS version check (Windows compatible):
+try:
+    import qgis.utils
+    print(f"QGIS version: {qgis.utils.Qgis.QGIS_VERSION}")
+except:
+    # Alternative for Windows:
+    from qgis.core import Qgis
+    print(f"QGIS version: {Qgis.QGIS_VERSION}")
 ```
 
 ### Support Channels

@@ -37,14 +37,14 @@ from helpers import create_detection_helper
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
-# Ultralytics MobileSAM setup
-MOBILESAM_AVAILABLE = False
+# Ultralytics SAM2.1_B setup
+SAM21B_AVAILABLE = False
 
 try:
     from ultralytics import SAM
     test_model = SAM('sam2.1_b.pt') # mobile_sam.pt
-    MOBILESAM_AVAILABLE = True
-    print("✅ Ultralytics MobileSAM available")
+    SAM21B_AVAILABLE = True
+    print("✅ Ultralytics SAM2.1_B available")
 
     class UltralyticsPredictor:
         def __init__(self, model):
@@ -120,15 +120,15 @@ try:
 
 except ImportError:
     print("⚠️ Ultralytics not available - install with: /usr/bin/python3 -m pip install --user ultralytics")
-    MOBILESAM_AVAILABLE = False
+    SAM21B_AVAILABLE = False
 except Exception as e:
-    print(f"⚠️ Ultralytics MobileSAM failed: {e}")
-    MOBILESAM_AVAILABLE = False
+    print(f"⚠️ Ultralytics SAM2.1_B failed: {e}")
+    SAM21B_AVAILABLE = False
 
-if MOBILESAM_AVAILABLE:
-    print("   Using fast Ultralytics MobileSAM")
+if SAM21B_AVAILABLE:
+    print("   Using fast Ultralytics SAM2.1_B")
 else:
-    print("   Falling back to SAM2")
+    print("   Falling back to SAM 2.1")
 
 """
 GeoOSAM Control Panel - Enhanced SAM segmentation for QGIS
@@ -366,14 +366,14 @@ def detect_best_device():
 
         else:
             device = "cpu"
-            model_choice = "MobileSAM" if MOBILESAM_AVAILABLE else "SAM2"
+            model_choice = "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
             cores = setup_pytorch_performance()
             print(f"💻 CPU detected - using {model_choice} ({cores} cores)")
             return device, model_choice, cores
 
     except Exception as e:
         print(f"⚠️ Device detection failed: {e}, falling back to CPU")
-        device, model_choice = "cpu", "SAM2"
+        device, model_choice = "cpu", "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
         cores = setup_pytorch_performance()
         return device, model_choice, cores
 
@@ -1221,8 +1221,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         """Initialize the selected SAM model"""
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
 
-        if self.model_choice == "MobileSAM":
-            self._init_mobilesam_model()
+        if self.model_choice == "SAM2.1_B":
+            self._init_sam21b_model()
         else:
             self._init_sam2_model(plugin_dir)
 
@@ -1262,15 +1262,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             print(f"❌ Failed to load SAM2: {e}")
             raise
 
-    def _init_mobilesam_model(self):
-        """Initialize Ultralytics MobileSAM model"""
+    def _init_sam21b_model(self):
+        """Initialize Ultralytics SAM2.1_B model"""
         try:
             from ultralytics import SAM
-            mobile_sam = SAM('mobile_sam.pt')
-            self.predictor = UltralyticsPredictor(mobile_sam)
-            print(f"✅ Ultralytics MobileSAM loaded successfully")
+            sam21b_model = SAM('sam2.1_b.pt')  # mobile_sam.pt
+            self.predictor = UltralyticsPredictor(sam21b_model)
+            print(f"✅ Ultralytics SAM2.1_B loaded successfully")
         except Exception as e:
-            print(f"❌ Failed to load MobileSAM: {e}, falling back to SAM2")
+            print(f"❌ Failed to load SAM2.1_B: {e}, falling back to SAM2")
             self.model_choice = "SAM2"
             self._init_sam2_model(os.path.dirname(os.path.abspath(__file__)))
 

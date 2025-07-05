@@ -8,7 +8,15 @@
 # Run in QGIS Python Console to check:
 import sys
 print("Python version:", sys.version)
-print("QGIS version:", qgis.core.Qgis.QGIS_VERSION)
+
+# QGIS version check (Windows compatible):
+try:
+    import qgis.utils
+    print("QGIS version:", qgis.utils.Qgis.QGIS_VERSION)
+except:
+    # Alternative for Windows:
+    from qgis.core import Qgis
+    print("QGIS version:", Qgis.QGIS_VERSION)
 
 # Check if plugin directory exists:
 import os
@@ -22,15 +30,15 @@ print("Plugin exists:", os.path.exists(plugin_path))
 # Check model selection and availability:
 try:
     from ultralytics import SAM
-    print("✅ Ultralytics available - MobileSAM ready")
+    print("✅ Ultralytics available - SAM2.1_B ready")
 
     # Test model loading
-    test_model = SAM('mobile_sam.pt')
-    print("✅ MobileSAM loaded successfully")
+    test_model = SAM('sam2.1_b.pt')  # mobile_sam.pt
+    print("✅ SAM2.1_B loaded successfully")
 except ImportError:
     print("❌ Ultralytics not available - falling back to SAM 2.1")
 except Exception as e:
-    print(f"⚠️ MobileSAM error: {e}")
+    print(f"⚠️ SAM2.1_B error: {e}")
 
 # Check SAM 2.1 model:
 sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
@@ -54,7 +62,7 @@ elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     print("→ Will use SAM 2.1 for optimal performance")
 else:
     print("💻 CPU-only system detected")
-    print("→ Will use MobileSAM for optimal CPU performance")
+    print("→ Will use SAM2.1_B for optimal CPU performance")
 
 # Check threading setup:
 print(f"PyTorch threads: {torch.get_num_threads()}")
@@ -68,6 +76,125 @@ print(f"CPU cores: {os.cpu_count()}")
 3. **Zoom to appropriate level** (not too far out)
 4. **Try different click position** (center of object)
 5. **Check image quality** (contrast, resolution)
+6. **For multi-spectral images** - Verify bands contain data (not all zeros)
+
+---
+
+## 🛰️ Multi-spectral Image Issues
+
+### **"Found 0 vegetation candidates" with UAV imagery**
+
+**Cause:** Multi-spectral data not processed correctly  
+**Solution:**
+
+```python
+# Check band count and data ranges:
+import rasterio
+import numpy as np
+
+# Open your multi-spectral image
+with rasterio.open("your_uav_image.tif") as src:
+    print(f"Bands: {src.count}")
+    print(f"Data type: {src.dtypes[0]}")
+    
+    # Check band 3 (Red) and band 4 (NIR) for NDVI
+    if src.count >= 4:
+        red = src.read(3, window=rasterio.windows.Window(0, 0, 100, 100))
+        nir = src.read(4, window=rasterio.windows.Window(0, 0, 100, 100))
+        
+        print(f"Red band range: {red.min():.4f} to {red.max():.4f}")
+        print(f"NIR band range: {nir.min():.4f} to {nir.max():.4f}")
+        
+        if red.max() == 0 and nir.max() == 0:
+            print("❌ Bands contain no data (all zeros)")
+        elif red.max() <= 1.0:
+            print("✅ Reflectance values detected (0-1 range)")
+        else:
+            print("✅ Digital number values detected")
+```
+
+### **"Tensor size mismatch" with 5+ band images**
+
+**Cause:** SAM2 receiving multi-spectral instead of RGB  
+**Solution:** This should be automatically handled. If persistent:
+
+```python
+# Check if dual processing is working:
+print("Plugin should show:")
+print("📡 Multi-spectral mode: reading all 5 bands")
+print("🔍 Detecting Vegetation candidates in (height, width, 5) region (multi-spectral)")
+
+# If you see (height, width, 3) instead, there's an issue with the band processing
+```
+
+### **"All pixel values are 0" in vegetation detection**
+
+**Cause:** Data type truncation during image reading  
+**Solution:**
+
+```python
+# This was fixed in v1.2.0 - ensure you have the latest version
+# Check plugin version in QGIS Plugin Manager
+
+# Expected behavior:
+# - Reflectance values (0.012-0.536) preserved as float32
+# - Automatic scaling to 0-255 for processing
+# - Should see: "🔧 NORM: Scaled reflectance to 0-255, result range: 3 to 137"
+```
+
+### **Batch mode returns huge masks (entire image)**
+
+**Cause:** SAM segmenting large homogeneous areas instead of objects  
+**Solution:**
+
+```python
+# Fixed in v1.2.0 with size validation
+# Plugin now rejects masks > 10% of image area
+
+# Expected output:
+# "❌ REJECTED: Object 5 too large (1089459 > 145216, 75.0% of image)"
+
+# If still occurring:
+# 1. Use smaller bounding boxes
+# 2. Try point mode instead
+# 3. Check if vegetation is actually present in the area
+```
+
+### **Roads/tracks detected as vegetation**
+
+**Cause:** Linear features passing shape validation  
+**Solution:**
+
+```python
+# Enhanced filtering in v1.2.0:
+# - Aspect ratio ≤ 2.0 (rejects elongated features)
+# - Solidity ≥ 0.5 (rejects sparse linear features)
+# - Thin feature detection (width/height < 8px with high aspect ratio)
+
+# Expected output:
+# "❌ CONTOUR 15: area=245.0px, too elongated (AR=4.2>2.0)"
+# "❌ CONTOUR 23: area=156.0px, too thin (45x4px, track-like)"
+
+# If roads still detected:
+# 1. Use smaller bounding boxes
+# 2. Adjust to areas with denser vegetation
+# 3. Check if detected features are actually vegetation edges
+```
+
+### **RuntimeWarning: invalid value encountered in sqrt**
+
+**Cause:** Numerical precision in texture calculation  
+**Solution:**
+
+```python
+# Fixed in v1.2.0 with variance clamping
+# Should no longer see this warning
+
+# If warning persists, it's harmless but indicates:
+# 1. Very low texture variation in the image area
+# 2. Possible issues with data normalization
+# 3. Try different area with more texture variation
+```
 
 ---
 
