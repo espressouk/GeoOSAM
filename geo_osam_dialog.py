@@ -385,10 +385,11 @@ class OptimizedSAM2Worker(QThread):
 
     def __init__(self, predictor, arr, mode, model_choice="SAM2", point_coords=None,
                  point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu",
-                 min_object_size=50, max_objects=20):
+                 min_object_size=50, max_objects=20, arr_multispectral=None):
         super().__init__()
         self.predictor = predictor
         self.arr = arr
+        self.arr_multispectral = arr_multispectral
         self.mode = mode
         self.model_choice = model_choice
         self.point_coords = point_coords
@@ -474,14 +475,20 @@ class OptimizedSAM2Worker(QThread):
 
         self._process_single_mask(masks[0], scores, logits)
 
-    def _detect_object_candidates(self, image, bbox, class_name):
+    def _detect_object_candidates(self, image, bbox, class_name, multispectral_image=None):
         """Detect potential object locations within bbox based on class type"""
         x1, y1, x2, y2 = bbox
 
-        # Crop image to bbox region
-        bbox_image = image[y1:y2, x1:x2].copy()
+        # Use multi-spectral image for vegetation detection if available
+        if multispectral_image is not None and class_name == "Vegetation":
+            detection_image = multispectral_image
+            print(f"🔍 Detecting {class_name} candidates in {detection_image.shape} region (multi-spectral)")
+        else:
+            detection_image = image
+            print(f"🔍 Detecting {class_name} candidates in {detection_image.shape} region")
 
-        print(f"🔍 Detecting {class_name} candidates in {bbox_image.shape} region")
+        # Crop image to bbox region
+        bbox_image = detection_image[y1:y2, x1:x2].copy()
 
         # Use helper for detection
         helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
@@ -565,7 +572,7 @@ class OptimizedSAM2Worker(QThread):
 
             # Detect potential object locations within bbox
             current_class = self.debug_info.get('class', 'Other')
-            candidate_points = self._detect_object_candidates(self.arr, [x1, y1, x2, y2], current_class)
+            candidate_points = self._detect_object_candidates(self.arr, [x1, y1, x2, y2], current_class, self.arr_multispectral)
 
             print(f"🔍 Found {len(candidate_points)} candidate objects for class '{current_class}'")
 
@@ -631,16 +638,23 @@ class OptimizedSAM2Worker(QThread):
                     pixel_count = np.sum(mask > 0)
                     print(f"  📊 Mask {i+1}: {pixel_count} pixels")
 
+                    # Calculate reasonable max size (10% of image area)
+                    image_area = self.arr.shape[0] * self.arr.shape[1]
+                    max_object_size = int(image_area * 0.1)
+                    
                     if pixel_count >= self.min_object_size:
-                        print(f"  🎯 Processing class: {current_class}")
+                        if pixel_count <= max_object_size:
+                            print(f"  🎯 Processing class: {current_class}")
 
-                        # Validate the mask for the current class
-                        if self._validate_mask_for_class(mask, current_class, [px, py]):
-                            individual_masks.append(mask)
-                            successful_detections += 1
-                            print(f"  ✅ ACCEPTED: {current_class} mask {i+1} ({pixel_count} pixels)")
+                            # Validate the mask for the current class
+                            if self._validate_mask_for_class(mask, current_class, [px, py]):
+                                individual_masks.append(mask)
+                                successful_detections += 1
+                                print(f"  ✅ ACCEPTED: {current_class} mask {i+1} ({pixel_count} pixels)")
+                            else:
+                                print(f"  ❌ REJECTED: {current_class} mask {i+1} failed validation")
                         else:
-                            print(f"  ❌ REJECTED: {current_class} mask {i+1} failed validation")
+                            print(f"  ❌ REJECTED: Object {i+1} too large ({pixel_count} > {max_object_size}, {pixel_count/image_area*100:.1f}% of image)")
                     else:
                         print(f"  ❌ REJECTED: Object {i+1} too small ({pixel_count} < {self.min_object_size})")
 
@@ -2019,7 +2033,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self._set_ui_enabled(True)
                 return
 
-            arr, mask_transform, debug_info, input_coords, input_labels, input_box = result
+            # Handle both RGB and multi-spectral data
+            if len(result) == 7:
+                arr, mask_transform, debug_info, input_coords, input_labels, input_box, arr_multispectral = result
+            else:
+                arr, mask_transform, debug_info, input_coords, input_labels, input_box = result
+                arr_multispectral = None
             prep_time = time.time() - start_time
 
             # Add layer info to debug
@@ -2051,6 +2070,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             device=self.device,
             # Pass batch settings
             min_object_size=self.min_object_size,
+            arr_multispectral=arr_multispectral,
             max_objects=self.max_objects
         )
 
@@ -2226,8 +2246,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # Handle multi-band images
                 band_count = src.count
 
-                # Determine which bands to use
-                if band_count >= 3:
+                # Determine which bands to use - preserve all bands for multi-spectral
+                if band_count >= 5:
+                    # Multi-spectral: read all bands for advanced processing
+                    bands_to_read = list(range(1, band_count + 1))
+                    print(f"📡 Multi-spectral mode: reading all {band_count} bands")
+                elif band_count >= 3:
                     bands_to_read = [1, 2, 3]
                 elif band_count == 2:
                     bands_to_read = [1, 1, 2]
@@ -2261,7 +2285,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         x_min, y_min, x_max - x_min, y_max - y_min)
 
                     try:
-                        arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
+                        # Use float32 for multi-spectral to preserve reflectance values
+                        if band_count >= 5:
+                            arr = src.read(bands_to_read, window=window, out_dtype=np.float32)
+                        else:
+                            arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
                         if arr.size == 0:
                             self._update_status("Empty crop area", "error")
                             return None
@@ -2274,16 +2302,33 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
                     elif band_count == 2:
                         arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
+                    elif band_count >= 5:
+                        # Multi-spectral: keep all bands as-is
+                        pass
+                    # For 3-4 bands, arr is already correct
 
                     arr = np.moveaxis(arr, 0, -1)
 
-                    # Normalize
-                    if arr.max() > arr.min():
-                        arr_min, arr_max = arr.min(), arr.max()
-                        arr = ((arr.astype(np.float32) - arr_min) /
-                            (arr_max - arr_min) * 255).astype(np.uint8)
+                    # Normalize - preserve multi-spectral data ranges
+                    if band_count >= 5:
+                        # For multi-spectral, normalize each band independently
+                        normalized_bands = []
+                        for i in range(arr.shape[2]):
+                            band = arr[:, :, i].astype(np.float32)
+                            if band.max() > band.min():
+                                band_norm = ((band - band.min()) / (band.max() - band.min()) * 255).astype(np.uint8)
+                            else:
+                                band_norm = np.zeros_like(band, dtype=np.uint8)
+                            normalized_bands.append(band_norm)
+                        arr = np.stack(normalized_bands, axis=2)
                     else:
-                        arr = np.zeros_like(arr, dtype=np.uint8)
+                        # Standard normalization for RGB
+                        if arr.max() > arr.min():
+                            arr_min, arr_max = arr.min(), arr.max()
+                            arr = ((arr.astype(np.float32) - arr_min) /
+                                (arr_max - arr_min) * 255).astype(np.uint8)
+                        else:
+                            arr = np.zeros_like(arr, dtype=np.uint8)
 
                     relative_x = center_pixel_x - x_min
                     relative_y = center_pixel_y - y_min
@@ -2383,12 +2428,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         out_height = int(padded_window.height * scale_factor)
 
                         try:
-                            arr = src.read(
-                                bands_to_read, 
-                                window=padded_window, 
-                                out_shape=(len(bands_to_read), out_height, out_width),
-                                out_dtype=np.uint8
-                            )
+                            # Use float32 for multi-spectral to preserve reflectance values
+                            if band_count >= 5:
+                                arr = src.read(
+                                    bands_to_read, 
+                                    window=padded_window, 
+                                    out_shape=(len(bands_to_read), out_height, out_width),
+                                    out_dtype=np.float32
+                                )
+                            else:
+                                arr = src.read(
+                                    bands_to_read, 
+                                    window=padded_window, 
+                                    out_shape=(len(bands_to_read), out_height, out_width),
+                                    out_dtype=np.uint8
+                                )
                             print(f"🔽 Downsampled large bbox: {padded_window.width}x{padded_window.height} -> {out_width}x{out_height}")
                         except Exception as e:
                             self._update_status(f"Error reading downsampled raster: {e}", "error")
@@ -2396,7 +2450,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     else:
                         # Read at full resolution
                         try:
-                            arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
+                            # Use float32 for multi-spectral to preserve reflectance values
+                            if band_count >= 5:
+                                arr = src.read(bands_to_read, window=padded_window, out_dtype=np.float32)
+                            else:
+                                arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
                         except Exception as e:
                             self._update_status(f"Error reading raster: {e}", "error")
                             return None
@@ -2410,16 +2468,33 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
                     elif band_count == 2:
                         arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
+                    elif band_count >= 5:
+                        # Multi-spectral: keep all bands as-is
+                        pass
+                    # For 3-4 bands, arr is already correct
 
                     arr = np.moveaxis(arr, 0, -1)
 
-                    # Normalize
-                    if arr.max() > arr.min():
-                        arr_min, arr_max = arr.min(), arr.max()
-                        arr = ((arr.astype(np.float32) - arr_min) /
-                            (arr_max - arr_min) * 255).astype(np.uint8)
+                    # Normalize - preserve multi-spectral data ranges
+                    if band_count >= 5:
+                        # For multi-spectral, normalize each band independently
+                        normalized_bands = []
+                        for i in range(arr.shape[2]):
+                            band = arr[:, :, i].astype(np.float32)
+                            if band.max() > band.min():
+                                band_norm = ((band - band.min()) / (band.max() - band.min()) * 255).astype(np.uint8)
+                            else:
+                                band_norm = np.zeros_like(band, dtype=np.uint8)
+                            normalized_bands.append(band_norm)
+                        arr = np.stack(normalized_bands, axis=2)
                     else:
-                        arr = np.zeros_like(arr, dtype=np.uint8)
+                        # Standard normalization for RGB
+                        if arr.max() > arr.min():
+                            arr_min, arr_max = arr.min(), arr.max()
+                            arr = ((arr.astype(np.float32) - arr_min) /
+                                (arr_max - arr_min) * 255).astype(np.uint8)
+                        else:
+                            arr = np.zeros_like(arr, dtype=np.uint8)
 
                     # Calculate bbox coordinates in the cropped image
                     padded_transform = src.window_transform(padded_window)
@@ -2492,7 +2567,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'device': self.device
                     }
 
-                return arr, mask_transform, debug_info, input_coords, input_labels, input_box
+                # Create RGB version for SAM2 and keep multi-spectral for vegetation detection
+                if band_count >= 5:
+                    # Create RGB version for SAM2 (use first 3 bands)
+                    arr_rgb = arr[:, :, :3].copy()
+                    # Keep full multi-spectral for vegetation detection
+                    arr_multispectral = arr.copy()
+                    return arr_rgb, mask_transform, debug_info, input_coords, input_labels, input_box, arr_multispectral
+                else:
+                    return arr, mask_transform, debug_info, input_coords, input_labels, input_box, None
 
         except Exception as e:
             self._update_status(f"Error accessing raster data: {e}", "error")
