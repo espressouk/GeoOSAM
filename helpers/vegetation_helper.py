@@ -113,16 +113,44 @@ class VegetationHelper(BaseDetectionHelper):
         for i, contour in enumerate(contours):
             area = cv2.contourArea(contour)
             if area >= min_area_threshold:
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                    full_x = x1 + cx
-                    full_y = y1 + cy
-                    candidates.append((full_x, full_y))
-                    print(f"    ✅ CONTOUR {i}: area={area:.1f}px, center=({cx},{cy}) -> ({full_x},{full_y})")
+                # Shape validation to reject road/track-like elongated features
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / max(min(w, h), 1)
+                
+                # Calculate solidity (area / convex hull area)
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area > 0 else 0
+                
+                # Vegetation should be compact, not elongated like roads/tracks
+                max_aspect_ratio = 2.0  # Stricter - reject elongated features
+                min_solidity = 0.5      # Stricter - vegetation should be more solid than tracks
+                
+                # Additional check: reject if bounding box is very thin (road-like)
+                min_width = 8   # Minimum width in pixels
+                min_height = 8  # Minimum height in pixels
+                is_too_thin = (w < min_width and h > w * 3) or (h < min_height and w > h * 3)
+                
+                if aspect_ratio <= max_aspect_ratio and solidity >= min_solidity and not is_too_thin:
+                    M = cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cx = int(M["m10"] / M["m00"])
+                        cy = int(M["m01"] / M["m00"])
+                        full_x = x1 + cx
+                        full_y = y1 + cy
+                        candidates.append((full_x, full_y))
+                        print(f"    ✅ CONTOUR {i}: area={area:.1f}px, AR={aspect_ratio:.1f}, sol={solidity:.2f}, center=({cx},{cy}) -> ({full_x},{full_y})")
+                    else:
+                        print(f"    ❌ CONTOUR {i}: area={area:.1f}px, invalid moments")
                 else:
-                    print(f"    ❌ CONTOUR {i}: area={area:.1f}px, invalid moments")
+                    rejection_reason = []
+                    if aspect_ratio > max_aspect_ratio:
+                        rejection_reason.append(f"too elongated (AR={aspect_ratio:.1f}>{max_aspect_ratio})")
+                    if solidity < min_solidity:
+                        rejection_reason.append(f"not solid enough (sol={solidity:.2f}<{min_solidity})")
+                    if is_too_thin:
+                        rejection_reason.append(f"too thin ({w}x{h}px, track-like)")
+                    print(f"    ❌ CONTOUR {i}: area={area:.1f}px, {', '.join(rejection_reason)}")
             else:
                 print(f"    ❌ CONTOUR {i}: area={area:.1f}px < {min_area_threshold}px")
         
