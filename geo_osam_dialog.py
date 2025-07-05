@@ -641,7 +641,7 @@ class OptimizedSAM2Worker(QThread):
                     # Calculate reasonable max size (10% of image area)
                     image_area = self.arr.shape[0] * self.arr.shape[1]
                     max_object_size = int(image_area * 0.1)
-                    
+
                     if pixel_count >= self.min_object_size:
                         if pixel_count <= max_object_size:
                             print(f"  🎯 Processing class: {current_class}")
@@ -1143,7 +1143,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         'Vegetation'  : {
             'color': '34,139,34',   
             'description': 'Trees, grass, and parks',
-            'batch_defaults': {'min_size': 30, 'max_objects': 40}
+            'batch_defaults': {'min_size': 30, 'max_objects': 100}
         },
         'Water'       : {
             'color': '30,144,255',  

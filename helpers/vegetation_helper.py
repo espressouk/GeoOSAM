@@ -77,7 +77,9 @@ class VegetationHelper(BaseDetectionHelper):
         kernel = np.ones((kernel_size, kernel_size), np.float32) / (kernel_size * kernel_size)
         mean = cv2.filter2D(gray.astype(np.float32), -1, kernel)
         sqr_mean = cv2.filter2D((gray.astype(np.float32))**2, -1, kernel)
-        texture = np.sqrt(sqr_mean - mean**2)
+        # Ensure non-negative values before sqrt to avoid numerical errors
+        variance = np.maximum(sqr_mean - mean**2, 0.0)
+        texture = np.sqrt(variance)
         
         print(f"  🔍 TEXTURE: Raw texture range: {texture.min():.4f} to {texture.max():.4f}")
         
