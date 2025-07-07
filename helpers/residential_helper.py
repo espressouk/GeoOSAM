@@ -113,20 +113,27 @@ class ResidentialHelper(BaseDetectionHelper):
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            # Size filtering with upper bound to exclude large vegetation areas
-            if area >= self.min_object_size and area <= 8000:
-                # BEST PRACTICE 5: Shape analysis for building characteristics
+            # Size filtering with stricter upper bound to exclude land patches
+            if area >= self.min_object_size and area <= 4000:  # Reduced from 8000 to exclude large land areas
+                # BEST PRACTICE 5: Enhanced shape analysis for building characteristics
                 x, y, w, h = cv2.boundingRect(contour)
                 aspect_ratio = max(w, h) / max(min(w, h), 1)
                 
-                # Calculate perimeter-to-area ratio (buildings are more compact)
+                # Calculate shape metrics to distinguish buildings from land
                 perimeter = cv2.arcLength(contour, True)
                 compactness = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
                 
-                # Buildings have reasonable aspect ratios and are reasonably compact
-                if (aspect_ratio < 5.0 and           # Not extremely elongated
-                    compactness > 0.12 and          # Reasonably compact shape
-                    w >= 5 and h >= 5):             # Minimum building size
+                # Calculate solidity (convex hull ratio) - buildings are more solid
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area > 0 else 0
+                
+                # Buildings have reasonable shape properties vs irregular land patches
+                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated
+                    compactness > 0.15 and          # Buildings are more compact than land patches
+                    solidity > 0.6 and              # Buildings are more solid/regular than land
+                    w >= 5 and h >= 5 and           # Minimum building size
+                    area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
                     
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
