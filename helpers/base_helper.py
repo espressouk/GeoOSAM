@@ -89,9 +89,12 @@ class BaseDetectionHelper(ABC):
         contour_area = cv2.contourArea(contour)
         solidity = contour_area / hull_area if hull_area > 0 else 0
         
+        perimeter = cv2.arcLength(contour, True)
+        
         return {
             'bbox': (x, y, w, h),
             'aspect_ratio': aspect_ratio,
             'area': contour_area,
-            'solidity': solidity
+            'solidity': solidity,
+            'perimeter': perimeter
         }

@@ -123,15 +123,36 @@ class VegetationHelper(BaseDetectionHelper):
                 solidity = area / hull_area if hull_area > 0 else 0
                 
                 # Vegetation should be compact, not elongated like roads/tracks
-                max_aspect_ratio = 2.0  # Stricter - reject elongated features
-                min_solidity = 0.5      # Stricter - vegetation should be more solid than tracks
+                max_aspect_ratio = 1.5  # Very strict - reject elongated features
+                min_solidity = 0.6      # Higher solidity - vegetation should be more solid than tracks
                 
                 # Additional check: reject if bounding box is very thin (road-like)
-                min_width = 8   # Minimum width in pixels
-                min_height = 8  # Minimum height in pixels
-                is_too_thin = (w < min_width and h > w * 3) or (h < min_height and w > h * 3)
+                min_width = 10  # Minimum width in pixels  
+                min_height = 10 # Minimum height in pixels
+                # Reject if either dimension is too small OR if it's too elongated
+                is_too_thin = (w < min_width) or (h < min_height) or (max(w,h)/min(w,h) > max_aspect_ratio)
                 
-                if aspect_ratio <= max_aspect_ratio and solidity >= min_solidity and not is_too_thin:
+                # Additional linearity check - calculate how much the contour deviates from a straight line
+                if len(contour) >= 5:  # Need at least 5 points for fitLine
+                    # Fit a line through the contour points
+                    [vx, vy, x, y] = cv2.fitLine(contour, cv2.DIST_L2, 0, 0.01, 0.01)
+                    
+                    # Calculate how well the contour fits a straight line
+                    line_distances = []
+                    for point in contour:
+                        px, py = point[0]
+                        # Distance from point to fitted line
+                        line_dist = abs((vy * (px - x) - vx * (py - y))) / np.sqrt(vx*vx + vy*vy)
+                        line_distances.append(line_dist)
+                    
+                    # If most points are close to the line, it's likely a road/track
+                    avg_line_distance = np.mean(line_distances)
+                    is_linear = avg_line_distance < 3.0  # Very close to straight line
+                else:
+                    is_linear = False
+                
+                if (aspect_ratio <= max_aspect_ratio and solidity >= min_solidity and 
+                    not is_too_thin and not is_linear):
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])

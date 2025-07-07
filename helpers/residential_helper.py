@@ -65,7 +65,7 @@ class ResidentialHelper(BaseDetectionHelper):
         return bbox_area * 0.6  # Medium threshold
     
     def _detect_bright_objects(self, bbox_image, bbox):
-        """Detect bright objects (residential buildings) using adaptive thresholding"""
+        """Enhanced residential building detection combining brightness with geometric features"""
         x1, y1, x2, y2 = bbox
         
         # Convert to grayscale
@@ -76,37 +76,66 @@ class ResidentialHelper(BaseDetectionHelper):
         
         print(f"  📊 Image stats: min={gray.min()}, max={gray.max()}, mean={gray.mean():.1f}")
         
-        # Adaptive thresholding to find bright objects
-        # Use mean + standard deviation to find objects brighter than background
-        mean_val = gray.mean()
-        std_val = gray.std()
-        threshold = min(255, mean_val + 1.5 * std_val)  # Objects significantly brighter than average
+        # BEST PRACTICE 1: Noise reduction with Gaussian blur
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         
-        print(f"  🎯 Using threshold: {threshold:.1f} (mean + 1.5*std)")
+        # BEST PRACTICE 2: Multi-modal thresholding approach
+        mean_val = blurred.mean()
+        std_val = blurred.std()
         
-        _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+        # Primary threshold: Statistical approach for bright objects
+        threshold_bright = min(255, mean_val + 1.2 * std_val)
         
-        # Morphological operations to clean up and separate objects
-        kernel = np.ones((3, 3), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=2)  # Remove noise
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)  # Fill gaps
+        # Secondary threshold: Otsu's method for adaptive segmentation
+        otsu_thresh, _ = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        # Find contours
+        # Combine approaches: Use brighter threshold to avoid vegetation
+        final_threshold = max(threshold_bright, otsu_thresh * 0.8)
+        
+        print(f"  🎯 Thresholds: bright={threshold_bright:.1f}, otsu={otsu_thresh}, final={final_threshold:.1f}")
+        
+        _, binary = cv2.threshold(blurred, final_threshold, 255, cv2.THRESH_BINARY)
+        
+        # BEST PRACTICE 3: Progressive morphological operations
+        # Start with small kernel to preserve building separation
+        small_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        medium_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        
+        # Remove small noise while preserving building shapes
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, small_kernel, iterations=1)
+        # Fill small gaps in building roofs
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, medium_kernel, iterations=1)
+        
+        # BEST PRACTICE 4: Contour analysis with geometric filtering
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         candidates = []
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            if area >= self.min_object_size:
-                M = cv2.moments(contour)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
+            # Size filtering with upper bound to exclude large vegetation areas
+            if area >= self.min_object_size and area <= 8000:
+                # BEST PRACTICE 5: Shape analysis for building characteristics
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / max(min(w, h), 1)
+                
+                # Calculate perimeter-to-area ratio (buildings are more compact)
+                perimeter = cv2.arcLength(contour, True)
+                compactness = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+                
+                # Buildings have reasonable aspect ratios and are reasonably compact
+                if (aspect_ratio < 5.0 and           # Not extremely elongated
+                    compactness > 0.12 and          # Reasonably compact shape
+                    w >= 5 and h >= 5):             # Minimum building size
                     
-                    full_x = x1 + cx
-                    full_y = y1 + cy
-                    candidates.append((full_x, full_y))
+                    M = cv2.moments(contour)
+                    if M["m00"] != 0:
+                        cx = int(M["m10"] / M["m00"])
+                        cy = int(M["m01"] / M["m00"])
+                        
+                        full_x = x1 + cx
+                        full_y = y1 + cy
+                        candidates.append((full_x, full_y))
         
-        print(f"  🏠 Found {len(candidates)} bright residential candidates")
+        print(f"  🏠 Found {len(candidates)} enhanced residential candidates")
         return candidates

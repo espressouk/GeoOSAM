@@ -1048,7 +1048,11 @@ class EnhancedBBoxClickTool(QgsMapTool):
         if self.is_dragging and self.start_point:
             end_point = self.canvas.getCoordinateTransform().toMapCoordinates(e.pos())
             rect = QgsRectangle(self.start_point, end_point)
-            if rect.width() > 10 and rect.height() > 10:
+            # Dynamic size validation based on coordinate system
+            # For geographic coordinates (degrees), use much smaller thresholds
+            min_size = 0.000001 if abs(rect.width()) < 1 and abs(rect.height()) < 1 else 10
+            
+            if rect.width() > min_size and rect.height() > min_size:
                 self.cb(rect)
             else:
                 self.bbox_rubber.reset(QgsWkbTypes.PolygonGeometry)
@@ -1123,7 +1127,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         'Residential' : {
             'color': '255,105,180', 
             'description': 'Housing areas',
-            'batch_defaults': {'min_size': 75, 'max_objects': 40}
+            'batch_defaults': {'min_size': 50, 'max_objects': 60}
         },
         'Roads'       : {
             'color': '105,105,105', 
@@ -1201,7 +1205,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.batch_mode_enabled = False
         self.min_object_size = 50  # Minimum pixels for valid object
         self.max_objects = 20  # Prevent too many small objects
-        self.duplicate_threshold = 0.5  # Spatial overlap threshold for duplicates
+        self.duplicate_threshold = 0.85  # Spatial overlap threshold for duplicates (very lenient for shape-based detection)
 
         self._setup_ui()
 
@@ -1951,6 +1955,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.current_mode = 'point'
         self.original_map_tool = self.canvas.mapTool()
 
+        # Disable batch mode for point mode (doesn't make sense for single points)
+        if self.batch_mode_enabled:
+            self.batchModeSwitch.setChecked(False)
+            self.batch_mode_enabled = False
+            self.batchSettingsFrame.setVisible(False)
+        
+        # Disable batch mode switch in point mode
+        self.batchModeSwitch.setEnabled(False)
+
         # Update button states
         self.pointModeBtn.setProperty("active", True)
         self.bboxModeBtn.setProperty("active", False)
@@ -1967,6 +1980,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         self.current_mode = 'bbox'
         self.original_map_tool = self.canvas.mapTool()
+
+        # Re-enable batch mode switch for bbox mode
+        self.batchModeSwitch.setEnabled(True)
 
         # Update button states
         self.pointModeBtn.setProperty("active", False)
@@ -2147,15 +2163,27 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _get_adaptive_bbox_padding(self, bbox_area):
         """Calculate adaptive padding based on bbox size to reduce background inclusion"""
-        # For large areas, use minimal padding to avoid including too much background
-        if bbox_area > 500000:      # Very large area
-            return 0.02             # 2% padding
-        elif bbox_area > 100000:    # Large area  
-            return 0.05             # 5% padding
-        elif bbox_area > 50000:     # Medium area
-            return 0.1              # 10% padding
-        else:                       # Small area
-            return 0.2              # 20% padding
+        # For geographic coordinates (small areas), use different thresholds
+        if bbox_area < 1:  # Geographic coordinates in degrees
+            if bbox_area > 0.1:         # Very large geographic area
+                return 0.02             # 2% padding
+            elif bbox_area > 0.01:      # Large geographic area  
+                return 0.05             # 5% padding
+            elif bbox_area > 0.001:     # Medium geographic area
+                return 0.1              # 10% padding
+            elif bbox_area > 0.000001:  # Small geographic area
+                return 0.2              # 20% padding
+            else:                       # Very small geographic area
+                return 0.3              # 30% padding
+        else:  # Projected coordinates (large areas)
+            if bbox_area > 500000:      # Very large area
+                return 0.02             # 2% padding
+            elif bbox_area > 100000:    # Large area  
+                return 0.05             # 5% padding
+            elif bbox_area > 50000:     # Medium area
+                return 0.1              # 10% padding
+            else:                       # Small area
+                return 0.2              # 20% padding
 
     def _add_features_to_layer(self, features, debug_info, object_count, filename=None):
         """Add features to the appropriate class layer"""
@@ -2355,7 +2383,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     bbox_area = bbox_width * bbox_height
 
                     # SMART HYBRID: Adaptive padding based on area size
-                    if bbox_area > 50000:  # Large areas get adaptive padding
+                    # For geographic coordinates, use much smaller thresholds
+                    large_area_threshold = 0.000001 if bbox_area < 1 else 50000
+                    
+                    if bbox_area > large_area_threshold:  # Large areas get adaptive padding
                         padding_factor = self._get_adaptive_bbox_padding(bbox_area)
                         print(f"🎯 LARGE area ({bbox_area:.0f}): adaptive padding {padding_factor*100:.1f}%")
 
