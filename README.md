@@ -316,7 +316,7 @@ If you use GeoOSAM in your research, please cite:
 - **📊 NEW**: Comprehensive logging for debugging high-resolution imagery issues
 - **🛰️ NEW**: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
 
-### v1.1.0 - Latest (2025-07-03)
+### v1.2.0 - Latest (2025-07-08)
 
 - **FIXED**: Multiple raster layer support - segmentation now works with selected raster (same CRS)
 - **FIXED**: Panel focus management - controls properly lose focus after use
@@ -378,6 +378,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2025-07-03
-**Plugin Version:** 1.1.0
+**Last updated:** 2025-07-08
+**Plugin Version:** 1.2.0
 **QGIS Compatibility:** 3.16+

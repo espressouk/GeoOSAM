@@ -352,7 +352,7 @@ Priority languages for GIS community:
 We use [Semantic Versioning](https://semver.org/):
 
 - **1.0.0** - Major release
-- **1.1.0** - Minor features
+- **1.2.0** - Minor features
 - **1.0.1** - Bug fixes
 
 ### Release Checklist
@@ -370,7 +370,7 @@ We use [Semantic Versioning](https://semver.org/):
 
 - **GitHub Discussions** - For general questions
 - **Issues** - For bug reports and feature requests
-- **Email** - ofer@butbega.com for sensitive matters
+- **Email** - bkst.dev@gmail.com for sensitive matters
 
 ### Development Chat
 

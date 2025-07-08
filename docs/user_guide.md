@@ -17,7 +17,7 @@
 1. **Select Output Folder** (optional - defaults to `~/GeoOSAM_shapefiles`)
 2. **Choose a Class** from the dropdown (e.g., "Buildings")
 3. **Point mode activates automatically** 🎯
-4. **Click on objects** to segment (expect <1s on powerful systems!)
+4. **Click on objects** to segment - supports rapid clicking with queue system (expect <1s on powerful systems!)
 5. **Export results** as professional shapefiles
 
 ---
@@ -253,6 +253,21 @@ Each polygon includes comprehensive metadata:
 - **Avoid edges**: Both SAM 2.1 and MobileSAM work better from object centers
 - **Consistent scale**: Maintain appropriate zoom for object size
 - **Quick workflow**: Modern performance allows rapid clicking
+
+#### **🚀 Queue System (v1.2.0+)**
+
+- **Non-blocking**: Click multiple objects without waiting for processing
+- **Sequential processing**: Requests processed in order automatically  
+- **Status feedback**: Shows "🔄 Queued point... - Position X" and processing progress
+- **Queue management**: See remaining items during processing
+- **Class preservation**: Each queued request remembers its target class
+
+**Example workflow:**
+1. Select "Buildings" class
+2. Rapidly click 10 building centers (all get queued instantly)
+3. Switch to "Vehicle" class while buildings process
+4. Click vehicles (added to queue)
+5. All requests process sequentially with clear status updates
 
 ---
 

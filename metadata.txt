@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=Advanced segmentation tool with intelligent SAM 2.1/MobileSAM selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
 about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics MobileSAM to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and MobileSAM for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles MobileSAM downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
-version=1.1.0
+version=1.2.0
 author=Ofer Butbega
 email=bkst.dev@gmail.com
 
@@ -32,7 +32,29 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.1.0 - Major Bug Fixes and GUI Improvements
+changelog=1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
+    - NEW: Native multi-spectral UAV/satellite imagery support (5+ bands)
+    - NEW: Automatic NDVI calculation for vegetation detection using NIR/Red bands
+    - NEW: Enhanced batch processing with up to 200 objects for vegetation
+    - NEW: Intelligent shape filtering to reject roads/tracks in vegetation detection
+    - NEW: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
+    - NEW: Specialized detection helpers for Agriculture, Road, Vehicle, Water, Vessels, and General classes
+    - NEW: Non-blocking queue system - submit multiple requests without waiting
+    - NEW: Class-specific validation and detection algorithms optimized for each object type
+    - FIXED: High-resolution reflectance value preservation (0-1 range) and data type truncation
+    - FIXED: SAM2 tensor mismatch errors with multi-spectral input
+    - FIXED: Vessels detection shoreline noise with strict size validation (>5000px rejection)
+    - FIXED: Oversized mask validation (rejects masks >10% of image area)
+    - FIXED: Crash prevention with robust processing state management
+    - FIXED: Shape attribute renamed from 'class_name' to 'class' for consistency
+    - FIXED: Mathematical warnings in texture calculation
+    - ENHANCED: Vegetation detection with aspect ratio and solidity filtering
+    - ENHANCED: Sequential processing with queue status feedback and position tracking
+    - ENHANCED: Point and batch mode validation consistency
+    - IMPROVED: Comprehensive logging for debugging high-resolution imagery issues
+    - IMPROVED: User experience with rapid clicking support and clear status messages
+    
+    1.1.0 - Major Bug Fixes and GUI Improvements
     - FIXED: Multiple raster layer support - segmentation now works with selected raster layer
     - FIXED: Resolved "point is out of raster bounds" exception with multiple rasters loaded (must be same CRS)
     - FIXED: Panel focus management - controls properly lose focus after use
@@ -74,4 +96,4 @@ changelog=1.1.0 - Major Bug Fixes and GUI Improvements
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-07-03
+update_date=2025-07-08
