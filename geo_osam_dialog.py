@@ -502,12 +502,21 @@ class OptimizedSAM2Worker(QThread):
         try:
             # Use helper for validation
             helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+            
+            # Debug mask info
+            mask_area = np.sum(mask > 0) if hasattr(mask, 'sum') else 0
+            print(f"🔍 VALIDATION DEBUG - Class: {class_name}, Mask area: {mask_area} pixels")
+            
             valid_masks = helper.process_sam_mask(mask)
-            return len(valid_masks) > 0
+            result = len(valid_masks) > 0
+            print(f"🔍 VALIDATION RESULT: {result} (found {len(valid_masks)} valid masks)")
+            
+            return result
 
         except Exception as e:
             print(f"Validation error: {e}")
             return False
+
 
     def _validate_object_shape(self, mask, area):
         """Validate if the detected object has a reasonable shape"""
@@ -1195,6 +1204,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Undo functionality
         self.undo_stack = []
 
+        # Processing queue system
+        self.processing_queue = []
+        self.is_processing = False
+        self.worker = None
+
         # Initialize
         self._init_save_directories()
         self.pointTool = EnhancedPointClickTool(self.canvas, self._point_done)
@@ -1346,7 +1360,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         main_layout = QtWidgets.QVBoxLayout(main_widget)
         main_layout.setSpacing(12)                    # Reduced spacing
         main_layout.setContentsMargins(15, 15, 15, 15)  # Reduced margins
-        main_widget.setStyleSheet("background: transparent; color: #344054;")
+        main_widget.setStyleSheet("""
+            background: transparent; 
+            color: #344054;
+        """)
+        
+        # Improved tooltip styling for better readability
+        self.setStyleSheet("""
+            QToolTip {
+                background-color: #ffffff;
+                color: #1a202c;
+                border: 1px solid #cbd5e0;
+                border-radius: 6px;
+                padding: 8px 10px;
+                font-size: 11px;
+                font-weight: 500;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+        """)
 
         # Allow flexible resizing
         self.setMinimumWidth(300)
@@ -1995,33 +2026,104 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.canvas.setMapTool(self.bboxTool)
 
     def _point_done(self, pt):
-        self.point = pt
-        self.bbox = None
-        self._update_status(
-            f"Processing point at ({pt.x():.1f}, {pt.y():.1f})...", "processing")
-        self._run_segmentation()
+        # Add to queue instead of blocking
+        request = {
+            'type': 'point',
+            'point': pt,
+            'bbox': None,
+            'class': self.current_class,
+            'timestamp': datetime.datetime.now()
+        }
+        self._add_to_queue(request)
 
     def _bbox_done(self, rect):
-        self.bbox = rect
-        self.point = None
-        self._update_status(
-            f"Processing bbox ({rect.width():.1f}×{rect.height():.1f})...", "processing")
+        # Add to queue instead of blocking
+        request = {
+            'type': 'bbox',
+            'point': None,
+            'bbox': rect,
+            'class': self.current_class,
+            'timestamp': datetime.datetime.now()
+        }
+        self._add_to_queue(request)
+
+    def _add_to_queue(self, request):
+        """Add a request to the processing queue"""
+        self.processing_queue.append(request)
+        queue_position = len(self.processing_queue)
+        
+        if request['type'] == 'point':
+            pt = request['point']
+            self._update_status(
+                f"🔄 Queued point ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}] - Position {queue_position}", 
+                "info")
+        else:
+            rect = request['bbox']
+            self._update_status(
+                f"🔄 Queued bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}] - Position {queue_position}", 
+                "info")
+        
+        # Start processing if not already running
+        self._process_queue()
+    
+    def _process_queue(self):
+        """Process the next item in the queue"""
+        if self.is_processing or not self.processing_queue:
+            return
+        
+        # Get next request
+        request = self.processing_queue.pop(0)
+        remaining = len(self.processing_queue)
+        
+        # Set current request data
+        self.point = request['point']
+        self.bbox = request['bbox']
+        self.current_class = request['class']
+        
+        # Update status with queue info
+        if request['type'] == 'point':
+            pt = request['point']
+            status_msg = f"Processing point ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}]"
+        else:
+            rect = request['bbox']
+            status_msg = f"Processing bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}]"
+        
+        if remaining > 0:
+            status_msg += f" - {remaining} more in queue"
+        
+        self._update_status(status_msg, "processing")
+        
+        # Start segmentation
         self._run_segmentation()
 
     def _run_segmentation(self):
         """Enhanced segmentation that ensures current layer is used"""
+        # Prevent multiple simultaneous requests
+        if self.is_processing:
+            self._update_status("Processing already in progress, please wait...", "warning")
+            return
+            
+        # Cancel any existing worker
+        if self.worker and self.worker.isRunning():
+            self._cancel_segmentation_safely()
+            
+        # Set processing state
+        self.is_processing = True
+        
         # DEBUG: Verify settings are correct
         if self.batch_mode_enabled and self.current_mode == 'bbox':
             self._debug_current_settings()
 
         if not self.current_class:
             self._update_status("No class selected", "error")
+            self.is_processing = False
             return
 
         # Get the CURRENT active layer (not stored reference)
         current_layer = self.iface.activeLayer()
         if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
             self._update_status("Please select a valid raster layer", "error")
+            self.is_processing = False
             return
 
         # Update stored reference to current layer
@@ -2029,6 +2131,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         if self.point is None and self.bbox is None:
             self._update_status("No selection found", "error")
+            self.is_processing = False
             return
 
         import time
@@ -2160,6 +2263,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             return []
 
         return features
+
 
     def _get_adaptive_bbox_padding(self, bbox_area):
         """Calculate adaptive padding based on bbox size to reduce background inclusion"""
@@ -2688,9 +2792,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._update_status(error_msg, "error")
         finally:
             self._set_ui_enabled(True)
+            self.is_processing = False  # Reset processing state
             if hasattr(self, 'worker') and self.worker:
                 self.worker.deleteLater()
                 self.worker = None
+            
+            # Process next item in queue
+            self._process_queue()
 
     def _get_next_segment_id(self, layer, class_name):
         """Get the next available segment ID for a class"""
@@ -2974,7 +3082,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self._update_status(f"Failed to save debug mask: {e}", "warning")
                 filename = "save_failed"
 
-        # Convert mask to features
+        # Convert mask to features  
         features = self._convert_mask_to_features(mask, mask_transform)
         if not features:
             self._update_status("No segments found", "warning")
@@ -3031,7 +3139,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         layer.dataProvider().addAttributes([
             QgsField("segment_id", QVariant.Int),
-            QgsField("class_name", QVariant.String),
+            QgsField("class", QVariant.String),
             QgsField("class_color", QVariant.String),
             QgsField("method", QVariant.String),
             QgsField("timestamp", QVariant.String),
@@ -3192,9 +3300,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _on_segmentation_error(self, error_message):
         self._update_status(f"❌ {error_message}", "error")
         self._set_ui_enabled(True)
+        self.is_processing = False  # Reset processing state
         if hasattr(self, 'worker') and self.worker:
             self.worker.deleteLater()
             self.worker = None
+        
+        # Process next item in queue
+        self._process_queue()
+    
+    def _clear_queue(self):
+        """Clear the processing queue"""
+        cleared_count = len(self.processing_queue)
+        self.processing_queue.clear()
+        if cleared_count > 0:
+            self._update_status(f"🗑️ Cleared {cleared_count} items from queue", "info")
+    
+    def _get_queue_status(self):
+        """Get current queue status"""
+        return f"Queue: {len(self.processing_queue)} pending"
 
     def _cancel_segmentation(self):
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
@@ -3204,6 +3327,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.worker = None
             self._update_status("Segmentation cancelled", "warning")
             self._set_ui_enabled(True)
+            self.is_processing = False  # Reset processing state
 
     def _set_ui_enabled(self, enabled):
         self.pointModeBtn.setEnabled(enabled)

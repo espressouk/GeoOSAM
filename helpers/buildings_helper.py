@@ -16,8 +16,8 @@ class BuildingsHelper(BaseDetectionHelper):
         super().__init__(class_name, min_object_size, max_objects)
     
     def detect_candidates(self, bbox_image, bbox):
-        """Buildings-specific rectangular detection"""
-        return self._detect_rectangular_objects(bbox_image, bbox)
+        """Buildings-specific bright object detection"""
+        return self._detect_bright_objects(bbox_image, bbox)
     
     def validate_object(self, component_mask, component_area, min_object_size):
         """Buildings-specific validation"""
@@ -59,8 +59,8 @@ class BuildingsHelper(BaseDetectionHelper):
         """Buildings-specific background threshold"""
         return bbox_area * 0.6  # Medium threshold
     
-    def _detect_rectangular_objects(self, bbox_image, bbox):
-        """Detect rectangular objects (buildings) using edge detection"""
+    def _detect_bright_objects(self, bbox_image, bbox):
+        """Enhanced building detection combining brightness with geometric features"""
         x1, y1, x2, y2 = bbox
         
         # Convert to grayscale
@@ -69,22 +69,67 @@ class BuildingsHelper(BaseDetectionHelper):
         else:
             gray = bbox_image
         
-        # Edge detection
-        edges = cv2.Canny(gray, 50, 150)
+        print(f"  📊 Image stats: min={gray.min()}, max={gray.max()}, mean={gray.mean():.1f}")
         
-        # Find contours from edges
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # BEST PRACTICE 1: Noise reduction with Gaussian blur
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        
+        # BEST PRACTICE 2: Multi-modal thresholding approach
+        mean_val = blurred.mean()
+        std_val = blurred.std()
+        
+        # Primary threshold: Statistical approach for bright objects
+        threshold_bright = min(255, mean_val + 1.2 * std_val)
+        
+        # Secondary threshold: Otsu's method for adaptive segmentation
+        otsu_thresh, _ = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Combine approaches: Use brighter threshold to avoid vegetation
+        final_threshold = max(threshold_bright, otsu_thresh * 0.8)
+        
+        print(f"  🎯 Thresholds: bright={threshold_bright:.1f}, otsu={otsu_thresh}, final={final_threshold:.1f}")
+        
+        _, binary = cv2.threshold(blurred, final_threshold, 255, cv2.THRESH_BINARY)
+        
+        # BEST PRACTICE 3: Progressive morphological operations
+        # Start with small kernel to preserve building separation
+        small_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        medium_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        
+        # Remove small noise while preserving building shapes
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, small_kernel, iterations=1)
+        # Fill small gaps in building roofs
+        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, medium_kernel, iterations=1)
+        
+        # BEST PRACTICE 4: Contour analysis with geometric filtering
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         candidates = []
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            if area >= self.min_object_size:
-                # Check if contour is roughly rectangular
-                epsilon = 0.02 * cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, epsilon, True)
+            # Size filtering with stricter upper bound to exclude land patches
+            if area >= self.min_object_size and area <= 4000:  # Reduced from 8000 to exclude large land areas
+                # BEST PRACTICE 5: Enhanced shape analysis for building characteristics
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / max(min(w, h), 1)
                 
-                if len(approx) >= 4:  # Roughly rectangular
+                # Calculate shape metrics to distinguish buildings from land
+                perimeter = cv2.arcLength(contour, True)
+                compactness = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+                
+                # Calculate solidity (convex hull ratio) - buildings are more solid
+                hull = cv2.convexHull(contour)
+                hull_area = cv2.contourArea(hull)
+                solidity = area / hull_area if hull_area > 0 else 0
+                
+                # Buildings have reasonable shape properties vs irregular land patches
+                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated
+                    compactness > 0.15 and          # Buildings are more compact than land patches
+                    solidity > 0.6 and              # Buildings are more solid/regular than land
+                    w >= 5 and h >= 5 and           # Minimum building size
+                    area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
+                    
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
@@ -94,5 +139,5 @@ class BuildingsHelper(BaseDetectionHelper):
                         full_y = y1 + cy
                         candidates.append((full_x, full_y))
         
-        print(f"  🏢 Found {len(candidates)} rectangular building candidates")
+        print(f"  🏢 Found {len(candidates)} enhanced building candidates")
         return candidates
