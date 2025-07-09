@@ -74,14 +74,17 @@ For current limitations and upcoming fixes, see:
 **Batch mode is currently in active development** with varying performance across different object classes:
 
 ### 🎯 **Tested Classes:**
+
 - **Vegetation** ✅ - Advanced NDVI analysis, excellent results with multi-spectral imagery
 - **Vessels** ✅ - Optimized for water body detection, good performance
 - **Buildings/Residential** 🔧 - Basic functionality, mixed results
 
 ### 🔧 **Classes Under Development:**
+
 - **Other classes** 🚧 - Limited testing, performance may vary
 
 ### 📝 **Best Practice:**
+
 - **Point-click mode** remains the most reliable for all classes
 - **Batch mode** works best on clear, high-contrast imagery
 - **Mixed workflow** recommended: use batch where it works well, point-click for precision
@@ -219,13 +222,13 @@ bash download_sam2_checkpoints.sh
 
 GeoOSAM now provides native support for high-resolution multi-spectral imagery:
 
-| Feature | Capability | Benefit |
-|---------|------------|---------|
-| **5+ Band Support** | Automatic NDVI calculation | Superior vegetation detection |
-| **Reflectance Values** | 0-1 range preservation | Accurate spectral analysis |
-| **High Resolution** | UAV imagery (0.08m/pixel) | Fine-scale object detection |
-| **Batch Processing** | Up to 200 objects per selection | Efficient large-area mapping |
-| **Shape Filtering** | Road/track rejection | Clean vegetation results |
+| Feature                | Capability                      | Benefit                       |
+| ---------------------- | ------------------------------- | ----------------------------- |
+| **5+ Band Support**    | Automatic NDVI calculation      | Superior vegetation detection |
+| **Reflectance Values** | 0-1 range preservation          | Accurate spectral analysis    |
+| **High Resolution**    | UAV imagery (0.08m/pixel)       | Fine-scale object detection   |
+| **Batch Processing**   | Up to 200 objects per selection | Efficient large-area mapping  |
+| **Shape Filtering**    | Road/track rejection            | Clean vegetation results      |
 
 ### **Supported Image Types**
 
@@ -240,7 +243,7 @@ GeoOSAM now provides native support for high-resolution multi-spectral imagery:
 🔹 **5+ Bands**: Automatic NDVI calculation using NIR/Red bands  
 🔹 **3-4 Bands**: Enhanced green channel processing  
 🔹 **RGB**: Standard texture analysis  
-🔹 **Single Band**: Grayscale texture detection  
+🔹 **Single Band**: Grayscale texture detection
 
 ### **Vegetation Detection Excellence**
 
@@ -326,7 +329,7 @@ If you use GeoOSAM in your research, please cite:
 - **📊 NEW**: Comprehensive logging for debugging high-resolution imagery issues
 - **🛰️ NEW**: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
 
-### v1.2.0 - Latest (2025-07-08)
+### v1.1.0 - Latest (2025-07-08)
 
 - **FIXED**: Multiple raster layer support - segmentation now works with selected raster (same CRS)
 - **FIXED**: Panel focus management - controls properly lose focus after use
