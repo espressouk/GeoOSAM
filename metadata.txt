@@ -35,7 +35,7 @@ plugin_dependencies=
 changelog=1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
     - NEW: Native multi-spectral UAV/satellite imagery support (5+ bands)
     - NEW: Automatic NDVI calculation for vegetation detection using NIR/Red bands
-    - NEW: Enhanced batch processing with up to 200 objects for vegetation
+    - NEW: Enhanced batch processing with up to 100 objects for vegetation
     - NEW: Intelligent shape filtering to reject roads/tracks in vegetation detection
     - NEW: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
     - NEW: Specialized detection helpers for Agriculture, Road, Vehicle, Water, Vessels, and General classes

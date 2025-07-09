@@ -301,7 +301,7 @@ For **5+ band imagery**, vegetation detection uses:
 
 - **NDVI Calculation**: `(NIR - Red) / (NIR + Red)` using bands 4 and 3
 - **Shape Filtering**: Rejects roads/tracks (aspect ratio ≤ 2.0, solidity ≥ 0.5)
-- **Batch Processing**: Up to 200 vegetation objects per selection
+- **Batch Processing**: Up to 100 vegetation objects per selection
 - **Size Validation**: Rejects oversized masks (>10% of image)
 
 #### **Multi-spectral Workflow Steps**
@@ -312,7 +312,7 @@ For **5+ band imagery**, vegetation detection uses:
 
 2. **Select Vegetation Class**
    - NDVI processing activates automatically
-   - Max objects increases to 200 for dense areas
+   - Max objects increases to 100 for dense areas
 
 3. **Use Batch Mode** (Recommended for vegetation)
    - Draw bounding box around vegetation area
@@ -381,7 +381,7 @@ For **5+ band imagery**, vegetation detection uses:
    - Plugin automatically detects bands and enables NDVI
    - Reflectance values (0-1) handled automatically
 2. **Vegetation Mapping:** Select "Vegetation" class
-   - Batch mode processes up to 200 vegetation patches
+   - Batch mode processes up to 100 vegetation patches
    - NDVI calculation provides superior detection
    - Automatic filtering removes roads/tracks
 3. **Water Bodies:** Select "Water" class for water body mapping

@@ -227,7 +227,7 @@ GeoOSAM now provides native support for high-resolution multi-spectral imagery:
 | **5+ Band Support**    | Automatic NDVI calculation      | Superior vegetation detection |
 | **Reflectance Values** | 0-1 range preservation          | Accurate spectral analysis    |
 | **High Resolution**    | UAV imagery (0.08m/pixel)       | Fine-scale object detection   |
-| **Batch Processing**   | Up to 200 objects per selection | Efficient large-area mapping  |
+| **Batch Processing**   | Up to 100 objects per selection | Efficient large-area mapping  |
 | **Shape Filtering**    | Road/track rejection            | Clean vegetation results      |
 
 ### **Supported Image Types**
@@ -320,7 +320,7 @@ If you use GeoOSAM in your research, please cite:
 - **🌿 NEW**: Automatic NDVI calculation for vegetation detection using NIR/Red bands
 - **🔧 FIXED**: High-resolution reflectance value preservation (0-1 range)
 - **🔧 FIXED**: Data type truncation issues with multi-spectral imagery
-- **🚀 NEW**: Enhanced batch processing with up to 200 objects for vegetation
+- **🚀 NEW**: Enhanced batch processing with up to 100 objects for vegetation
 - **🎯 NEW**: Intelligent shape filtering to reject roads/tracks in vegetation detection
 - **🔧 FIXED**: SAM2 tensor mismatch errors with multi-spectral input
 - **🔧 FIXED**: Oversized mask validation (rejects masks >10% of image area)
