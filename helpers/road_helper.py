@@ -1,7 +1,7 @@
 """
 Road Detection Helper
 
-Specialized helper for road detection using linear feature detection.
+Specialized helper for road detection using OpenCV algorithms.
 """
 
 import cv2
@@ -71,7 +71,7 @@ class RoadHelper(BaseDetectionHelper):
         return bbox_area * 0.5  # Medium threshold
     
     def _detect_linear_objects(self, bbox_image, bbox):
-        """Smart road detection: find center lines, then expand to full road width"""
+        """Simple, guaranteed OpenCV road detection"""
         x1, y1, x2, y2 = bbox
         
         # Convert to grayscale
@@ -80,97 +80,119 @@ class RoadHelper(BaseDetectionHelper):
         else:
             gray = bbox_image
         
+        print(f"  🛣️ OPENCV: Simple road detection on {gray.shape[1]}x{gray.shape[0]}px image")
         print(f"  📊 Image stats: min={gray.min()}, max={gray.max()}, mean={gray.mean():.1f}")
         
-        # Step 1: Find center lines using skeletonization approach
-        # Roads are typically medium brightness
+        # Step 1: Enhanced edge detection for road boundaries
+        # Use adaptive thresholding for better edge detection
         mean_val = gray.mean()
         std_val = gray.std()
         
-        # Initial road detection (adaptive thresholds for different road types)
-        # Roads can be darker or brighter than background
-        road_threshold_low = max(0, mean_val - 1.2 * std_val)
-        road_threshold_high = min(255, mean_val + 1.2 * std_val)
+        # Dynamic Canny thresholds based on image statistics
+        lower_thresh = max(50, int(mean_val - 0.5 * std_val))
+        upper_thresh = min(200, int(mean_val + 0.5 * std_val))
         
-        print(f"  🛣️ Road brightness range: {road_threshold_low:.1f} - {road_threshold_high:.1f}")
+        edges = cv2.Canny(gray, lower_thresh, upper_thresh, apertureSize=3)
+        print(f"  🔍 EDGES: Adaptive thresholds ({lower_thresh}, {upper_thresh}), found {np.sum(edges > 0)} edge pixels")
         
-        # Create binary mask for road-like areas (more inclusive)
-        # Try both darker and brighter roads
-        dark_roads = cv2.inRange(gray, 0, int(mean_val - 0.3 * std_val))
-        bright_roads = cv2.inRange(gray, int(mean_val + 0.3 * std_val), 255)
-        medium_roads = cv2.inRange(gray, int(road_threshold_low), int(road_threshold_high))
+        # Step 2: Detect both straight and curved road segments
+        final_mask = np.zeros(gray.shape, dtype=np.uint8)
         
-        # Combine all road possibilities
-        road_mask = cv2.bitwise_or(dark_roads, bright_roads)
-        road_mask = cv2.bitwise_or(road_mask, medium_roads)
+        # Part A: Hough lines for straight road segments
+        lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=30, minLineLength=50, maxLineGap=10)
         
-        # Step 2: Clean up the mask to get road shapes
-        kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_OPEN, kernel_clean, iterations=1)
-        road_mask = cv2.morphologyEx(road_mask, cv2.MORPH_CLOSE, kernel_clean, iterations=2)
+        straight_pixels = 0
         
-        # Step 3: Find skeletons (center lines) of road areas
-        try:
-            from skimage import morphology
-            # Convert to binary for skeletonization
-            binary = road_mask > 0
-            # Get skeleton (center lines)
-            skeleton = morphology.skeletonize(binary)
-            skeleton = (skeleton * 255).astype(np.uint8)
-        except ImportError:
-            # Fallback: Use morphological erosion to find centerlines
-            print("  ⚠️ skimage not available, using morphological centerline detection")
+        if lines is not None:
+            print(f"  📏 HOUGH: Found {len(lines)} straight line segments")
+            # Draw thick lines to represent straight roads
+            for line in lines:
+                x1_line, y1_line, x2_line, y2_line = line[0]
+                # Calculate line length and angle
+                length = np.sqrt((x2_line - x1_line)**2 + (y2_line - y1_line)**2)
+                
+                # Only keep longer lines (likely roads, not noise)
+                if length > 40:
+                    # Draw thick line to represent road width
+                    thickness = min(15, max(8, int(length / 20)))  # Adaptive thickness
+                    cv2.line(final_mask, (x1_line, y1_line), (x2_line, y2_line), 255, thickness)
+                    straight_pixels += thickness * length
             
-            # Create different directional kernels to detect centerlines
-            kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 7))  # Detect horizontal centerlines
-            kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 1))  # Detect vertical centerlines
-            
-            # Erode with different kernels to get centerlines
-            centerline_h = cv2.morphologyEx(road_mask, cv2.MORPH_ERODE, kernel_h, iterations=3)
-            centerline_v = cv2.morphologyEx(road_mask, cv2.MORPH_ERODE, kernel_v, iterations=3)
-            
-            # Combine centerlines
-            skeleton = cv2.bitwise_or(centerline_h, centerline_v)
-            
-            # Clean up skeleton
-            kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            skeleton = cv2.morphologyEx(skeleton, cv2.MORPH_CLOSE, kernel_clean, iterations=1)
+            print(f"  ✅ STRAIGHT: Generated {int(straight_pixels)} straight road pixels")
+        else:
+            print(f"  ❌ STRAIGHT: No straight road lines detected")
         
-        # Step 4: Expand skeleton back to realistic road width
-        # Use different kernels for different road orientations
-        kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 7))  # Horizontal roads
-        kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 15))  # Vertical roads
-        kernel_d = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))  # Diagonal roads
+        # Part B: Curved road detection using contour analysis
+        print(f"  🌀 CURVES: Detecting curved road segments")
         
-        # Expand skeleton in all directions
-        expanded_h = cv2.morphologyEx(skeleton, cv2.MORPH_DILATE, kernel_h, iterations=1)
-        expanded_v = cv2.morphologyEx(skeleton, cv2.MORPH_DILATE, kernel_v, iterations=1)
-        expanded_d = cv2.morphologyEx(skeleton, cv2.MORPH_DILATE, kernel_d, iterations=1)
+        # Create a mask for potential curved roads
+        # Use morphological operations to find road-like curves
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        edges_closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_close, iterations=1)
         
-        # Combine all expansions
-        final_mask = cv2.bitwise_or(expanded_h, expanded_v)
-        final_mask = cv2.bitwise_or(final_mask, expanded_d)
+        # Find contours that could be curved roads
+        curve_contours, _ = cv2.findContours(edges_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Intersect with original road areas to avoid expanding into non-road areas
-        final_mask = cv2.bitwise_and(final_mask, road_mask)
+        curved_pixels = 0
+        curve_count = 0
         
-        # Final cleanup
-        final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_clean, iterations=1)
-        
-        # Find contours
-        contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        candidates = []
-        for contour in contours:
+        for contour in curve_contours:
+            # Analyze contour for road-like curves
             area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
             
-            if area >= self.min_object_size * 0.3:  # Lower threshold for center-line approach
-                # Check if it's road-like (elongated)
+            if area > 100 and perimeter > 80:  # Minimum size for road curves
+                # Check if it's elongated and smooth (road-like)
                 x, y, w, h = cv2.boundingRect(contour)
                 aspect_ratio = max(w, h) / max(min(w, h), 1)
                 
-                # Roads should be elongated and have minimum dimensions
-                if aspect_ratio >= 1.2 and w >= 5 and h >= 5:  # More permissive for center-line
+                # Calculate curve smoothness
+                epsilon = 0.02 * perimeter
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                
+                # Road curves should be elongated and not too angular
+                if aspect_ratio > 2.0 and len(approx) > 4:
+                    # Calculate road width based on area and perimeter
+                    estimated_width = min(20, max(6, int(area / (perimeter / 2))))
+                    
+                    # Draw the curved road
+                    cv2.drawContours(final_mask, [contour], -1, 255, estimated_width)
+                    curved_pixels += area
+                    curve_count += 1
+        
+        print(f"  🌀 CURVES: Found {curve_count} curved segments, {int(curved_pixels)} curve pixels")
+        
+        # Part C: Final cleanup and combination
+        if straight_pixels > 0 or curved_pixels > 0:
+            # Clean up the combined mask
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+            
+            total_pixels = np.sum(final_mask > 0)
+            print(f"  ✅ OPENCV: Combined road mask with {total_pixels} pixels (straight + curves)")
+        else:
+            print(f"  ❌ OPENCV: No roads detected (straight or curved)")
+        
+        # Find contours from OpenCV road mask
+        contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        candidates = []
+        print(f"  🛣️ OPENCV: Found {len(contours)} road segments")
+        
+        for i, contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            
+            # Simple validation - just check minimum size
+            if area >= self.min_object_size * 0.5:  # More permissive for OpenCV detection
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = max(w, h) / max(min(w, h), 1)
+                
+                print(f"  🔍 ROAD SEGMENT {i}: area={area:.1f}px, {w}x{h}px, AR={aspect_ratio:.1f}")
+                
+                # Simple validation - roads should be somewhat elongated
+                if aspect_ratio >= 1.5 and w >= 10 and h >= 10:
+                    # Use center point for SAM
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
@@ -179,8 +201,15 @@ class RoadHelper(BaseDetectionHelper):
                         full_x = x1 + cx
                         full_y = y1 + cy
                         candidates.append((full_x, full_y))
+                        print(f"  ✅ ROAD SEGMENT {i}: ACCEPTED -> center=({full_x},{full_y})")
+                    else:
+                        print(f"  ❌ ROAD SEGMENT {i}: Invalid moments")
+                else:
+                    print(f"  ❌ ROAD SEGMENT {i}: Failed validation (AR={aspect_ratio:.1f} < 1.5 or too small)")
+            else:
+                print(f"  ❌ ROAD SEGMENT {i}: Too small ({area:.1f} < {self.min_object_size * 0.5:.1f})")
         
-        print(f"  🛣️ Found {len(candidates)} road candidates using center-line approach")
+        print(f"  🛣️ OPENCV: Found {len(candidates)} road candidates")
         return candidates
     
     def _group_nearby_candidates(self, candidate_points, max_distance=100):
@@ -221,3 +250,15 @@ class RoadHelper(BaseDetectionHelper):
             groups.append(group)
         
         return groups
+
+    def get_merge_buffer_size(self):
+        """Roads: Allow moderate merging"""
+        return 4
+    
+    def get_iou_threshold(self):
+        """Roads: Allow merging of connected road segments"""
+        return 0.2
+    
+    def should_merge_duplicates(self):
+        """Roads: Merge connected segments"""
+        return True

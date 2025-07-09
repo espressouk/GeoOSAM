@@ -14,6 +14,7 @@
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
 - **🎯 Three Modes**: Point-click, bounding box, and bbox batch processing
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
+- **⚠️ Batch Mode Status**: Currently in development - some classes perform better than others
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **↶ Undo Support**: Mistake correction with polygon-level undo
 - **📁 Custom Output**: User-selectable output folders
@@ -67,6 +68,23 @@ _Export segmented polygons as shapefiles with detailed attributes_
 For current limitations and upcoming fixes, see:
 
 👉 [Known Issues](#known-issues-and-planned-fixes)
+
+## ⚠️ Batch Mode Development Status
+
+**Batch mode is currently in active development** with varying performance across different object classes:
+
+### 🎯 **Tested Classes:**
+- **Vegetation** ✅ - Advanced NDVI analysis, excellent results with multi-spectral imagery
+- **Vessels** ✅ - Optimized for water body detection, good performance
+- **Buildings/Residential** 🔧 - Basic functionality, mixed results
+
+### 🔧 **Classes Under Development:**
+- **Other classes** 🚧 - Limited testing, performance may vary
+
+### 📝 **Best Practice:**
+- **Point-click mode** remains the most reliable for all classes
+- **Batch mode** works best on clear, high-contrast imagery
+- **Mixed workflow** recommended: use batch where it works well, point-click for precision
 
 ## 📋 System Requirements
 

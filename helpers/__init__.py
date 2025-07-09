@@ -32,7 +32,7 @@ def create_detection_helper(class_name, min_object_size=50, max_objects=25):
         return WaterHelper(class_name, min_object_size, max_objects)
     elif class_name == 'Agriculture':
         return AgricultureHelper(class_name, min_object_size, max_objects)
-    elif class_name == 'Road':
+    elif class_name in ['Road', 'Roads']:
         return RoadHelper(class_name, min_object_size, max_objects)
     else:
         # Default helper for other classes - use general helper as fallback
