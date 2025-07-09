@@ -33,7 +33,7 @@ try:
     print("✅ Ultralytics available - SAM2.1_B ready")
 
     # Test model loading
-    test_model = SAM('sam2.1_b.pt')  # mobile_sam.pt
+    test_model = SAM('sam2.1_b.pt')  # sam2.1_b.pt
     print("✅ SAM2.1_B loaded successfully")
 except ImportError:
     print("❌ Ultralytics not available - falling back to SAM 2.1")
@@ -204,14 +204,14 @@ print("🔍 Detecting Vegetation candidates in (height, width, 5) region (multi-
 
 #### Error: "No module named 'ultralytics'"
 
-**Cause:** Ultralytics not installed (needed for MobileSAM)  
+**Cause:** Ultralytics not installed (needed for SAM2.1_B)  
 **Solution:**
 
 ```python
 # Install in QGIS Python Console:
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "ultralytics"])
-print("✅ Ultralytics installed - MobileSAM now available")
+print("✅ Ultralytics installed - SAM2.1_B now available")
 ```
 
 #### Error: "No module named 'torch'"
@@ -282,13 +282,13 @@ if missing:
 
 ### Model Selection Errors
 
-#### Error: "MobileSAM prediction error"
+#### Error: "SAM2.1_B prediction error"
 
 **Cause:** Ultralytics model issue  
 **Solution:**
 
 ```python
-# Force re-download of MobileSAM:
+# Force re-download of SAM2.1_B:
 import os
 ultralytics_cache = os.path.expanduser("~/.ultralytics")
 print(f"Clearing Ultralytics cache: {ultralytics_cache}")
@@ -329,7 +329,7 @@ print(f"MPS available: {torch.backends.mps.is_available() if hasattr(torch.backe
 
 #### Error: "Ultralytics not available - falling back to SAM2"
 
-**Cause:** Normal fallback behavior, but you might want MobileSAM  
+**Cause:** Normal fallback behavior, but you might want SAM2.1_B  
 **Solution:**
 
 ```bash
@@ -344,14 +344,14 @@ pip install ultralytics
 **Cause:** GPU memory insufficient  
 **Solution:**
 
-- Plugin automatically falls back to MobileSAM on CPU
+- Plugin automatically falls back to SAM2.1_B on CPU
 - Close other GPU-intensive applications
 - Restart QGIS
 - Use smaller image crop sizes
 
 #### Error: "SAM model failed to load"
 
-**Cause:** Issues with either SAM 2.1 or MobileSAM  
+**Cause:** Issues with either SAM 2.1 or SAM2.1_B  
 **Solution:**
 
 ```bash
@@ -360,29 +360,29 @@ cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/check
 rm -f sam2.1_hiera_tiny.pt
 wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt
 
-# For MobileSAM (CPU users):
+# For SAM2.1_B (CPU users):
 pip uninstall ultralytics
 pip install ultralytics
-# MobileSAM will auto-download on next use
+# SAM2.1_B will auto-download on next use
 ```
 
 #### Error: "UltralyticsPredictor failed"
 
-**Cause:** Issues with MobileSAM model or Ultralytics  
+**Cause:** Issues with SAM2.1_B model or Ultralytics  
 **Solution:**
 
 ```python
 # Debug Ultralytics installation:
 try:
     from ultralytics import SAM
-    model = SAM('mobile_sam.pt')
+    model = SAM('sam2.1_b.pt')
     print("✅ Ultralytics working")
 
     # Test prediction
     import numpy as np
     test_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
     result = model.predict(source=test_img, verbose=False)
-    print("✅ MobileSAM prediction working")
+    print("✅ SAM2.1_B prediction working")
 
 except Exception as e:
     print(f"❌ Ultralytics error: {e}")
@@ -456,7 +456,7 @@ torch.set_num_threads(8)  # Adjust based on your CPU
 **Solution:**
 
 ```bash
-# Manual MobileSAM download:
+# Manual SAM2.1_B download:
 pip uninstall ultralytics
 pip install ultralytics --trusted-host pypi.org --trusted-host pypi.python.org
 ```
@@ -517,7 +517,7 @@ print(f"Device: {device}")
 # Model check:
 try:
     from ultralytics import SAM
-    print("Model: MobileSAM (CPU optimized)")
+    print("Model: SAM2.1_B (CPU optimized)")
 except ImportError:
     print("Model: SAM 2.1 (Fallback)")
 
@@ -549,7 +549,7 @@ else:
 
 **CPU Users (slower than expected):**
 
-- Verify MobileSAM is being used (shows in control panel)
+- Verify SAM2.1_B is being used (shows in control panel)
 - Check CPU usage during processing
 - Close other CPU-intensive applications
 - For 16+ cores: Should be using 75% of cores
@@ -623,11 +623,11 @@ print(f"MPS available: {mps_available}")
 print("\n--- Model Availability ---")
 try:
     from ultralytics import SAM
-    test_model = SAM('mobile_sam.pt')
-    print("✅ MobileSAM available")
+    test_model = SAM('sam2.1_b.pt')
+    print("✅ SAM2.1_B available")
     mobilesam_available = True
 except Exception as e:
-    print(f"❌ MobileSAM failed: {e}")
+    print(f"❌ SAM2.1_B failed: {e}")
     mobilesam_available = False
 
 sam2_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
@@ -638,7 +638,7 @@ print(f"SAM 2.1 available: {sam2_available}")
 print("\n--- Final Selection ---")
 if force_cpu:
     device = "cpu"
-    model = "MobileSAM" if mobilesam_available else "SAM2"
+    model = "SAM2.1_B" if mobilesam_available else "SAM2"
     print(f"FORCED → {device}, {model}")
 elif cuda_available and not force_cpu:
     gpu_props = torch.cuda.get_device_properties(0)
@@ -648,7 +648,7 @@ elif cuda_available and not force_cpu:
         print(f"AUTO → {device}, {model} (sufficient GPU memory)")
     else:
         device = "cpu"
-        model = "MobileSAM" if mobilesam_available else "SAM2"
+        model = "SAM2.1_B" if mobilesam_available else "SAM2"
         print(f"AUTO → {device}, {model} (insufficient GPU memory)")
 elif mps_available:
     device = "mps"
@@ -656,7 +656,7 @@ elif mps_available:
     print(f"AUTO → {device}, {model}")
 else:
     device = "cpu"
-    model = "MobileSAM" if mobilesam_available else "SAM2"
+    model = "SAM2.1_B" if mobilesam_available else "SAM2"
     print(f"AUTO → {device}, {model}")
 
 print(f"\nFinal: {model} on {device.upper()}")
@@ -876,7 +876,7 @@ if torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memor
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     print("MPS → SAM 2.1")
 else:
-    mobilesam = "MobileSAM" if deps["ultralytics"] != "MISSING" else "SAM 2.1 (fallback)"
+    mobilesam = "SAM2.1_B" if deps["ultralytics"] != "MISSING" else "SAM 2.1 (fallback)"
     print(f"CPU → {mobilesam}")
 
 # Plugin status
@@ -891,9 +891,9 @@ else:
     print("SAM 2.1 model: Missing")
 
 if deps["ultralytics"] != "MISSING":
-    print("MobileSAM: Available via Ultralytics")
+    print("SAM2.1_B: Available via Ultralytics")
 else:
-    print("MobileSAM: Not available")
+    print("SAM2.1_B: Not available")
 
 # Check iopath specifically
 if deps["iopath"] != "MISSING":
@@ -964,7 +964,7 @@ When reporting a new issue, please include:
 | Issue                  | Quick Fix                                    |
 | ---------------------- | -------------------------------------------- |
 | Plugin won't load      | Check dependencies with diagnostic script    |
-| MobileSAM missing      | `pip install ultralytics`                    |
+| SAM2.1_B missing      | `pip install ultralytics`                    |
 | SAM 2.1 won't download | Check internet, clear cache, manual download |
 | Wrong model selected   | Check force environment variables            |
 | Slow performance       | Check device detection, close other apps     |
@@ -991,7 +991,7 @@ import os
 os.environ["GEOOSAM_FORCE_CPU"] = "1"          # Force CPU mode
 os.environ["GEOOSAM_FORCE_GPU"] = "1"          # Force GPU mode
 os.environ["GEOOSAM_FORCE_SAM2"] = "1"         # Force SAM2 (any device)
-os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"    # Force MobileSAM
+os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"    # Force SAM2.1_B
 
 # Debug mode
 os.environ["GEOOSAM_DEBUG"] = "1"              # Enable debug output

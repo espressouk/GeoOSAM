@@ -110,7 +110,7 @@ try:
                 return self._empty_result()
 
             except Exception as e:
-                print(f"MobileSAM prediction error: {e}")
+                print(f"SAM2.1_B prediction error: {e}")
                 return self._empty_result()
 
         def _empty_result(self):
@@ -2540,8 +2540,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     # Adjust max_crop_size based on device capability
                     if self.device == "cuda":
                         max_crop_size = min(max_crop_size * 1.5, 2048)  # Increase for GPU
-                    elif self.device == "cpu" and self.model_choice == "MobileSAM":
-                        max_crop_size = min(max_crop_size, 1024)  # Limit for CPU MobileSAM
+                    elif self.device == "cpu" and self.model_choice == "SAM2.1_B":
+                        max_crop_size = min(max_crop_size, 1024)  # Limit for CPU SAM2.1_B
 
                     print(f"📐 Max crop size: {max_crop_size}px (device: {self.device})")
 
@@ -2749,7 +2749,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         elif self.device == "mps":
             base_size = 768   # Good for Apple Silicon
         else:
-            base_size = 512 if self.model_choice == "MobileSAM" else 640
+            base_size = 512 if self.model_choice == "SAM2.1_B" else 640
 
         # Adjust based on map scale for better context
         if canvas_scale > 500000:      # Very zoomed out - use larger crops

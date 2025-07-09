@@ -2,7 +2,7 @@
 
 ## 📋 Overview
 
-GeoOSAM is built with a modular architecture featuring intelligent model selection between SAM 2.1 and MobileSAM based on available hardware. This document covers the public API for developers who want to extend or integrate with the plugin.
+GeoOSAM is built with a modular architecture featuring intelligent model selection between SAM 2.1 and SAM2.1_B based on available hardware. This document covers the public API for developers who want to extend or integrate with the plugin.
 
 ## 🏗️ Architecture
 
@@ -14,7 +14,7 @@ geo_osam/
 │   ├── build_sam.py
 │   ├── sam2_image_predictor.py
 │   └── configs/
-├── UltralyticsPredictor     # MobileSAM wrapper (embedded)
+├── UltralyticsPredictor     # SAM2.1_B wrapper (embedded)
 └── resources/               # UI resources
 ```
 
@@ -32,7 +32,7 @@ def detect_best_device():
     elif torch.backends.mps.is_available():
         return "mps", "SAM2.1"
     else:
-        model = "MobileSAM" if ultralytics_available else "SAM2"
+        model = "SAM2.1_B" if ultralytics_available else "SAM2"
         return "cpu", model
 ```
 
@@ -42,9 +42,9 @@ def detect_best_device():
 | ------------- | --------- | -------------- | --------------------- |
 | NVIDIA GPU    | SAM 2.1   | 0.2-0.5s       | Maximum accuracy      |
 | Apple Silicon | SAM 2.1   | 1-2s           | Balanced performance  |
-| 24+ Core CPU  | MobileSAM | <1s            | High-end workstations |
-| 8-16 Core CPU | MobileSAM | 1-2s           | Standard systems      |
-| 4-8 Core CPU  | MobileSAM | 2-4s           | Budget systems        |
+| 24+ Core CPU  | SAM2.1_B | <1s            | High-end workstations |
+| 8-16 Core CPU | SAM2.1_B | 1-2s           | Standard systems      |
+| 4-8 Core CPU  | SAM2.1_B | 2-4s           | Budget systems        |
 
 ## 📚 Core Classes
 
@@ -100,7 +100,7 @@ Intelligently detects optimal device and model combination.
 
 - `tuple`: (device_str, model_choice, num_cores)
   - `device_str`: "cuda", "mps", or "cpu"
-  - `model_choice`: "SAM2" or "MobileSAM"
+  - `model_choice`: "SAM2" or "SAM2.1_B"
   - `num_cores`: CPU core count (None for GPU)
 
 **Example:**
@@ -144,11 +144,11 @@ print(f"Configured {threads} PyTorch threads")
 
 ```python
 class UltralyticsPredictor:
-    """Wrapper for Ultralytics MobileSAM with SAM2 interface compatibility."""
+    """Wrapper for Ultralytics SAM2.1_B with SAM2 interface compatibility."""
 
     def __init__(self, model):
         """Initialize with Ultralytics SAM model."""
-        self.model = model  # SAM('mobile_sam.pt')
+        self.model = model  # SAM('sam2.1_b.pt')
         self.features = None
 
     def set_image(self, image: np.ndarray) -> None:
@@ -172,23 +172,23 @@ Perform segmentation prediction with SAM2-compatible interface.
 - `point_coords` (array): Point coordinates [[x, y]]
 - `point_labels` (array): Point labels [1] (positive)
 - `box` (array): Bounding box [[x1, y1, x2, y2]]
-- `multimask_output` (bool): Return multiple masks (ignored for MobileSAM)
+- `multimask_output` (bool): Return multiple masks (ignored for SAM2.1_B)
 
 **Returns:**
 
 - `tuple`: (masks, scores, logits)
   - `masks`: List of numpy arrays
   - `scores`: List of confidence scores
-  - `logits`: None (not used by MobileSAM)
+  - `logits`: None (not used by SAM2.1_B)
 
 **Example:**
 
 ```python
 from ultralytics import SAM
 
-# Initialize MobileSAM
-mobile_sam = SAM('mobile_sam.pt')
-predictor = UltralyticsPredictor(mobile_sam)
+# Initialize SAM2.1_B
+sam21b_model = SAM('sam2.1_b.pt')
+predictor = UltralyticsPredictor(sam21b_model)
 
 # Set image
 predictor.set_image(image_array)
@@ -249,7 +249,7 @@ def detect_best_device():
 
         # 3. CPU fallback with model selection
         else:
-            model_choice = "MobileSAM" if MOBILESAM_AVAILABLE else "SAM2"
+            model_choice = "SAM2.1_B" if MOBILESAM_AVAILABLE else "SAM2"
             cores = setup_pytorch_performance()
             return "cpu", model_choice, cores
 
@@ -328,13 +328,13 @@ Enhanced checkpoint downloading with better error handling.
 - **Verification**: Checks file size and integrity
 - **Timeout handling**: 5-minute timeout for large downloads
 
-#### MobileSAM Auto-Download
+#### SAM2.1_B Auto-Download
 
 ```python
-# MobileSAM downloading is handled automatically by Ultralytics
+# SAM2.1_B downloading is handled automatically by Ultralytics
 try:
     from ultralytics import SAM
-    test_model = SAM('mobile_sam.pt')  # Auto-downloads if needed
+    test_model = SAM('sam2.1_b.pt')  # Auto-downloads if needed
     MOBILESAM_AVAILABLE = True
 except Exception:
     MOBILESAM_AVAILABLE = False
@@ -346,14 +346,14 @@ except Exception:
 
 ```python
 class OptimizedSAM2Worker(QThread):
-    """Enhanced worker thread supporting both SAM2 and MobileSAM."""
+    """Enhanced worker thread supporting both SAM2 and SAM2.1_B."""
 
     def __init__(self, predictor, arr, mode, model_choice="SAM2",
                  point_coords=None, point_labels=None, box=None,
                  mask_transform=None, debug_info=None, device="cpu"):
         """Initialize with model choice and device information."""
         super().__init__()
-        self.model_choice = model_choice  # "SAM2" or "MobileSAM"
+        self.model_choice = model_choice  # "SAM2" or "SAM2.1_B"
         self.device = device
         # ... other parameters
 
@@ -400,7 +400,7 @@ class OptimizedSAM2Worker(QThread):
 
 #### Enhanced Features
 
-- **Model-aware processing**: Different optimizations for SAM2 vs MobileSAM
+- **Model-aware processing**: Different optimizations for SAM2 vs SAM2.1_B
 - **Device-specific handling**: GPU vs CPU optimizations
 - **Progress tracking**: Model-specific progress messages
 - **Error context**: Enhanced error reporting with model information
@@ -412,7 +412,7 @@ class OptimizedSAM2Worker(QThread):
 ```python
 device_info = {
     'device': str,           # "cuda", "mps", "cpu"
-    'model': str,            # "SAM2", "MobileSAM"
+    'model': str,            # "SAM2", "SAM2.1_B"
     'cores': int,            # CPU cores (None for GPU)
     'gpu_name': str,         # GPU name (None for CPU)
     'gpu_memory': float,     # GPU memory in GB (None for CPU)
@@ -431,13 +431,13 @@ device_info = {
 result = {
     'mask': numpy.ndarray,           # Binary segmentation mask
     'scores': numpy.ndarray,         # Confidence scores
-    'logits': numpy.ndarray,         # Raw model outputs (None for MobileSAM)
+    'logits': numpy.ndarray,         # Raw model outputs (None for SAM2.1_B)
     'mask_transform': Affine,        # Geospatial transform
     'debug_info': {                  # Enhanced processing metadata
         'mode': str,                 # "point" or "bbox"
         'class': str,                # Target class name
         'device': str,               # Processing device
-        'model': str,                # Model used ("SAM2" or "MobileSAM")
+        'model': str,                # Model used ("SAM2" or "SAM2.1_B")
         'prep_time': float,          # Preprocessing time
         'inference_time': float,     # Model inference time
         'crop_size': str,            # Processing dimensions
@@ -459,7 +459,7 @@ import os
 os.environ["GEOOSAM_FORCE_CPU"] = "1"      # Force CPU mode
 os.environ["GEOOSAM_FORCE_GPU"] = "1"      # Force GPU mode
 os.environ["GEOOSAM_FORCE_SAM2"] = "1"     # Force SAM2 (any device)
-os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"  # Force MobileSAM
+os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"  # Force SAM2.1_B
 
 # Custom device detection
 class CustomGeoOSAMPanel(GeoOSAMControlPanel):
@@ -469,7 +469,7 @@ class CustomGeoOSAMPanel(GeoOSAMControlPanel):
         # Custom logic here
         if self.custom_condition():
             self.device = "cpu"
-            self.model_choice = "MobileSAM"
+            self.model_choice = "SAM2.1_B"
             self._init_mobilesam_model()
         else:
             super()._init_sam_model()
@@ -553,8 +553,8 @@ class HardwareOptimizer:
 
         elif device == "cpu":
             # CPU optimizations
-            if model_choice == "MobileSAM":
-                # MobileSAM-specific optimizations
+            if model_choice == "SAM2.1_B":
+                # SAM2.1_B-specific optimizations
                 torch.set_num_threads(setup_pytorch_performance())
 
             # Memory optimizations
@@ -601,7 +601,7 @@ class TestModelSelection(unittest.TestCase):
             self.assertIsNone(cores)
 
     def test_cpu_mobilesam_selection(self):
-        """Test CPU with MobileSAM selection."""
+        """Test CPU with SAM2.1_B selection."""
         with patch('torch.cuda.is_available', return_value=False), \
              patch('torch.backends.mps.is_available', return_value=False), \
              patch('geo_osam_dialog.MOBILESAM_AVAILABLE', True):
@@ -609,12 +609,12 @@ class TestModelSelection(unittest.TestCase):
             device, model, cores = detect_best_device()
 
             self.assertEqual(device, "cpu")
-            self.assertEqual(model, "MobileSAM")
+            self.assertEqual(model, "SAM2.1_B")
             self.assertIsInstance(cores, int)
             self.assertGreater(cores, 0)
 
     def test_cpu_fallback(self):
-        """Test CPU fallback when MobileSAM unavailable."""
+        """Test CPU fallback when SAM2.1_B unavailable."""
         with patch('torch.cuda.is_available', return_value=False), \
              patch('torch.backends.mps.is_available', return_value=False), \
              patch('geo_osam_dialog.MOBILESAM_AVAILABLE', False):
@@ -633,8 +633,8 @@ class TestModelSelection(unittest.TestCase):
             device, model, cores = detect_best_device()
 
             self.assertEqual(device, "cpu")
-            # Should prefer MobileSAM on forced CPU
-            self.assertIn(model, ["MobileSAM", "SAM2"])
+            # Should prefer SAM2.1_B on forced CPU
+            self.assertIn(model, ["SAM2.1_B", "SAM2"])
 ```
 
 ### Performance Testing
@@ -660,11 +660,11 @@ class TestPerformance(unittest.TestCase):
         """Test model loading times."""
         import time
 
-        # Test MobileSAM loading
+        # Test SAM2.1_B loading
         if MOBILESAM_AVAILABLE:
             start = time.time()
             from ultralytics import SAM
-            model = SAM('mobile_sam.pt')
+            model = SAM('sam2.1_b.pt')
             predictor = UltralyticsPredictor(model)
             load_time = time.time() - start
 
@@ -784,7 +784,7 @@ class CustomModelSelector:
 
         # Large batch processing: prefer speed
         if batch_size > 100:
-            return "cpu", "MobileSAM"
+            return "cpu", "SAM2.1_B"
 
         # High accuracy requirement: prefer SAM2
         if accuracy_priority:
@@ -793,7 +793,7 @@ class CustomModelSelector:
 
         # Small images: CPU is often sufficient
         if image_size < (512, 512):
-            return "cpu", "MobileSAM"
+            return "cpu", "SAM2.1_B"
 
         # Default to automatic detection
         return detect_best_device()[:2]
@@ -811,7 +811,7 @@ class CustomGeoOSAMApp:
         )
 
         # Override environment
-        if model == "MobileSAM":
+        if model == "SAM2.1_B":
             os.environ["GEOOSAM_FORCE_MOBILESAM"] = "1"
 
         # Initialize panel
@@ -825,7 +825,7 @@ class CustomGeoOSAMApp:
 
 ### Model-Aware Development
 
-- **Test both models**: Ensure compatibility with SAM2 and MobileSAM
+- **Test both models**: Ensure compatibility with SAM2 and SAM2.1_B
 - **Handle device switching**: Code should work across GPU/CPU
 - **Performance expectations**: Different models have different characteristics
 - **Error handling**: Model-specific error scenarios

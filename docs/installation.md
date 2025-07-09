@@ -41,7 +41,7 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 1. **Click GeoOSAM icon** 🛰️ in QGIS toolbar
 2. **Automatic model selection** happens instantly:
    - **🎮 GPU detected**: Downloads SAM 2.1 (~160MB, one-time)
-   - **💻 CPU detected**: Downloads MobileSAM (~40MB via Ultralytics)
+   - **💻 CPU detected**: Downloads SAM2.1_B (~40MB via Ultralytics)
    - **⚡ High-core CPU**: Optimized for sub-second performance
 3. **Control panel opens** on the right side showing your hardware
 4. **Start segmenting!** 🚀
@@ -196,25 +196,25 @@ GeoOSAM automatically detects your hardware and selects the optimal model:
 | ------------------------ | -------------- | ------------- | ----------- |
 | NVIDIA GPU (CUDA)        | SAM 2.1        | ~160MB        | 0.2-0.5s    |
 | Apple Silicon (M1/M2/M3) | SAM 2.1        | ~160MB        | 1-2s        |
-| 24+ Core CPU             | MobileSAM      | ~40MB         | <1s         |
-| 16+ Core CPU             | MobileSAM      | ~40MB         | 1-2s        |
-| 8-16 Core CPU            | MobileSAM      | ~40MB         | 2-3s        |
-| 4-8 Core CPU             | MobileSAM      | ~40MB         | 3-5s        |
+| 24+ Core CPU             | SAM2.1_B      | ~40MB         | <1s         |
+| 16+ Core CPU             | SAM2.1_B      | ~40MB         | 1-2s        |
+| 8-16 Core CPU            | SAM2.1_B      | ~40MB         | 2-3s        |
+| 4-8 Core CPU             | SAM2.1_B      | ~40MB         | 3-5s        |
 
 ### Download Process
 
 **🔄 What Happens Automatically:**
 
 1. **Device Detection**: Plugin detects GPU/CPU capabilities
-2. **Model Selection**: Chooses SAM 2.1 (GPU) or MobileSAM (CPU)
+2. **Model Selection**: Chooses SAM 2.1 (GPU) or SAM2.1_B (CPU)
 3. **Smart Download**: Only downloads the model you need
-4. **Ultralytics Magic**: MobileSAM handled seamlessly by Ultralytics
+4. **Ultralytics Magic**: SAM2.1_B handled seamlessly by Ultralytics
 5. **One-time Setup**: Subsequent uses are instant
 
 **📥 Download Details:**
 
 - **GPU Systems**: Downloads SAM 2.1 checkpoint directly
-- **CPU Systems**: Ultralytics automatically downloads MobileSAM
+- **CPU Systems**: Ultralytics automatically downloads SAM2.1_B
 - **Total Time**: 1-3 minutes depending on connection
 - **Storage**: Only uses space for your hardware's model
 
@@ -341,13 +341,13 @@ if cores:
     print(f"💻 CPU cores configured: {cores}")
 
 # Test 4: Model availability
-if model_choice == "MobileSAM":
+if model_choice == "SAM2.1_B":
     try:
         from ultralytics import SAM
-        test_model = SAM('mobile_sam.pt')
-        print("✅ MobileSAM ready (Ultralytics)")
+        test_model = SAM('sam2.1_b.pt')
+        print("✅ SAM2.1_B ready (Ultralytics)")
     except Exception as e:
-        print(f"⏳ MobileSAM will download on first use: {e}")
+        print(f"⏳ SAM2.1_B will download on first use: {e}")
 else:
     import os
     plugin_dir = os.path.dirname(__file__)
@@ -358,7 +358,7 @@ else:
         print("⏳ SAM 2.1 model will download on first use")
 
 # Test 5: Performance estimate
-if model_choice == "MobileSAM" and cores and cores >= 24:
+if model_choice == "SAM2.1_B" and cores and cores >= 24:
     print("🚀 Expected performance: <1 second per segment")
 elif device == "cuda":
     print("🚀 Expected performance: 0.2-0.5 seconds per segment")
@@ -423,14 +423,14 @@ pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-c
 - Run Command Prompt as Administrator
 - Or use QGIS Python Console (recommended)
 
-#### Issue: "MobileSAM download fails"
+#### Issue: "SAM2.1_B download fails"
 
 **Solution:**
 
 ```python
 # Test Ultralytics directly in QGIS Python Console:
 from ultralytics import SAM
-model = SAM('mobile_sam.pt')  # Should auto-download
+model = SAM('sam2.1_b.pt')  # Should auto-download
 ```
 
 #### Issue: "SAM 2.1 model download fails"
@@ -449,7 +449,7 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.
 
 - Check NVIDIA driver version
 - Reinstall PyTorch with correct CUDA version
-- Plugin will automatically fallback to MobileSAM on CPU
+- Plugin will automatically fallback to SAM2.1_B on CPU
 
 #### Issue: "Wrong model selected"
 
@@ -458,7 +458,7 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.
 ```python
 # Force specific model in QGIS Python Console:
 import os
-os.environ["GEOOSAM_FORCE_CPU"] = "1"  # Force CPU/MobileSAM
+os.environ["GEOOSAM_FORCE_CPU"] = "1"  # Force CPU/SAM2.1_B
 # Restart QGIS
 ```
 
@@ -536,7 +536,7 @@ pip install --upgrade torch torchvision ultralytics opencv-python rasterio shape
 
 ### Model Updates
 
-- **MobileSAM**: Automatically updated via Ultralytics
+- **SAM2.1_B**: Automatically updated via Ultralytics
 - **SAM 2.1**: Plugin checks for newer checkpoints
 - **Automatic**: Models update seamlessly in background
 
@@ -558,7 +558,7 @@ rm -rf ~/GeoOSAM_shapefiles ~/GeoOSAM_masks
 **Installation complete! Your system will automatically use the optimal AI model for your hardware.** 🚀
 
 - **GPU Users**: Enjoy SAM 2.1's cutting-edge accuracy
-- **CPU Users**: Experience MobileSAM's remarkable efficiency
+- **CPU Users**: Experience SAM2.1_B's remarkable efficiency
 - **High-End CPU**: Get sub-second performance rivaling GPUs
 
 See [User Guide](user_guide.md) for next steps.

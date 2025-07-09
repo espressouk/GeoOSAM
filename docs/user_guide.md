@@ -8,7 +8,7 @@
 2. **Click the GeoOSAM icon** 🛰️ in the toolbar
 3. **Automatic model selection** happens instantly:
    - **🎮 GPU detected**: Downloads SAM 2.1 (~160MB, one-time)
-   - **💻 CPU detected**: Downloads MobileSAM (~40MB via Ultralytics)
+   - **💻 CPU detected**: Downloads SAM2.1_B (~40MB via Ultralytics)
    - **⚡ High-core CPU**: Optimized for sub-second performance
 4. **Control panel opens** on the right side showing your hardware
 
@@ -32,16 +32,16 @@ GeoOSAM automatically detects your hardware and optimizes accordingly:
 | -------------- | ---------- | -------------- | ----------------------------- |
 | NVIDIA RTX GPU | SAM 2.1    | 0.2-0.5s       | 🎮 CUDA (SAM2.1)              |
 | Apple M1/M2/M3 | SAM 2.1    | 1-2s           | 🍎 MPS (SAM2.1)               |
-| 24+ Core CPU   | MobileSAM  | **<1s**        | 💻 CPU (MobileSAM) (24 cores) |
-| 16+ Core CPU   | MobileSAM  | 1-2s           | 💻 CPU (MobileSAM) (16 cores) |
-| 8-16 Core CPU  | MobileSAM  | 2-3s           | 💻 CPU (MobileSAM) (12 cores) |
-| 4-8 Core CPU   | MobileSAM  | 3-5s           | 💻 CPU (MobileSAM) (6 cores)  |
+| 24+ Core CPU   | SAM2.1_B  | **<1s**        | 💻 CPU (SAM2.1_B) (24 cores) |
+| 16+ Core CPU   | SAM2.1_B  | 1-2s           | 💻 CPU (SAM2.1_B) (16 cores) |
+| 8-16 Core CPU  | SAM2.1_B  | 2-3s           | 💻 CPU (SAM2.1_B) (12 cores) |
+| 4-8 Core CPU   | SAM2.1_B  | 3-5s           | 💻 CPU (SAM2.1_B) (6 cores)  |
 
 **🚀 Performance Highlights:**
 
 - **High-end CPUs**: Sub-second segmentation rivals GPU performance
 - **Automatic Threading**: Uses 75% of available cores intelligently
-- **MobileSAM Efficiency**: 5x smaller, exceptional multi-core scaling
+- **SAM2.1_B Efficiency**: 5x smaller, exceptional multi-core scaling
 - **Zero Configuration**: Works optimally out-of-the-box
 
 ---
@@ -111,7 +111,7 @@ GeoOSAM includes 12 ready-to-use classes optimized for various use cases:
 **How it works:**
 
 - **SAM 2.1** (GPU): Uses transformer architecture for precise boundaries
-- **MobileSAM** (CPU): Uses efficient Tiny-ViT encoder for speed
+- **SAM2.1_B** (CPU): Uses efficient Tiny-ViT encoder for speed
 
 **Usage:**
 
@@ -159,7 +159,7 @@ GeoOSAM includes 12 ready-to-use classes optimized for various use cases:
 #### ⚡ **Real-time Performance Monitoring**
 
 - Status panel shows actual processing times
-- Device information displayed: "🎮 CUDA (SAM2.1)" or "💻 CPU (MobileSAM) (24 cores)"
+- Device information displayed: "🎮 CUDA (SAM2.1)" or "💻 CPU (SAM2.1_B) (24 cores)"
 - Progress updates during processing
 - **Benchmark your system**: Times displayed after each segmentation
 
@@ -213,13 +213,13 @@ Each polygon includes comprehensive metadata:
 
 #### **High-Core CPU Users (16+ cores)**
 
-- **Expect**: <1-2s per segment with MobileSAM
+- **Expect**: <1-2s per segment with SAM2.1_B
 - **Performance**: Rivals GPU systems
 - **Tip**: Excellent for large-scale projects without GPU
 
 #### **Standard CPU Users (4-16 cores)**
 
-- **Expect**: 2-5s per segment with MobileSAM
+- **Expect**: 2-5s per segment with SAM2.1_B
 - **Still efficient**: Much faster than traditional methods
 - **Tip**: Process in smaller batches for best workflow
 
@@ -229,7 +229,7 @@ Each polygon includes comprehensive metadata:
 
 - **Optimal**: <1m/pixel for buildings, <0.5m for vehicles
 - **Minimum**: 2m/pixel for large objects
-- **MobileSAM advantage**: Works well even with lower resolution
+- **SAM2.1_B advantage**: Works well even with lower resolution
 
 #### **Image Characteristics**
 
@@ -250,7 +250,7 @@ Each polygon includes comprehensive metadata:
 #### **Click Strategy**
 
 - **Point Mode**: Click near object centers for best boundary detection
-- **Avoid edges**: Both SAM 2.1 and MobileSAM work better from object centers
+- **Avoid edges**: Both SAM 2.1 and SAM2.1_B work better from object centers
 - **Consistent scale**: Maintain appropriate zoom for object size
 - **Quick workflow**: Modern performance allows rapid clicking
 
@@ -374,7 +374,7 @@ For **5+ band imagery**, vegetation detection uses:
 ### Environmental Monitoring with Multi-spectral Data
 
 **Hardware**: CPU systems excellent for this workflow
-**Expected Time**: Large areas processed efficiently with MobileSAM
+**Expected Time**: Large areas processed efficiently with SAM2.1_B
 **Image Type**: Multi-spectral UAV/satellite preferred for vegetation analysis
 
 1. **Setup:** Load multi-spectral imagery (5+ bands for best results)
@@ -402,7 +402,7 @@ For **5+ band imagery**, vegetation detection uses:
 
 ### Transportation Analysis
 
-**Hardware**: MobileSAM excellent for vehicle detection
+**Hardware**: SAM2.1_B excellent for vehicle detection
 **Expected Time**: Sub-second per vehicle on high-end systems
 
 1. **Setup:** High-resolution imagery of transportation hubs
@@ -426,7 +426,7 @@ For **5+ band imagery**, vegetation detection uses:
 
 #### **For CPU Systems**
 
-- **MobileSAM advantage**: Specially optimized for CPU efficiency
+- **SAM2.1_B advantage**: Specially optimized for CPU efficiency
 - **Threading**: Plugin automatically uses optimal core count
 - **Memory**: 16GB+ RAM recommended for large imagery
 
@@ -441,7 +441,7 @@ For **5+ band imagery**, vegetation detection uses:
 #### **Slower than Expected**
 
 1. **Check device detection**: Look at status panel for hardware info
-2. **Verify model**: Should show SAM2.1 (GPU) or MobileSAM (CPU)
+2. **Verify model**: Should show SAM2.1 (GPU) or SAM2.1_B (CPU)
 3. **Close applications**: Free up system resources
 4. **Check zoom level**: Closer zoom = smaller processing area
 
@@ -482,11 +482,11 @@ os.environ["GEOOSAM_FORCE_CPU"] = "1"
 
 ### Model Download Issues
 
-#### **MobileSAM download fails**
+#### **SAM2.1_B download fails**
 
 - **Automatic retry**: Ultralytics handles retries automatically
 - **Internet check**: Verify connection for first-time download
-- **Manual test**: Try in QGIS Python Console: `from ultralytics import SAM; SAM('mobile_sam.pt')`
+- **Manual test**: Try in QGIS Python Console: `from ultralytics import SAM; SAM('sam2.1_b.pt')`
 
 #### **SAM 2.1 download fails**
 

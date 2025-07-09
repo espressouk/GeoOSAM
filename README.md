@@ -1,6 +1,6 @@
 # GeoOSAM - Advanced Segmentation for QGIS
 
-🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and MobileSAM with intelligent hardware optimization**
+🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and SAM2.1_B with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
@@ -10,7 +10,7 @@
 
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
 - **🧠 Intelligent Model Selection**: Automatically chooses the best AI model for your hardware
-- **🚀 Optimized Performance**: SAM 2.1 for GPU, MobileSAM for CPU
+- **🚀 Optimized Performance**: SAM 2.1 for GPU, SAM2.1_B for CPU
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
 - **🎯 Dual Modes**: Point-click and bounding box segmentation with batch processing
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Ship, and more
@@ -278,7 +278,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 ## 🙏 Acknowledgments
 
 - **Meta AI**: For the Segment Anything Model (SAM 2.1)
-- **Ultralytics**: For MobileSAM integration and optimization
+- **Ultralytics**: For SAM2.1_B integration and optimization
 - **QGIS Community**: For the excellent GIS platform
 - **PyTorch Team**: For the deep learning framework
 
@@ -332,8 +332,8 @@ If you use GeoOSAM in your research, please cite:
 
 ### v1.0.0 - Major Update with Intelligent Model Selection
 
-- **Intelligent Model Selection**: Automatic SAM 2.1 vs MobileSAM selection
-- **Enhanced CPU Performance**: MobileSAM integration for 5-10x CPU speedup
+- **Intelligent Model Selection**: Automatic SAM 2.1 vs SAM2.1_B selection
+- **Enhanced CPU Performance**: SAM2.1_B integration for 5-10x CPU speedup
 - **Ultralytics Integration**: Professional computer vision library support
 - **Improved Device Detection**: Better GPU/CPU/Apple Silicon handling
 - **Updated Dependencies**: Modern ML stack with automatic model downloads
