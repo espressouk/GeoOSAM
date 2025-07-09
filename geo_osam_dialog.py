@@ -479,8 +479,13 @@ class OptimizedSAM2Worker(QThread):
         """Detect potential object locations within bbox based on class type"""
         x1, y1, x2, y2 = bbox
 
-        # Use multi-spectral image for vegetation detection if available
-        if multispectral_image is not None and class_name == "Vegetation":
+        # Use helper to determine if multispectral detection is supported
+        helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+
+        # Use multi-spectral image if available and supported by the helper
+        if (multispectral_image is not None and 
+            hasattr(helper, 'supports_multispectral') and 
+            helper.supports_multispectral()):
             detection_image = multispectral_image
             print(f"🔍 Detecting {class_name} candidates in {detection_image.shape} region (multi-spectral)")
         else:
@@ -491,7 +496,6 @@ class OptimizedSAM2Worker(QThread):
         bbox_image = detection_image[y1:y2, x1:x2].copy()
 
         # Use helper for detection
-        helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
         return helper.detect_candidates(bbox_image, bbox)
 
 
@@ -502,15 +506,15 @@ class OptimizedSAM2Worker(QThread):
         try:
             # Use helper for validation
             helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
-            
+
             # Debug mask info
             mask_area = np.sum(mask > 0) if hasattr(mask, 'sum') else 0
             print(f"🔍 VALIDATION DEBUG - Class: {class_name}, Mask area: {mask_area} pixels")
-            
+
             valid_masks = helper.process_sam_mask(mask)
             result = len(valid_masks) > 0
             print(f"🔍 VALIDATION RESULT: {result} (found {len(valid_masks)} valid masks)")
-            
+
             return result
 
         except Exception as e:
@@ -591,22 +595,39 @@ class OptimizedSAM2Worker(QThread):
                 self.finished.emit(result)
                 return
 
-            # Segment each candidate point individually
-            individual_masks = []
-            successful_detections = 0
-
             # Limit to max_objects to prevent too many detections
             candidates_to_process = candidate_points[:self.max_objects]
 
-            for i, (px, py) in enumerate(candidates_to_process):
+            # Process candidates (roads return grouped candidates, others return individual points)
+            individual_masks = []
+            successful_detections = 0
+
+            for i, candidate in enumerate(candidates_to_process):
+                # Handle both individual points and grouped points
+                if isinstance(candidate, list):
+                    # Grouped candidates (from road helper)
+                    points_in_group = candidate
+                    print(f"🛣️ Processing road group {i+1} with {len(points_in_group)} points")
+                else:
+                    # Individual point
+                    points_in_group = [candidate]
+
                 try:
+                    px, py = points_in_group[0] if len(points_in_group) == 1 else (
+                        int(np.mean([p[0] for p in points_in_group])),
+                        int(np.mean([p[1] for p in points_in_group]))
+                    )
+
                     self.progress.emit(f"🎯 Segmenting object {i+1}/{len(candidates_to_process)}...")
+                    print(f"🔍 Processing candidate {i+1}: {len(points_in_group)} point(s)")
 
-                    print(f"🔍 Processing candidate {i+1}: point ({px}, {py})")
-
-                    # Run point segmentation using existing SAM2 pipeline
-                    point_coords = np.array([[px, py]])
-                    point_labels = np.array([1])
+                    # Prepare coordinates for SAM2
+                    if len(points_in_group) == 1:
+                        point_coords = np.array([points_in_group[0]])
+                        point_labels = np.array([1])
+                    else:
+                        point_coords = np.array(points_in_group)
+                        point_labels = np.array([1] * len(points_in_group))
 
                     with torch.no_grad():
                         masks, scores, logits = self.predictor.predict(
@@ -677,9 +698,10 @@ class OptimizedSAM2Worker(QThread):
             # Class-aware processing
             current_class = self.debug_info.get('class', 'Other')
 
-            # Class-aware processing - use existing logic for all classes
-            individual_masks = merge_nearby_masks_class_aware(individual_masks, current_class, buffer_px=1)
-            individual_masks = dedupe_or_merge_masks_smart(individual_masks, current_class)
+            # Class-aware processing - use helper methods instead of hardcoded logic
+            helper = create_detection_helper(current_class, self.min_object_size, self.max_objects)
+            individual_masks = helper.merge_nearby_masks(individual_masks)
+            individual_masks = helper.dedupe_or_merge_masks(individual_masks)
 
             print(f"🎯 Point-guided batch complete: {successful_detections}/{len(candidates_to_process)} objects successfully segmented")
 
@@ -1060,7 +1082,7 @@ class EnhancedBBoxClickTool(QgsMapTool):
             # Dynamic size validation based on coordinate system
             # For geographic coordinates (degrees), use much smaller thresholds
             min_size = 0.000001 if abs(rect.width()) < 1 and abs(rect.height()) < 1 else 10
-            
+
             if rect.width() > min_size and rect.height() > min_size:
                 self.cb(rect)
             else:
@@ -1179,7 +1201,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.device, self.model_choice, self.num_cores = detect_best_device()
         self._init_sam_model()
 
-        # Setup docking
+        # Setup docking with version in title
+        version = self._get_plugin_version()
+        self.setWindowTitle(f"Version: {version}")
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable |
                          QtWidgets.QDockWidget.DockWidgetFloatable)
@@ -1364,7 +1388,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             background: transparent; 
             color: #344054;
         """)
-        
+
         # Improved tooltip styling for better readability
         self.setStyleSheet("""
             QToolTip {
@@ -1991,7 +2015,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.batchModeSwitch.setChecked(False)
             self.batch_mode_enabled = False
             self.batchSettingsFrame.setVisible(False)
-        
+
         # Disable batch mode switch in point mode
         self.batchModeSwitch.setEnabled(False)
 
@@ -2051,7 +2075,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         """Add a request to the processing queue"""
         self.processing_queue.append(request)
         queue_position = len(self.processing_queue)
-        
+
         if request['type'] == 'point':
             pt = request['point']
             self._update_status(
@@ -2062,24 +2086,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._update_status(
                 f"🔄 Queued bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}] - Position {queue_position}", 
                 "info")
-        
+
         # Start processing if not already running
         self._process_queue()
-    
+
     def _process_queue(self):
         """Process the next item in the queue"""
         if self.is_processing or not self.processing_queue:
             return
-        
+
         # Get next request
         request = self.processing_queue.pop(0)
         remaining = len(self.processing_queue)
-        
+
         # Set current request data
         self.point = request['point']
         self.bbox = request['bbox']
         self.current_class = request['class']
-        
+
         # Update status with queue info
         if request['type'] == 'point':
             pt = request['point']
@@ -2087,12 +2111,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         else:
             rect = request['bbox']
             status_msg = f"Processing bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}]"
-        
+
         if remaining > 0:
             status_msg += f" - {remaining} more in queue"
-        
+
         self._update_status(status_msg, "processing")
-        
+
         # Start segmentation
         self._run_segmentation()
 
@@ -2102,14 +2126,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if self.is_processing:
             self._update_status("Processing already in progress, please wait...", "warning")
             return
-            
+
         # Cancel any existing worker
         if self.worker and self.worker.isRunning():
             self._cancel_segmentation_safely()
-            
+
         # Set processing state
         self.is_processing = True
-        
+
         # DEBUG: Verify settings are correct
         if self.batch_mode_enabled and self.current_mode == 'bbox':
             self._debug_current_settings()
@@ -2489,7 +2513,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     # SMART HYBRID: Adaptive padding based on area size
                     # For geographic coordinates, use much smaller thresholds
                     large_area_threshold = 0.000001 if bbox_area < 1 else 50000
-                    
+
                     if bbox_area > large_area_threshold:  # Large areas get adaptive padding
                         padding_factor = self._get_adaptive_bbox_padding(bbox_area)
                         print(f"🎯 LARGE area ({bbox_area:.0f}): adaptive padding {padding_factor*100:.1f}%")
@@ -2796,7 +2820,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if hasattr(self, 'worker') and self.worker:
                 self.worker.deleteLater()
                 self.worker = None
-            
+
             # Process next item in queue
             self._process_queue()
 
@@ -2887,7 +2911,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             print(f"🚫 Removed {removed_count} spatial duplicates (overlap > {overlap_threshold*100}%)")
 
         return filtered_features
-
 
     def _process_individual_batch_results(self, result_data, mask_transform, debug_info):
         """Process multiple individual masks from batch segmentation - INDIVIDUAL OBJECTS ONLY"""
@@ -3304,17 +3327,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if hasattr(self, 'worker') and self.worker:
             self.worker.deleteLater()
             self.worker = None
-        
+
         # Process next item in queue
         self._process_queue()
-    
+
     def _clear_queue(self):
         """Clear the processing queue"""
         cleared_count = len(self.processing_queue)
         self.processing_queue.clear()
         if cleared_count > 0:
             self._update_status(f"🗑️ Cleared {cleared_count} items from queue", "info")
-    
+
     def _get_queue_status(self):
         """Get current queue status"""
         return f"Queue: {len(self.processing_queue)} pending"
@@ -3386,6 +3409,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         super().closeEvent(event)
 
+    def _get_plugin_version(self):
+        """Read version from metadata.txt"""
+        try:
+            import os
+            metadata_path = os.path.join(os.path.dirname(__file__), 'metadata.txt')
+            with open(metadata_path, 'r') as f:
+                for line in f:
+                    if line.startswith('version='):
+                        return line.split('=')[1].strip()
+            return "1.0.0"  # Fallback version
+        except Exception:
+            return "1.0.0"  # Fallback version
+
 class SegSamDialog(QtWidgets.QDialog):
     def __init__(self, iface, parent=None):
         super().__init__(parent)
@@ -3406,7 +3442,9 @@ class SegSamDialog(QtWidgets.QDialog):
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
 
-        self.setWindowTitle("GeoOSAM")
+        # Get version from metadata
+        version = self._get_plugin_version()
+        self.setWindowTitle(f"Version: {version}")
         self.resize(280, 140)
 
     def _show_control_panel(self):
@@ -3417,3 +3455,16 @@ class SegSamDialog(QtWidgets.QDialog):
         self.control_panel.show()
         self.control_panel.raise_()
         self.close()
+
+    def _get_plugin_version(self):
+        """Read version from metadata.txt"""
+        try:
+            import os
+            metadata_path = os.path.join(os.path.dirname(__file__), 'metadata.txt')
+            with open(metadata_path, 'r') as f:
+                for line in f:
+                    if line.startswith('version='):
+                        return line.split('=')[1].strip()
+            return "1.0.0"  # Fallback version
+        except Exception:
+            return "1.0.0"  # Fallback version

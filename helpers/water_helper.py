@@ -135,3 +135,15 @@ class WaterHelper(BaseDetectionHelper):
         
         print(f"  💧 Found {len(candidates)} water body candidates")
         return candidates
+    
+    def get_merge_buffer_size(self):
+        """Water: Allow more aggressive merging"""
+        return 5
+    
+    def get_iou_threshold(self):
+        """Water: Allow merging of adjacent areas"""
+        return 0.1
+    
+    def should_merge_duplicates(self):
+        """Water: Merge duplicates"""
+        return True

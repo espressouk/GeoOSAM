@@ -273,3 +273,19 @@ class VegetationHelper(BaseDetectionHelper):
         else:
             # Single band or grayscale
             return cv2.cvtColor(bbox_image, cv2.COLOR_RGB2GRAY) if len(bbox_image.shape) == 3 else bbox_image
+    
+    def get_merge_buffer_size(self):
+        """Vegetation: Allow more aggressive merging"""
+        return 5
+    
+    def get_iou_threshold(self):
+        """Vegetation: Allow merging of adjacent areas"""
+        return 0.1
+    
+    def should_merge_duplicates(self):
+        """Vegetation: Merge duplicates"""
+        return True
+    
+    def supports_multispectral(self):
+        """Vegetation supports multispectral images"""
+        return True

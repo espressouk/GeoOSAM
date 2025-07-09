@@ -55,6 +55,18 @@ class BuildingsHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return False  # Buildings don't merge - each detection should stay separate
     
+    def get_merge_buffer_size(self):
+        """Buildings: NO merging - each detection should stay separate"""
+        return 0
+    
+    def get_iou_threshold(self):
+        """Buildings: Only merge if VERY high overlap (likely same building)"""
+        return 0.7
+    
+    def should_merge_duplicates(self):
+        """Buildings: Don't merge, just remove duplicates"""
+        return False
+    
     def get_background_threshold(self, bbox_area):
         """Buildings-specific background threshold"""
         return bbox_area * 0.6  # Medium threshold

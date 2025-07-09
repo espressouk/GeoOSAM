@@ -62,6 +62,18 @@ class VehicleHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return False  # Vehicles should stay separate - don't merge
     
+    def get_merge_buffer_size(self):
+        """Vehicle: minimal merging (1-2px buffer)"""
+        return 1
+    
+    def get_iou_threshold(self):
+        """Vehicle: Moderate overlap allowed"""
+        return 0.4
+    
+    def should_merge_duplicates(self):
+        """Vehicle: Merge duplicates"""
+        return True
+    
     def get_background_threshold(self, bbox_area):
         """Vehicle-specific background threshold"""
         return bbox_area * 0.8  # High threshold - vehicles are small objects

@@ -143,3 +143,15 @@ class VesselsHelper(BaseDetectionHelper):
         
         print(f"  🚢 Found {len(candidates)} vessel candidates")
         return candidates
+    
+    def get_merge_buffer_size(self):
+        """Vessels: minimal merging (1-2px buffer)"""
+        return 1
+    
+    def get_iou_threshold(self):
+        """Vessels: Moderate overlap allowed"""
+        return 0.4
+    
+    def should_merge_duplicates(self):
+        """Vessels: Merge duplicates"""
+        return True

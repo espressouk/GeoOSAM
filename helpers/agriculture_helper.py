@@ -129,3 +129,15 @@ class AgricultureHelper(BaseDetectionHelper):
         
         print(f"  🌾 Found {len(candidates)} agriculture candidates")
         return candidates
+    
+    def get_merge_buffer_size(self):
+        """Agriculture: Allow more aggressive merging"""
+        return 5
+    
+    def get_iou_threshold(self):
+        """Agriculture: Allow merging of adjacent areas"""
+        return 0.1
+    
+    def should_merge_duplicates(self):
+        """Agriculture: Merge duplicates"""
+        return True

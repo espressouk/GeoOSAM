@@ -98,3 +98,83 @@ class BaseDetectionHelper(ABC):
             'solidity': solidity,
             'perimeter': perimeter
         }
+    
+    def get_merge_buffer_size(self):
+        """Get buffer size for merging nearby objects. Override in subclasses."""
+        return 3  # Default buffer size
+    
+    def get_iou_threshold(self):
+        """Get IoU threshold for deduplication. Override in subclasses."""
+        return 0.3  # Default IoU threshold
+    
+    def should_merge_duplicates(self):
+        """Whether to merge overlapping objects or just remove duplicates. Override in subclasses."""
+        return True  # Default: merge duplicates
+    
+    def merge_nearby_masks(self, masks):
+        """Merge nearby masks using class-specific buffer size"""
+        buffer_px = self.get_merge_buffer_size()
+        
+        if buffer_px == 0:
+            # No merging for this class
+            return masks
+            
+        # Original merging logic with class-aware buffer
+        kernel = np.ones((buffer_px*2+1, buffer_px*2+1), np.uint8)
+        bins = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
+        dilated = [cv2.dilate(b, kernel, iterations=1) for b in bins]
+        used = [False] * len(bins)
+        merged = []
+
+        for i in range(len(bins)):
+            if used[i]: 
+                continue
+            group_mask = bins[i].copy()
+            # merge in any dilated-overlap neighbors
+            for j in range(i+1, len(bins)):
+                if used[j]:
+                    continue
+                # if dilated masks touch at all…
+                if np.any(cv2.bitwise_and(dilated[i], dilated[j]) == 255):
+                    used[j] = True
+                    # union the original shapes
+                    group_mask = cv2.bitwise_or(group_mask, bins[j])
+            merged.append(group_mask)
+        return merged
+    
+    def dedupe_or_merge_masks(self, masks):
+        """Smart deduplication using class-specific parameters"""
+        iou_thresh = self.get_iou_threshold()
+        merge = self.should_merge_duplicates()
+        
+        # Original logic with class-aware parameters
+        bins = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
+        used = [False] * len(masks)
+        result = []
+
+        for i in range(len(bins)):
+            if used[i]: 
+                continue
+            mi = bins[i]
+            union_mask = mi.copy()
+
+            for j in range(i+1, len(bins)):
+                if used[j]: 
+                    continue
+                mj = bins[j]
+                inter = cv2.bitwise_and(mi, mj)
+                uni = cv2.bitwise_or(mi, mj)
+                # IoU = area(inter) / area(union)
+                if np.sum(uni == 255) > 0:
+                    iou = np.sum(inter == 255) / np.sum(uni == 255)
+                    if iou >= iou_thresh:
+                        used[j] = True
+                        if merge:
+                            union_mask = cv2.bitwise_or(union_mask, mj)
+                        else:
+                            # keep only the bigger mask by area
+                            if np.sum(mj == 255) > np.sum(mi == 255):
+                                union_mask = mj.copy()
+                                
+            result.append(union_mask)
+        return result
