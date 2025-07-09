@@ -41,7 +41,7 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 1. **Click GeoOSAM icon** 🛰️ in QGIS toolbar
 2. **Automatic model selection** happens instantly:
    - **🎮 GPU detected**: Downloads SAM 2.1 (~160MB, one-time)
-   - **💻 CPU detected**: Downloads Ultralytics SAM2.1_B (~40MB via Ultralytics)
+   - **💻 CPU detected**: Downloads Ultralytics SAM2.1_B (~160MB via Ultralytics)
    - **⚡ High-core CPU**: Optimized for sub-second performance
 3. **Control panel opens** on the right side showing your hardware
 4. **Start segmenting!** 🚀
@@ -192,14 +192,14 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 
 GeoOSAM automatically detects your hardware and selects the optimal model:
 
-| Hardware Detected        | Model Selected | Download Size | Performance |
-| ------------------------ | -------------- | ------------- | ----------- |
-| NVIDIA GPU (CUDA)        | SAM 2.1        | ~160MB        | 0.2-0.5s    |
-| Apple Silicon (M1/M2/M3) | SAM 2.1        | ~160MB        | 1-2s        |
-| 24+ Core CPU             | Ultralytics SAM2.1_B      | ~40MB         | <1s         |
-| 16+ Core CPU             | Ultralytics SAM2.1_B      | ~40MB         | 1-2s        |
-| 8-16 Core CPU            | Ultralytics SAM2.1_B      | ~40MB         | 2-3s        |
-| 4-8 Core CPU             | Ultralytics SAM2.1_B      | ~40MB         | 3-5s        |
+| Hardware Detected        | Model Selected       | Download Size | Performance |
+| ------------------------ | -------------------- | ------------- | ----------- |
+| NVIDIA GPU (CUDA)        | SAM 2.1              | ~160MB        | 0.2-0.5s    |
+| Apple Silicon (M1/M2/M3) | SAM 2.1              | ~160MB        | 1-2s        |
+| 24+ Core CPU             | Ultralytics SAM2.1_B | ~160MB        | <1s         |
+| 16+ Core CPU             | Ultralytics SAM2.1_B | ~160MB        | 1-2s        |
+| 8-16 Core CPU            | Ultralytics SAM2.1_B | ~160MB        | 2-3s        |
+| 4-8 Core CPU             | Ultralytics SAM2.1_B | ~160MB        | 3-5s        |
 
 ### Download Process
 
