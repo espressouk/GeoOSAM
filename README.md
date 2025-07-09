@@ -29,9 +29,9 @@
 | -------------- | ---------- | ------------- | ------------- | ----------------- |
 | NVIDIA RTX GPU | SAM 2.1    | ~160MB        | 0.2-0.5s      | **10-50x faster** |
 | Apple M1/M2    | SAM 2.1    | ~160MB        | 1-2s          | **5-15x faster**  |
-| 24+ Core CPU   | SAM2.1_B   | ~160MB        | **<1s**       | **20-30x faster** |
-| 8-16 Core CPU  | SAM2.1_B   | ~160MB        | 1-2s          | **10-15x faster** |
-| 4-8 Core CPU   | SAM2.1_B   | ~160MB        | 2-4s          | **5-10x faster**  |
+| 24+ Core CPU   | SAM2.1_B   | ~162MB        | **<1s**       | **20-30x faster** |
+| 8-16 Core CPU  | SAM2.1_B   | ~162MB        | 1-2s          | **10-15x faster** |
+| 4-8 Core CPU   | SAM2.1_B   | ~162MB        | 2-4s          | **5-10x faster**  |
 
 **🎯 Smart Model Selection:**
 
@@ -176,9 +176,9 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 
 **🔄 Download Process:**
 
-- **CPU Systems**: Ultralytics automatically downloads SAM2.1_B (~160MB) on first use
+- **CPU Systems**: Ultralytics automatically downloads SAM2.1_B (~162MB) on first use
 - **GPU Systems**: Plugin auto-downloads SAM 2.1 checkpoint (~160MB) on first use
-- **Total Size**: ~160MB for all systems (unified model approach)
+- **Total Size**: ~160-162MB depending on model (SAM 2.1: ~160MB, SAM2.1_B: ~162MB)
 
 **📥 What happens automatically:**
 

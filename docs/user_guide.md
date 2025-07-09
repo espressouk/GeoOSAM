@@ -8,7 +8,7 @@
 2. **Click the GeoOSAM icon** 🛰️ in the toolbar
 3. **Automatic model selection** happens instantly:
    - **🎮 GPU detected**: Downloads SAM 2.1 (~160MB, one-time)
-   - **💻 CPU detected**: Downloads SAM2.1_B (~40MB via Ultralytics)
+   - **💻 CPU detected**: Downloads SAM2.1_B (~162MB via Ultralytics)
    - **⚡ High-core CPU**: Optimized for sub-second performance
 4. **Control panel opens** on the right side showing your hardware
 
