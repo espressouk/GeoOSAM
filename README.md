@@ -1,6 +1,6 @@
 # GeoOSAM - Advanced Segmentation for QGIS
 
-🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and SAM2.1_B with intelligent hardware optimization**
+🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and Ultralytics SAM2.1_B with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
@@ -10,10 +10,10 @@
 
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
 - **🧠 Intelligent Model Selection**: Automatically chooses the best AI model for your hardware
-- **🚀 Optimized Performance**: SAM 2.1 for GPU, SAM2.1_B for CPU
+- **🚀 Optimized Performance**: SAM 2.1 for GPU, Ultralytics SAM2.1_B for CPU
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
-- **🎯 Dual Modes**: Point-click and bounding box segmentation with batch processing
-- **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Ship, and more
+- **🎯 Three Modes**: Point-click, bounding box, and bbox batch processing
+- **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **↶ Undo Support**: Mistake correction with polygon-level undo
 - **📁 Custom Output**: User-selectable output folders
@@ -230,17 +230,9 @@ For vegetation mapping, GeoOSAM automatically:
 
 - **Calculates NDVI** from NIR and Red bands
 - **Filters linear features** (roads, tracks) with shape analysis
-- **Processes up to 200 objects** in batch mode
+- **Processes up to 100 objects** in batch mode
 - **Validates object geometry** (aspect ratio, solidity)
 - **Preserves spectral fidelity** throughout processing
-
-### **Workflow for UAV/Satellite Data**
-
-1. **Load multi-spectral raster** → Automatic band detection
-2. **Select Vegetation class** → NDVI processing activated  
-3. **Batch mode** → Processes large areas efficiently
-4. **Shape validation** → Filters out roads/tracks automatically
-5. **Export results** → Professional shapefiles with spectral attributes
 
 ## ⚙️ Technical Details
 

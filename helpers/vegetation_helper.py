@@ -12,7 +12,7 @@ from .base_helper import BaseDetectionHelper
 class VegetationHelper(BaseDetectionHelper):
     """Specialized helper for vegetation detection"""
     
-    def __init__(self, class_name="Vegetation", min_object_size=30, max_objects=40):
+    def __init__(self, class_name="Vegetation", min_object_size=30, max_objects=100):
         super().__init__(class_name, min_object_size, max_objects)
     
     def detect_candidates(self, bbox_image, bbox):

@@ -402,7 +402,7 @@ For **5+ band imagery**, vegetation detection uses:
 
 ### Transportation Analysis
 
-**Hardware**: SAM2.1_B excellent for vehicle detection
+**Hardware**: Ultralytics SAM2.1_B excellent for vehicle detection
 **Expected Time**: Sub-second per vehicle on high-end systems
 
 1. **Setup:** High-resolution imagery of transportation hubs
