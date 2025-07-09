@@ -44,7 +44,7 @@ changelog=1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
     - FIXED: High-resolution reflectance value preservation (0-1 range) and data type truncation
     - FIXED: SAM2 tensor mismatch errors with multi-spectral input
     - FIXED: Vessels detection shoreline noise with strict size validation (>5000px rejection)
-    - FIXED: Oversized mask validation (rejects masks >10% of image area)
+    - FIXED: Oversized mask validation (rejects masks >10%% of image area)
     - FIXED: Crash prevention with robust processing state management
     - FIXED: Shape attribute renamed from 'class_name' to 'class' for consistency
     - FIXED: Mathematical warnings in texture calculation
