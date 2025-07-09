@@ -314,7 +314,7 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
-### v1.2.0 - Multi-spectral UAV Support (2025-07-06)
+### v1.2.0 - Multi-spectral UAV Support (2025-07-09)
 
 - **🛰️ NEW**: Native multi-spectral UAV/satellite imagery support (5+ bands)
 - **🌿 NEW**: Automatic NDVI calculation for vegetation detection using NIR/Red bands
@@ -329,7 +329,7 @@ If you use GeoOSAM in your research, please cite:
 - **📊 NEW**: Comprehensive logging for debugging high-resolution imagery issues
 - **🛰️ NEW**: Dual processing path - RGB for SAM2, full spectral for vegetation analysis
 
-### v1.1.0 - Latest (2025-07-08)
+### v1.1.0 - Latest (2025-07-03)
 
 - **FIXED**: Multiple raster layer support - segmentation now works with selected raster (same CRS)
 - **FIXED**: Panel focus management - controls properly lose focus after use
