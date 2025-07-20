@@ -13,6 +13,9 @@ import pathlib
 import platform
 import subprocess
 import urllib.request
+import tempfile
+import math
+from PIL import Image
 from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal
 from qgis.core import (
     QgsProject,
@@ -25,7 +28,16 @@ from qgis.core import (
     QgsGeometry,
     QgsFillSymbol,
     QgsField,
-    QgsVectorFileWriter
+    QgsVectorFileWriter,
+    QgsMapLayerType,
+    QgsDataSourceUri,
+    QgsNetworkAccessManager,
+    QgsRasterFileWriter,
+    QgsRasterPipe,
+    QgsCoordinateTransform,
+    QgsMapRendererParallelJob,
+    QgsMapSettings,
+    Qgis
 )
 from qgis.gui import QgsRubberBand, QgsMapTool
 from qgis.PyQt import QtWidgets, QtCore, QtGui
@@ -1980,6 +1992,149 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if index >= 0:
                 self.classComboBox.setCurrentIndex(index)
 
+    def _detect_tile_layer_type(self, layer):
+        """Detect if layer is a tile service (XYZ, WMS, WMTS) and return type"""
+        if not isinstance(layer, QgsRasterLayer):
+            return None
+        
+        try:
+            provider_type = layer.providerType()
+            data_source = layer.dataProvider().dataSourceUri()
+            
+            if provider_type == "wms":
+                # All tile services use "wms" provider in QGIS
+                data_source_lower = data_source.lower()
+                data_source_upper = data_source.upper()
+                
+                if "type=xyz" in data_source_lower:
+                    return "XYZ"
+                elif "service=WMS" in data_source_upper:
+                    return "WMS" 
+                elif "service=WMTS" in data_source_upper or "wmts" in data_source_lower:
+                    return "WMTS"
+                elif "tilematrixset" in data_source_lower:
+                    return "WMTS"
+                else:
+                    # Generic tile service
+                    return "TILE"
+            
+            return None  # Not a tile service
+            
+        except Exception as e:
+            print(f"Error detecting tile layer type: {e}")
+            return None
+
+    def _cache_tile_layer_as_raster(self, layer):
+        """Cache tile layer by rendering current canvas view to a temporary GeoTIFF"""
+        try:
+            # Get current canvas
+            canvas = self.iface.mapCanvas()
+            
+            # Create a temporary raster by rendering just this layer
+            from qgis.core import QgsProject
+            
+            # Use map renderer instead of canvas manipulation to avoid flickering
+            from qgis.core import QgsMapRendererParallelJob, QgsMapSettings
+            
+            # Create map settings for just this layer
+            settings = QgsMapSettings()
+            settings.setLayers([layer])
+            settings.setExtent(canvas.extent())
+            settings.setDestinationCrs(canvas.mapSettings().destinationCrs())
+            settings.setOutputSize(canvas.size())
+            settings.setBackgroundColor(QtGui.QColor(255, 255, 255, 0))
+            
+            # Render to image without touching canvas
+            job = QgsMapRendererParallelJob(settings)
+            job.start()
+            job.waitForFinished()
+            
+            if job.errors():
+                raise Exception(f"Render errors: {'; '.join(job.errors())}")
+            
+            # Get rendered image and save temporarily
+            image = job.renderedImage()
+            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            temp_img_path = temp_file.name
+            temp_file.close()
+            
+            image.save(temp_img_path)
+            
+            # Convert to GeoTIFF with proper georeferencing
+            temp_tif = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
+            temp_tif_path = temp_tif.name
+            temp_tif.close()
+            
+            # Get canvas extent and CRS
+            extent = canvas.extent()
+            crs = canvas.mapSettings().destinationCrs()
+            
+            # Open the PNG and convert to GeoTIFF
+            from PIL import Image
+            import rasterio
+            from rasterio.transform import from_bounds
+            
+            with Image.open(temp_img_path) as img:
+                img_array = np.array(img)
+                
+                if len(img_array.shape) == 3:
+                    # Convert to rasterio format (bands, height, width)
+                    img_array = np.transpose(img_array, (2, 0, 1))
+                    
+                    # Handle RGBA vs RGB
+                    if img_array.shape[0] == 4:
+                        # Drop alpha channel, keep only RGB
+                        img_array = img_array[:3, :, :]
+                        band_count = 3
+                    else:
+                        band_count = img_array.shape[0]
+                else:
+                    band_count = 1
+                
+                height, width = img.size[1], img.size[0]
+                
+                # Create transform
+                transform = from_bounds(
+                    extent.xMinimum(), extent.yMinimum(),
+                    extent.xMaximum(), extent.yMaximum(),
+                    width, height
+                )
+                
+                # Write GeoTIFF
+                with rasterio.open(
+                    temp_tif_path, 'w',
+                    driver='GTiff',
+                    height=height,
+                    width=width,
+                    count=band_count,
+                    dtype=img_array.dtype,
+                    crs=crs.toWkt(),
+                    transform=transform
+                ) as dst:
+                    if len(img_array.shape) == 3:
+                        dst.write(img_array)
+                    else:
+                        dst.write(img_array, 1)
+            
+            # No need to restore visibility since we didn't change it
+            
+            # Clean up PNG
+            try:
+                os.unlink(temp_img_path)
+            except:
+                pass
+            
+            print(f"✅ Successfully cached tiles to: {temp_tif_path}")
+            return temp_tif_path
+            
+        except Exception as e:
+            print(f"❌ Tile caching error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # No visibility cleanup needed since we didn't change it
+            return None
+
     def _validate_class_selection(self):
         """Enhanced validation that properly handles layer switching"""
         if not self.current_class:
@@ -1992,6 +2147,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 "Please select a valid raster layer first!", "warning")
             return False
 
+        # Check if this is a tile layer and show appropriate message
+        tile_type = self._detect_tile_layer_type(current_layer)
+        if tile_type:
+            self._update_status(f"🌐 {tile_type} tile layer detected - will cache tiles for processing", "info")
+        
         # ALWAYS update the raster layer reference when validating
         self.original_raster_layer = current_layer
 
@@ -2394,7 +2554,23 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             return
 
     def _prepare_optimized_segmentation_data(self, rlayer):
-        rpath = rlayer.source()
+        # Check if this is a tile layer that needs caching
+        tile_type = self._detect_tile_layer_type(rlayer)
+        cached_path = None
+        
+        if tile_type:
+            # For tile layers, cache the current extent as a temporary raster
+            self._update_status(f"🌐 {tile_type} tile layer - caching current view", "processing")
+            cached_path = self._cache_tile_layer_as_raster(rlayer)
+            if cached_path:
+                rpath = cached_path
+                self._update_status("✅ Tile caching complete", "info")
+            else:
+                self._update_status("❌ Failed to cache tiles - check console for details", "error")
+                return None
+        else:
+            rpath = rlayer.source()
+        
         adaptive_crop_size = self._get_adaptive_crop_size()
 
         try:
@@ -2739,6 +2915,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         except Exception as e:
             self._update_status(f"Error accessing raster data: {e}", "error")
             return None
+        finally:
+            # Clean up temporary cached file
+            if cached_path and os.path.exists(cached_path):
+                try:
+                    os.unlink(cached_path)
+                    print(f"🧹 Cleaned up temp file: {os.path.basename(cached_path)}")
+                except Exception as e:
+                    print(f"Warning: Could not clean up temp file {cached_path}: {e}")
 
     def _get_adaptive_crop_size(self):
         canvas_scale = self.canvas.scale()
