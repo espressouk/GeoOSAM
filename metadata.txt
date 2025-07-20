@@ -96,7 +96,7 @@ changelog=1.2.1 - Online Tile Layer Support
     - Comprehensive error handling and user feedback system
     - Professional workflow features optimized for GIS analysis
     - Updated dependencies: torch, torchvision, ultralytics, opencv-python, rasterio, shapely, hydra-core
-    - Automatic model downloading: Ultralytics handles SAM2.1_B, plugin manages SAM 2.1
+    - Automatic model downloading: Ultralytics handles SAM2.1_B, plugin manages SAM 2.1.
     - Enhanced memory management and processing efficiency
     - Cross-platform compatibility with Windows, macOS, and Linux
 
