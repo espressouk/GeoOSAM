@@ -16,6 +16,7 @@
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
 - **⚠️ Batch Mode Status**: Currently in development - some classes perform better than others
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
+- **🌐 Online Map Support**: Works with ESRI, Google Satellite, and XYZ/WMS/WMTS tile services
 - **↶ Undo Support**: Mistake correction with polygon-level undo
 - **📁 Custom Output**: User-selectable output folders
 - **🎨 Class Management**: Custom classes with color coding
@@ -48,11 +49,17 @@ Enable in QGIS Plugin Manager or download from GitHub
 
 ### 2. Load Imagery & Select Class
 
+**Supported Data Sources:**
+- 🗂️ Local raster files (GeoTIFF, JP2, etc.)
+- 🌐 ESRI services
+- 🗺️ Google Satellite, Bing Aerial (XYZ tiles)
+- 🌍 WMS/WMTS tile services
+
 ![Main Interface](screenshots/main_interface.png)
 
 ### 3. Point & Click to Segment
 
-Select a class (Buildings, Water, etc.) and click on objects in your imagery
+Select a class (Buildings, Water, etc.) and click on objects in your imagery. Works identically with local rasters and online tile services.
 
 ### 4. View Results
 
@@ -314,6 +321,12 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.2.1 - Online Tile Layer Support (2025-07-20)
+
+- **🌐 NEW**: Support for online tile services (XYZ, WMS, WMTS)
+- **🗺️ NEW**: Works with ESRI, Google Satellite, Bing Aerial
+- **⚡ NEW**: Automatic tile caching with proper georeferencing
+
 ### v1.2.0 - Multi-spectral UAV Support (2025-07-09)
 
 - **🛰️ NEW**: Native multi-spectral UAV/satellite imagery support (5+ bands)
@@ -392,5 +405,5 @@ To be determined based on user feedback and usage patterns.
 ---
 
 **Last updated:** 2025-07-08
-**Plugin Version:** 1.2.0
+**Plugin Version:** 1.2.1
 **QGIS Compatibility:** 3.16+

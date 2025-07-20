@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=Advanced segmentation tool with intelligent SAM 2.1/Ultralytics SAM2.1_B selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
 about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics SAM2.1_B to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and Ultralytics SAM2.1_B for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles SAM2.1_B downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
-version=1.2.0
+version=1.2.1
 author=Ofer Butbega
 email=bkst.dev@gmail.com
 
@@ -32,7 +32,12 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
+changelog=1.2.1 - Online Tile Layer Support
+    - NEW: Support for online tile services (XYZ, WMS, WMTS)
+    - NEW: Works with ESRI, Google Satellite, Bing Aerial
+    - NEW: Automatic tile caching with proper georeferencing
+    
+    1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
     - NEW: Native multi-spectral UAV/satellite imagery support (5+ bands)
     - NEW: Automatic NDVI calculation for vegetation detection using NIR/Red bands
     - NEW: Enhanced batch processing with up to 100 objects for vegetation
@@ -96,4 +101,4 @@ changelog=1.2.0 - Multi-spectral UAV Support with Comprehensive Object Detection
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-07-08
+update_date=2025-07-20
