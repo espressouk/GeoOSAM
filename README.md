@@ -306,8 +306,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 
 ## ☕ Support GeoOSAM
 
-If you find this plugin useful, please consider [buying me a coffee](https://coff.ee/OpticBloom) to support continued development and new features.
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-blue?logo=buy-me-a-coffee&style=for-the-badge)](https://coff.ee/OpticBloom)
+If you find this plugin useful, please consider [buying me a coffee](https://buymeacoffee.com/OpticBloom) to support continued development and new features.
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-blue?logo=buy-me-a-coffee&style=for-the-badge)](https://buymeacoffee.com/OpticBloom)
 
 ## 📄 License
 
