@@ -328,6 +328,13 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.2.2 - Threading Configuration Fix (2025-09-20)
+
+- **🔧 FIXED**: PyTorch threading initialization error when other plugins pre-configure threads
+- **🔧 FIXED**: "cannot set number of interop threads" RuntimeError on plugin startup
+- **⚡ ENHANCED**: Thread configuration with graceful fallback for pre-initialized environments
+- **🤝 IMPROVED**: Compatibility with other PyTorch-based QGIS plugins
+
 ### v1.2.1 - Online Tile Layer Support (2025-07-20)
 
 - **🌐 NEW**: Support for online tile services (XYZ, WMS, WMTS)
