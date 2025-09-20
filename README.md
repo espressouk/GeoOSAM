@@ -302,6 +302,13 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 - **QGIS Community**: For the excellent GIS platform
 - **PyTorch Team**: For the deep learning framework
 
+---
+
+## ☕ Support GeoOSAM
+
+If you find this plugin useful, please consider [buying me a coffee](https://buymeacoffee.com/OpticBloom) to support continued development and new features.
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-blue?logo=buy-me-a-coffee&style=for-the-badge)](https://buymeacoffee.com/OpticBloom)
+
 ## 📄 License
 
 This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) file for details.
