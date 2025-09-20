@@ -263,8 +263,6 @@ def filter_contained_masks(masks):
 
 def setup_pytorch_performance():
     global _THREADS_CONFIGURED
-    if _THREADS_CONFIGURED:
-        return torch.get_num_threads()
 
     import multiprocessing
     num_cores = multiprocessing.cpu_count()
@@ -272,15 +270,32 @@ def setup_pytorch_performance():
         max(4, num_cores - 2) if num_cores >= 8 else \
         max(1, num_cores - 1)
 
-    torch.set_num_interop_threads(min(4, optimal_threads // 2))
-    torch.set_num_threads(optimal_threads)
+    if _THREADS_CONFIGURED:
+        try:
+            return torch.get_num_threads()
+        except:
+            return optimal_threads
 
-    os.environ["OMP_NUM_THREADS"] = str(optimal_threads)
-    os.environ["MKL_NUM_THREADS"] = str(optimal_threads)
-    os.environ["OPENBLAS_NUM_THREADS"] = str(optimal_threads)
+    # Try to configure threads, but don't fail if already initialized
+    try:
+        torch.set_num_interop_threads(min(4, optimal_threads // 2))
+        torch.set_num_threads(optimal_threads)
+        actual_threads = torch.get_num_threads()
+    except RuntimeError as e:
+        # Threading already configured by another plugin/process
+        print(f"Note: PyTorch threading pre-configured, using existing settings")
+        try:
+            actual_threads = torch.get_num_threads()
+        except:
+            actual_threads = optimal_threads
+
+    # Always set environment variables as backup
+    os.environ["OMP_NUM_THREADS"] = str(actual_threads)
+    os.environ["MKL_NUM_THREADS"] = str(actual_threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(actual_threads)
 
     _THREADS_CONFIGURED = True
-    return optimal_threads
+    return actual_threads
 
 def auto_download_checkpoint():
     """Download SAM2 checkpoint if missing"""
@@ -1996,16 +2011,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         """Detect if layer is a tile service (XYZ, WMS, WMTS) and return type"""
         if not isinstance(layer, QgsRasterLayer):
             return None
-        
+
         try:
             provider_type = layer.providerType()
             data_source = layer.dataProvider().dataSourceUri()
-            
+
             if provider_type == "wms":
                 # All tile services use "wms" provider in QGIS
                 data_source_lower = data_source.lower()
                 data_source_upper = data_source.upper()
-                
+
                 if "type=xyz" in data_source_lower:
                     return "XYZ"
                 elif "service=WMS" in data_source_upper:
@@ -2017,9 +2032,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 else:
                     # Generic tile service
                     return "TILE"
-            
+
             return None  # Not a tile service
-            
+
         except Exception as e:
             print(f"Error detecting tile layer type: {e}")
             return None
@@ -2029,13 +2044,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         try:
             # Get current canvas
             canvas = self.iface.mapCanvas()
-            
+
             # Create a temporary raster by rendering just this layer
             from qgis.core import QgsProject
-            
+
             # Use map renderer instead of canvas manipulation to avoid flickering
             from qgis.core import QgsMapRendererParallelJob, QgsMapSettings
-            
+
             # Create map settings for just this layer
             settings = QgsMapSettings()
             settings.setLayers([layer])
@@ -2043,44 +2058,44 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             settings.setDestinationCrs(canvas.mapSettings().destinationCrs())
             settings.setOutputSize(canvas.size())
             settings.setBackgroundColor(QtGui.QColor(255, 255, 255, 0))
-            
+
             # Render to image without touching canvas
             job = QgsMapRendererParallelJob(settings)
             job.start()
             job.waitForFinished()
-            
+
             if job.errors():
                 raise Exception(f"Render errors: {'; '.join(job.errors())}")
-            
+
             # Get rendered image and save temporarily
             image = job.renderedImage()
             temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
             temp_img_path = temp_file.name
             temp_file.close()
-            
+
             image.save(temp_img_path)
-            
+
             # Convert to GeoTIFF with proper georeferencing
             temp_tif = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
             temp_tif_path = temp_tif.name
             temp_tif.close()
-            
+
             # Get canvas extent and CRS
             extent = canvas.extent()
             crs = canvas.mapSettings().destinationCrs()
-            
+
             # Open the PNG and convert to GeoTIFF
             from PIL import Image
             import rasterio
             from rasterio.transform import from_bounds
-            
+
             with Image.open(temp_img_path) as img:
                 img_array = np.array(img)
-                
+
                 if len(img_array.shape) == 3:
                     # Convert to rasterio format (bands, height, width)
                     img_array = np.transpose(img_array, (2, 0, 1))
-                    
+
                     # Handle RGBA vs RGB
                     if img_array.shape[0] == 4:
                         # Drop alpha channel, keep only RGB
@@ -2090,16 +2105,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         band_count = img_array.shape[0]
                 else:
                     band_count = 1
-                
+
                 height, width = img.size[1], img.size[0]
-                
+
                 # Create transform
                 transform = from_bounds(
                     extent.xMinimum(), extent.yMinimum(),
                     extent.xMaximum(), extent.yMaximum(),
                     width, height
                 )
-                
+
                 # Write GeoTIFF
                 with rasterio.open(
                     temp_tif_path, 'w',
@@ -2115,23 +2130,23 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         dst.write(img_array)
                     else:
                         dst.write(img_array, 1)
-            
+
             # No need to restore visibility since we didn't change it
-            
+
             # Clean up PNG
             try:
                 os.unlink(temp_img_path)
             except:
                 pass
-            
+
             print(f"✅ Successfully cached tiles to: {temp_tif_path}")
             return temp_tif_path
-            
+
         except Exception as e:
             print(f"❌ Tile caching error: {e}")
             import traceback
             traceback.print_exc()
-            
+
             # No visibility cleanup needed since we didn't change it
             return None
 
@@ -2151,7 +2166,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         tile_type = self._detect_tile_layer_type(current_layer)
         if tile_type:
             self._update_status(f"🌐 {tile_type} tile layer detected - will cache tiles for processing", "info")
-        
+
         # ALWAYS update the raster layer reference when validating
         self.original_raster_layer = current_layer
 
@@ -2557,7 +2572,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Check if this is a tile layer that needs caching
         tile_type = self._detect_tile_layer_type(rlayer)
         cached_path = None
-        
+
         if tile_type:
             # For tile layers, cache the current extent as a temporary raster
             self._update_status(f"🌐 {tile_type} tile layer - caching current view", "processing")
@@ -2570,7 +2585,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 return None
         else:
             rpath = rlayer.source()
-        
+
         adaptive_crop_size = self._get_adaptive_crop_size()
 
         try:

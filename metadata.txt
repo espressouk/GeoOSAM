@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=Advanced segmentation tool with intelligent SAM 2.1/Ultralytics SAM2.1_B selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
 about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics SAM2.1_B to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and Ultralytics SAM2.1_B for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles SAM2.1_B downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
-version=1.2.1
+version=1.2.2
 author=Ofer Butbega
 email=bkst.dev@gmail.com
 
@@ -32,7 +32,13 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.2.1 - Online Tile Layer Support
+changelog=1.2.2 - Threading Configuration Fix
+    - FIXED: PyTorch threading initialization error when other plugins pre-configure threads
+    - FIXED: "cannot set number of interop threads" RuntimeError on plugin startup
+    - Enhanced thread configuration with graceful fallback for pre-initialized environments
+    - Improved compatibility with other PyTorch-based QGIS plugins
+
+    1.2.1 - Online Tile Layer Support
     - NEW: Support for online tile services (XYZ, WMS, WMTS)
     - NEW: Works with ESRI, Google Satellite, Bing Aerial
     - NEW: Automatic tile caching with proper georeferencing
@@ -101,4 +107,4 @@ changelog=1.2.1 - Online Tile Layer Support
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-07-20
+update_date=2025-09-20
