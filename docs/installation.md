@@ -12,16 +12,51 @@
 
 ### Step 2: Install Dependencies
 
-**🎯 Windows Users: Use OSGeo4W Shell (Recommended)**
+**🎯 Windows Users: IMPORTANT - Choose CPU or CUDA Version**
+
+First, check if you have an NVIDIA GPU and want to use it:
 
 ```bash
 # Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
+# Check if NVIDIA GPU is available:
+nvidia-smi
+```
+
+**If you have NVIDIA GPU (nvidia-smi shows your GPU):**
+
+```bash
+# Install PyTorch with CUDA su
+pport (CUDA 11.8 - most compatible)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+
+# OR for newer GPUs with CUDA 12.1+:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+```
+
+**If you DON'T have NVIDIA GPU or want CPU-only:**
+
+```bash
+# Install CPU-only version
 pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
-**🍎 macOS/🐧 Linux Users: Use Terminal**
+**🍎 macOS Users: Use Terminal**
 
 ```bash
+# macOS (CPU or Apple Silicon MPS)
+pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+```
+
+**🐧 Linux Users: Use Terminal**
+
+```bash
+# For NVIDIA GPU with CUDA support:
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+
+# For CPU-only:
 pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
@@ -35,6 +70,29 @@ packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", 
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 
 ```
+
+**✅ Verify CUDA Installation (Windows/Linux with NVIDIA GPU)**
+
+After installing PyTorch with CUDA, verify it's working:
+
+```python
+# Open QGIS → Plugins → Python Console
+import torch
+print(f"PyTorch version: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU detected: {torch.cuda.get_device_name(0)}")
+else:
+    print("⚠️ CUDA not detected - see troubleshooting below")
+```
+
+**Expected output for GPU users:**
+
+- `CUDA available: True`
+- `GPU detected: NVIDIA GeForce RTX ...` (your GPU name)
+
+**If CUDA available shows False:**
+See troubleshooting section: [CUDA Not Detected on Windows](#issue-cuda-not-detected-on-windows-despite-nvidia-smi-working)
 
 ### Step 3: First Use
 
@@ -450,6 +508,68 @@ wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.
 - Check NVIDIA driver version
 - Reinstall PyTorch with correct CUDA version
 - Plugin will automatically fallback to Ultralytics SAM2.1_B on CPU
+
+#### Issue: "CUDA Not Detected on Windows" (despite nvidia-smi working)
+
+**Symptoms:**
+
+- `nvidia-smi` command works and shows your GPU
+- Plugin runs in CPU mode
+- `torch.cuda.is_available()` returns `False`
+- Plugin shows "💻 CPU" instead of "🎮 CUDA"
+
+**Root Cause:**
+PyTorch was installed without CUDA support (CPU-only version). The default `pip install torch` command installs the CPU version, even if you have NVIDIA drivers.
+
+**Solution:**
+
+**Step 1: Verify the issue**
+
+```python
+# In QGIS Python Console:
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"CUDA built: {torch.version.cuda}")
+```
+
+If it shows `CUDA available: False` and `CUDA built: None`, follow these steps:
+
+**Step 2: Uninstall CPU-only PyTorch**
+
+```bash
+# In OSGeo4W Shell:
+pip uninstall torch torchvision
+```
+
+**Step 3: Install PyTorch with CUDA support**
+
+```bash
+# For CUDA 11.8 (most compatible with current drivers):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# OR for CUDA 12.1+ (newer GPUs/drivers):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+```
+
+**Step 4: Verify CUDA is now working**
+
+```python
+# Restart QGIS, then in Python Console:
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"GPU: {torch.cuda.get_device_name(0)}")
+```
+
+You should now see:
+
+- `CUDA available: True`
+- Your GPU name displayed
+
+**Step 5: Test plugin**
+
+- Click GeoOSAM icon
+- Control panel should now show "🎮 CUDA | SAM2"
+- GPU acceleration active!
 
 #### Issue: "Wrong model selected"
 

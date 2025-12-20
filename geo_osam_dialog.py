@@ -142,6 +142,184 @@ if SAM21B_AVAILABLE:
 else:
     print("   Falling back to SAM 2.1")
 
+
+# SAM3 Predictor Wrapper
+class SAM3PredictorWrapper:
+    """Wrapper to adapt Ultralytics SAM3 to GeoOSAM interface"""
+
+    def __init__(self, weights_path='sam3.pt'):
+        """Initialize SAM3 predictor with weights path"""
+        from ultralytics import SAM
+
+        self.weights_path = weights_path
+        self.model = SAM(weights_path)
+        self.current_image = None
+        self.image_hash = None
+        self.cached_image_path = None
+
+    def set_image(self, image):
+        """
+        Set image for SAM3 prediction
+        SAM3 works with file paths or arrays
+        """
+        import hashlib
+        import tempfile
+        from PIL import Image
+
+        self.current_image = image
+
+        # Hash image to avoid re-encoding same image
+        img_hash = hashlib.md5(image.tobytes()).hexdigest()
+
+        if img_hash == self.image_hash and self.cached_image_path and os.path.exists(self.cached_image_path):
+            # Reuse cached image
+            return
+
+        # Cache new image to temp file (SAM3 may need file path)
+        if self.cached_image_path is None or not os.path.exists(self.cached_image_path):
+            fd, self.cached_image_path = tempfile.mkstemp(suffix='.jpg', prefix='geoosam_sam3_')
+            os.close(fd)
+
+        # Save RGB image
+        if len(image.shape) == 2:
+            # Grayscale
+            img_pil = Image.fromarray(image, mode='L')
+        elif image.shape[2] == 3:
+            # RGB
+            img_pil = Image.fromarray(image, mode='RGB')
+        else:
+            # Multi-channel, take first 3
+            img_pil = Image.fromarray(image[:, :, :3], mode='RGB')
+
+        img_pil.save(self.cached_image_path, quality=95)
+        self.image_hash = img_hash
+
+    def predict(self, point_coords=None, point_labels=None, box=None,
+                text=None, exemplar_mode=False, multimask_output=False):
+        """
+        Unified predict interface supporting:
+        - Point/bbox prompts (classic SAM)
+        - Text prompts (SAM3 semantic)
+        - Exemplar mode (SAM3 find-similar)
+        """
+
+        # Text prompt mode (SAM3 semantic segmentation)
+        if text is not None:
+            try:
+                results = self.model.predict(
+                    source=self.current_image,
+                    text=text,
+                    verbose=False,
+                    conf=0.25,
+                    save=False
+                )
+                return self._extract_masks(results)
+            except Exception as e:
+                print(f"SAM3 text prediction error: {e}")
+                return self._empty_result()
+
+        # Exemplar mode: use bbox as example to find similar
+        if exemplar_mode and box is not None:
+            try:
+                bbox = box[0]  # [x1, y1, x2, y2]
+                results = self.model.predict(
+                    source=self.current_image,
+                    bboxes=[bbox.tolist() if hasattr(bbox, 'tolist') else bbox],
+                    verbose=False,
+                    conf=0.25,
+                    save=False
+                )
+                return self._extract_masks(results)
+            except Exception as e:
+                print(f"SAM3 exemplar prediction error: {e}")
+                return self._empty_result()
+
+        # Classic point/bbox mode - SAM3 supports these too
+        if point_coords is not None:
+            try:
+                point = point_coords[0]
+                x, y = int(point[0]), int(point[1])
+                results = self.model.predict(
+                    source=self.current_image,
+                    points=[[x, y]],
+                    labels=[1],
+                    verbose=False,
+                    save=False
+                )
+                return self._extract_masks(results)
+            except Exception as e:
+                print(f"SAM3 point prediction error: {e}")
+                return self._empty_result()
+
+        if box is not None:
+            try:
+                bbox = box[0]
+                x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                results = self.model.predict(
+                    source=self.current_image,
+                    bboxes=[[x1, y1, x2, y2]],
+                    verbose=False,
+                    save=False
+                )
+                return self._extract_masks(results)
+            except Exception as e:
+                print(f"SAM3 bbox prediction error: {e}")
+                return self._empty_result()
+
+        return self._empty_result()
+
+    def _extract_masks(self, results):
+        """Extract masks from SAM3 results"""
+        try:
+            if results and len(results) > 0:
+                result = results[0]
+                if hasattr(result, 'masks') and result.masks is not None:
+                    masks_tensor = result.masks.data
+
+                    # SAM3 may return multiple masks
+                    masks_list = []
+                    scores_list = []
+
+                    for i, mask_tensor in enumerate(masks_tensor):
+                        if hasattr(mask_tensor, 'cpu'):
+                            mask = mask_tensor.cpu().numpy()
+                        else:
+                            mask = np.array(mask_tensor)
+
+                        # Ensure uint8 format
+                        if mask.max() <= 1.0:
+                            mask = (mask * 255).astype(np.uint8)
+                        else:
+                            mask = mask.astype(np.uint8)
+
+                        # Only add non-empty masks
+                        num_pixels = np.sum(mask > 0)
+                        if num_pixels > 0:
+                            masks_list.append(mask)
+                            # Get confidence if available
+                            if hasattr(result, 'boxes') and hasattr(result.boxes, 'conf'):
+                                try:
+                                    score = float(result.boxes.conf[i]) if i < len(result.boxes.conf) else 1.0
+                                except:
+                                    score = 1.0
+                            else:
+                                score = 1.0
+                            scores_list.append(score)
+
+                    if len(masks_list) > 0:
+                        return masks_list, scores_list, None
+
+            return self._empty_result()
+        except Exception as e:
+            print(f"SAM3 mask extraction error: {e}")
+            return self._empty_result()
+
+    def _empty_result(self):
+        """Return empty result"""
+        h, w = self.current_image.shape[:2] if self.current_image is not None else (512, 512)
+        empty_mask = np.zeros((h, w), dtype=np.uint8)
+        return [empty_mask], [0.0], None
+
 """
 GeoOSAM Control Panel - Enhanced SAM segmentation for QGIS
 Copyright (C) 2025 by Ofer Butbega
@@ -374,35 +552,89 @@ def show_checkpoint_dialog(parent=None):
     return False
 
 def detect_best_device():
-    """Detect best available device and model"""
+    """Detect best available device and model (with SAM3 support)"""
     cores = None
+
+    # Check what models are available
+    available_models = {
+        'SAM2': True,  # Always available (fallback)
+        'SAM2.1_B': SAM21B_AVAILABLE,
+        'SAM3': check_sam3_available()
+    }
+
     try:
         if torch.cuda.is_available() and not os.getenv("GEOOSAM_FORCE_CPU"):
             gpu_props = torch.cuda.get_device_properties(0)
             if gpu_props.total_memory / 1024**3 >= 3:  # 3GB minimum
                 device = "cuda"
-                model_choice = "SAM2"
-                print(
-                    f"🎮 GPU detected: {torch.cuda.get_device_name(0)} - using SAM2")
-                return device, model_choice, cores
+                # Prefer SAM3 if available, otherwise SAM2
+                model_choice = "SAM3" if available_models['SAM3'] else "SAM2"
+                print(f"🎮 GPU detected: {torch.cuda.get_device_name(0)} - using {model_choice}")
+                return device, model_choice, cores, available_models
 
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device, model_choice = "mps", "SAM2"
-            print("🍎 Apple Silicon GPU detected - using SAM2")
-            return device, model_choice, cores
+            device = "mps"
+            # Prefer SAM3 if available, otherwise SAM2
+            model_choice = "SAM3" if available_models['SAM3'] else "SAM2"
+            print(f"🍎 Apple Silicon GPU detected - using {model_choice}")
+            return device, model_choice, cores, available_models
 
         else:
             device = "cpu"
+            # CPU: Prefer SAM2.1_B > SAM2 (SAM3 not great on CPU)
             model_choice = "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
             cores = setup_pytorch_performance()
             print(f"💻 CPU detected - using {model_choice} ({cores} cores)")
-            return device, model_choice, cores
+            return device, model_choice, cores, available_models
 
     except Exception as e:
         print(f"⚠️ Device detection failed: {e}, falling back to CPU")
-        device, model_choice = "cpu", "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
+        device = "cpu"
+        model_choice = "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
         cores = setup_pytorch_performance()
-        return device, model_choice, cores
+        return device, model_choice, cores, available_models
+
+
+def check_sam3_available():
+    """Check if SAM3 weights and Ultralytics version are available"""
+    try:
+        # Check Ultralytics version supports SAM3 (>=8.3.237)
+        import ultralytics
+        version_str = ultralytics.__version__
+        version_parts = version_str.split('.')
+
+        # Parse version (e.g., "8.3.237" → [8, 3, 237])
+        major = int(version_parts[0])
+        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+        patch = int(version_parts[2]) if len(version_parts) > 2 else 0
+
+        # Check if version >= 8.3.237
+        if major < 8 or (major == 8 and minor < 3) or (major == 8 and minor == 3 and patch < 237):
+            print(f"⚠️ SAM3 requires Ultralytics >=8.3.237, found {version_str}")
+            return False
+
+        # Check if SAM3 weights exist in common locations
+        import pathlib
+        search_paths = [
+            os.path.join(os.path.dirname(__file__), 'sam3.pt'),
+            os.path.join(pathlib.Path.home(), '.ultralytics', 'weights', 'sam3.pt'),
+            'sam3.pt'  # Current directory
+        ]
+
+        for path in search_paths:
+            if os.path.exists(path):
+                print(f"✅ SAM3 weights found: {path}")
+                return True
+
+        print("⚠️ SAM3 not available - weights not found (see Help for download instructions)")
+        return False
+
+    except ImportError:
+        print("⚠️ SAM3 not available - Ultralytics not installed")
+        return False
+    except Exception as e:
+        print(f"⚠️ SAM3 availability check failed: {e}")
+        return False
 
 
 class OptimizedSAM2Worker(QThread):
@@ -412,12 +644,13 @@ class OptimizedSAM2Worker(QThread):
 
     def __init__(self, predictor, arr, mode, model_choice="SAM2", point_coords=None,
                  point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu",
-                 min_object_size=50, max_objects=20, arr_multispectral=None):
+                 min_object_size=50, max_objects=20, arr_multispectral=None, text_prompt=None):
         super().__init__()
         self.predictor = predictor
         self.arr = arr
         self.arr_multispectral = arr_multispectral
         self.mode = mode
+        self.text_prompt = text_prompt
         self.model_choice = model_choice
         self.point_coords = point_coords
         self.point_labels = point_labels
@@ -438,7 +671,12 @@ class OptimizedSAM2Worker(QThread):
 
             self.predictor.set_image(self.arr)
 
-            if self.mode == "bbox_batch":
+            # Dispatch to appropriate segmentation method based on mode
+            if self.mode == "text":
+                self._run_text_segmentation()
+            elif self.mode == "similar":
+                self._run_similar_segmentation()
+            elif self.mode == "bbox_batch":
                 self._run_batch_segmentation()
             else:
                 self._run_single_segmentation()
@@ -525,8 +763,53 @@ class OptimizedSAM2Worker(QThread):
         # Use helper for detection
         return helper.detect_candidates(bbox_image, bbox)
 
+    def _run_text_segmentation(self):
+        """Run SAM3 text-based segmentation"""
+        self.progress.emit(f"🧠 SAM3 text inference: '{self.text_prompt}'...")
 
+        try:
+            with torch.no_grad():
+                masks, scores, logits = self.predictor.predict(
+                    text=self.text_prompt,
+                    multimask_output=False
+                )
 
+            # Process all returned masks
+            if masks and len(masks) > 0:
+                self.progress.emit(f"✅ Found {len(masks)} instances")
+                # Process each mask individually
+                for i, mask in enumerate(masks):
+                    score = scores[i] if scores and i < len(scores) else 1.0
+                    self._process_single_mask(mask, [score], None, batch_count=(i+1, len(masks)))
+            else:
+                self.error.emit("No objects found matching text prompt")
+
+        except Exception as e:
+            self.error.emit(f"Text segmentation error: {e}")
+
+    def _run_similar_segmentation(self):
+        """Run SAM3 exemplar-based (find similar) segmentation"""
+        self.progress.emit("🧠 SAM3 exemplar inference: finding similar objects...")
+
+        try:
+            with torch.no_grad():
+                masks, scores, logits = self.predictor.predict(
+                    box=self.box,
+                    exemplar_mode=True,  # Flag for SAM3PredictorWrapper
+                    multimask_output=False
+                )
+
+            # Process all similar objects found
+            if masks and len(masks) > 1:
+                self.progress.emit(f"✅ Found {len(masks)} similar objects")
+                for i, mask in enumerate(masks):
+                    score = scores[i] if scores and i < len(scores) else 1.0
+                    self._process_single_mask(mask, [score], None, batch_count=(i+1, len(masks)))
+            else:
+                self.error.emit("No similar objects found")
+
+        except Exception as e:
+            self.error.emit(f"Similar objects error: {e}")
 
     def _validate_mask_for_class(self, mask, class_name, center_point):
         """Validate segmented mask based on class-specific criteria"""
@@ -1225,7 +1508,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.canvas = iface.mapCanvas()
 
         # Initialize device and model
-        self.device, self.model_choice, self.num_cores = detect_best_device()
+        self.device, self.model_choice, self.num_cores, self.available_models = detect_best_device()
         self._init_sam_model()
 
         # Setup docking with version in title
@@ -1287,10 +1570,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         print(f"   Current mode: {self.current_mode}")
 
     def _init_sam_model(self):
-        """Initialize the selected SAM model"""
+        """Initialize the selected SAM model (SAM2, SAM2.1_B, or SAM3)"""
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
 
-        if self.model_choice == "SAM2.1_B":
+        if self.model_choice == "SAM3":
+            self._init_sam3_model()
+        elif self.model_choice == "SAM2.1_B":
             self._init_sam21b_model()
         else:
             self._init_sam2_model(plugin_dir)
@@ -1342,6 +1627,81 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             print(f"❌ Failed to load SAM2.1_B: {e}, falling back to SAM2")
             self.model_choice = "SAM2"
             self._init_sam2_model(os.path.dirname(os.path.abspath(__file__)))
+
+    def _init_sam3_model(self):
+        """Initialize SAM3 model (Ultralytics SAM3)"""
+        try:
+            import pathlib
+
+            # Look for sam3.pt in multiple locations
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            sam3_paths = [
+                os.path.join(plugin_dir, 'sam3.pt'),
+                os.path.join(pathlib.Path.home(), '.ultralytics', 'weights', 'sam3.pt'),
+                'sam3.pt'  # Current directory
+            ]
+
+            weights_path = None
+            for path in sam3_paths:
+                if os.path.exists(path):
+                    weights_path = path
+                    break
+
+            if not weights_path:
+                raise FileNotFoundError("SAM3 weights not found - download from Hugging Face")
+
+            self.predictor = SAM3PredictorWrapper(weights_path)
+            print(f"✅ SAM3 loaded from {weights_path}")
+
+        except FileNotFoundError as e:
+            print(f"❌ SAM3 weights not found: {e}")
+            # Show user-friendly dialog with download instructions
+            self._show_sam3_download_dialog()
+            # Fallback to SAM2.1_B or SAM2
+            self.model_choice = "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
+            print(f"Falling back to {self.model_choice}")
+            if self.model_choice == "SAM2.1_B":
+                self._init_sam21b_model()
+            else:
+                self._init_sam2_model(os.path.dirname(os.path.abspath(__file__)))
+
+        except Exception as e:
+            print(f"❌ Failed to load SAM3: {e}")
+            # Show error dialog
+            QtWidgets.QMessageBox.warning(
+                self,
+                "SAM3 Load Failed",
+                f"Failed to load SAM3: {e}\n\nFalling back to {'SAM2.1_B' if SAM21B_AVAILABLE else 'SAM2'}"
+            )
+            # Fallback
+            self.model_choice = "SAM2.1_B" if SAM21B_AVAILABLE else "SAM2"
+            if self.model_choice == "SAM2.1_B":
+                self._init_sam21b_model()
+            else:
+                self._init_sam2_model(os.path.dirname(os.path.abspath(__file__)))
+
+    def _show_sam3_download_dialog(self):
+        """Show SAM3 download instructions"""
+        msg = QtWidgets.QMessageBox(self)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        msg.setWindowTitle("SAM3 Download Required")
+        msg.setText("SAM3 weights not found")
+        msg.setInformativeText(
+            "SAM3 requires manual download:\n\n"
+            "1. Visit: https://huggingface.co/facebook/sam3\n"
+            "2. Request access (Meta approval required)\n"
+            "3. Download sam3.pt file\n"
+            "4. Place in one of these locations:\n"
+            f"   • {os.path.dirname(os.path.abspath(__file__))}/sam3.pt\n"
+            f"   • ~/.ultralytics/weights/sam3.pt\n"
+            "   • Current directory/sam3.pt\n\n"
+            "Requirements:\n"
+            "• Ultralytics >=8.3.237\n"
+            "• Install/update: pip install -U ultralytics\n\n"
+            "Falling back to SAM2.1_B/SAM2..."
+        )
+        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        msg.exec_()
 
     def _init_save_directories(self):
         """Initialize output directories"""
@@ -1487,6 +1847,47 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         separator.setStyleSheet("border-top: 1px solid #EAECF0;")
         main_layout.addWidget(separator)
 
+        # --- Model Selection Card (NEW) ---
+        model_card, model_layout = create_card("Model Selection", "🤖")
+
+        self.modelComboBox = QtWidgets.QComboBox()
+        self.modelComboBox.setToolTip("Choose SAM model variant")
+        self.modelComboBox.setStyleSheet("""
+            QComboBox {
+                padding: 8px 10px; font-size: 11px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox:hover { border: 1px solid #1570EF; }
+        """)
+        self.modelComboBox.setFocusPolicy(Qt.NoFocus)
+
+        # Populate based on available models
+        if self.available_models.get('SAM3', False):
+            self.modelComboBox.addItem("SAM3 (Text + Semantic)", "SAM3")
+        if self.available_models.get('SAM2.1_B', False):
+            self.modelComboBox.addItem("SAM2.1_B (CPU Optimized)", "SAM2.1_B")
+        self.modelComboBox.addItem("SAM 2.1 Tiny (GPU/Fallback)", "SAM2")
+
+        # Set current model
+        current_idx = self.modelComboBox.findData(self.model_choice)
+        if current_idx >= 0:
+            self.modelComboBox.setCurrentIndex(current_idx)
+
+        model_layout.addWidget(self.modelComboBox)
+
+        # Help text for SAM3 if not available
+        if not self.available_models.get('SAM3', False):
+            help_label = QtWidgets.QLabel(
+                "⚠️ SAM3 not available. <a href='#sam3help' style='color: #1570EF;'>Download instructions</a>"
+            )
+            help_label.setStyleSheet("font-size: 10px; color: #DC6803;")
+            help_label.setOpenExternalLinks(False)
+            help_label.linkActivated.connect(self._show_sam3_download_dialog)
+            model_layout.addWidget(help_label)
+
+        main_layout.addWidget(model_card)
+
         # --- Output Settings ---
         output_card, output_layout = create_card("Output Settings", "📂")
         folder_layout = QtWidgets.QHBoxLayout()
@@ -1569,6 +1970,55 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         class_layout.addLayout(class_btn_layout)
         main_layout.addWidget(class_card)
 
+        # --- Text Prompt Card (SAM3 only) ---
+        self.textPromptCard, text_prompt_layout = create_card("Text Prompt", "💬")
+        self.textPromptCard.setVisible(self.model_choice == "SAM3")
+
+        # Text input field
+        self.textPromptInput = QtWidgets.QLineEdit()
+        self.textPromptInput.setPlaceholderText("e.g., 'all buildings', 'red roofs', 'swimming pools'")
+        self.textPromptInput.setStyleSheet("""
+            QLineEdit {
+                padding: 10px; font-size: 11px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF;
+            }
+            QLineEdit:focus {
+                border: 2px solid #1570EF;
+            }
+        """)
+        self.textPromptInput.setFocusPolicy(Qt.StrongFocus)
+        text_prompt_layout.addWidget(self.textPromptInput)
+
+        # Text-only mode toggle
+        text_mode_layout = QtWidgets.QHBoxLayout()
+        text_mode_label = QtWidgets.QLabel("Text-only mode")
+        text_mode_label.setStyleSheet("font-size: 11px; color: #475467;")
+        text_mode_label.setToolTip("Segment entire visible extent using text only (no point/bbox required)")
+        self.textOnlySwitch = Switch()
+        text_mode_layout.addWidget(text_mode_label)
+        text_mode_layout.addStretch()
+        text_mode_layout.addWidget(self.textOnlySwitch)
+        text_mode_layout.setSpacing(8)
+        text_prompt_layout.addLayout(text_mode_layout)
+
+        # Segment button
+        self.segmentTextBtn = QtWidgets.QPushButton("🔍 Segment from Text")
+        self.segmentTextBtn.setCursor(Qt.PointingHandCursor)
+        self.segmentTextBtn.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; font-weight: 600; padding: 10px;
+                border-radius: 8px; color: #FFF;
+                background: #1570EF; border: 1px solid #1570EF;
+            }
+            QPushButton:hover { background: #1849A9; }
+            QPushButton:disabled { background: #D0D5DD; border: #D0D5DD; color: #667085; }
+        """)
+        self.segmentTextBtn.setAutoDefault(False)
+        self.segmentTextBtn.setFocusPolicy(Qt.NoFocus)
+        text_prompt_layout.addWidget(self.segmentTextBtn)
+
+        main_layout.addWidget(self.textPromptCard)
+
         # --- Enhanced Segmentation Mode ---
         mode_card, mode_layout = create_card("Segmentation Mode", "🎯")
 
@@ -1583,10 +2033,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxModeBtn.setCheckable(True)
         self.bboxModeBtn.setVisible(True)
 
+        # Similar Objects mode button (SAM3 only)
+        self.similarModeBtn = QtWidgets.QPushButton("Similar Objects")
+        self.similarModeBtn.setCheckable(True)
+        self.similarModeBtn.setVisible(self.model_choice == "SAM3")
+        self.similarModeBtn.setToolTip("Click one object to find all similar instances (SAM3 exemplar mode)")
+
         # Button group for mutual exclusion
         self.mode_button_group = QtWidgets.QButtonGroup()
         self.mode_button_group.addButton(self.pointModeBtn)
         self.mode_button_group.addButton(self.bboxModeBtn)
+        self.mode_button_group.addButton(self.similarModeBtn)
         self.mode_button_group.setExclusive(True)
 
         mode_btn_style = """
@@ -1602,6 +2059,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         """
         self.pointModeBtn.setStyleSheet(mode_btn_style)
         self.bboxModeBtn.setStyleSheet(mode_btn_style)
+        self.similarModeBtn.setStyleSheet(mode_btn_style)
 
         # NEW: Batch mode toggle
         batch_layout = QtWidgets.QHBoxLayout()
@@ -1694,6 +2152,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Add all to mode layout
         mode_layout.addWidget(self.pointModeBtn)
         mode_layout.addWidget(self.bboxModeBtn)
+        mode_layout.addWidget(self.similarModeBtn)
         mode_layout.addLayout(batch_layout)
         mode_layout.addWidget(self.batchSettingsFrame)
         main_layout.addWidget(mode_card)
@@ -1789,6 +2248,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.batchModeSwitch.toggled.connect(self._on_batch_mode_toggle)
         self.minSizeSpinBox.valueChanged.connect(self._on_batch_settings_changed)
         self.maxObjectsSpinBox.valueChanged.connect(self._on_batch_settings_changed)
+
+        # SAM3 feature connections
+        self.modelComboBox.currentIndexChanged.connect(self._on_model_changed)
+        self.segmentTextBtn.clicked.connect(self._run_text_segmentation)
+        self.textPromptInput.returnPressed.connect(self._run_text_segmentation)
+        self.similarModeBtn.clicked.connect(self._activate_similar_tool)
 
     def _select_output_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(
@@ -1993,6 +2458,119 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.min_object_size = self.minSizeSpinBox.value()
         self.max_objects = self.maxObjectsSpinBox.value()
         self._clear_widget_focus()
+
+    def _run_text_segmentation(self):
+        """Run segmentation using text prompt (SAM3 only)"""
+        if self.model_choice != "SAM3":
+            QtWidgets.QMessageBox.warning(
+                self, "Not Available",
+                "Text prompts require SAM3 model.\n\n"
+                "Please select SAM3 from the Model Selection dropdown."
+            )
+            return
+
+        text_prompt = self.textPromptInput.text().strip()
+        if not text_prompt:
+            self._update_status("⚠️ Enter text prompt first", "warning")
+            return
+
+        if not self.current_class:
+            self._update_status("⚠️ Select a class first", "warning")
+            return
+
+        # Check if raster layer exists
+        rlayer = self._get_active_raster_layer()
+        if not rlayer:
+            self._update_status("⚠️ No raster layer found", "error")
+            return
+
+        # Get current map extent for text-only mode
+        bbox = None
+        if self.textOnlySwitch.isChecked():
+            # Text-only: segment entire visible extent
+            extent = self.canvas.extent()
+            bbox = extent
+        # else: text + point/bbox will be combined when user clicks
+
+        # Create request with text prompt
+        request = {
+            'type': 'text',
+            'text': text_prompt,
+            'point': None,
+            'bbox': bbox,  # None unless text-only mode
+            'class': self.current_class,
+            'timestamp': datetime.datetime.now()
+        }
+
+        self._add_to_queue(request)
+        self.textPromptInput.clear()
+
+    def _on_model_changed(self, index):
+        """Handle model selection change"""
+        new_model = self.modelComboBox.currentData()
+
+        if new_model == self.model_choice:
+            return
+
+        # Confirm change (requires reload)
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Change Model?",
+            f"Switch from {self.model_choice} to {new_model}?\n\n"
+            "This will reload the model and clear current segmentation.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.model_choice = new_model
+            self._reload_model()
+            self._update_ui_for_model()
+        else:
+            # Revert dropdown
+            current_idx = self.modelComboBox.findData(self.model_choice)
+            if current_idx >= 0:
+                self.modelComboBox.setCurrentIndex(current_idx)
+
+    def _reload_model(self):
+        """Reload SAM model"""
+        try:
+            self._update_status("Reloading model...", "processing")
+            self.predictor = None
+            self._init_sam_model()
+            self._update_status(f"✅ {self.model_choice} loaded successfully", "success")
+        except Exception as e:
+            self._update_status(f"❌ Model load failed: {e}", "error")
+            QtWidgets.QMessageBox.critical(
+                self, "Error",
+                f"Failed to load {self.model_choice}:\n{e}"
+            )
+
+    def _update_ui_for_model(self):
+        """Update UI based on selected model capabilities"""
+        is_sam3 = self.model_choice == "SAM3"
+
+        # Show/hide text prompt card
+        self.textPromptCard.setVisible(is_sam3)
+
+        # Update similar mode button visibility
+        self.similarModeBtn.setVisible(is_sam3)
+        if not is_sam3 and self.current_mode == "similar":
+            # Revert to point mode if similar mode was active
+            self.pointModeBtn.setChecked(True)
+            self.current_mode = "point"
+
+        # Update device label
+        device_icon = "🎮" if "cuda" in self.device else "🖥️"
+        device_info = f"{device_icon} {self.device.upper()} | {self.model_choice}"
+        if getattr(self, "num_cores", None):
+            device_info += f" ({self.num_cores} cores)"
+
+        # Find and update device label (it's created early in _setup_ui)
+        for i in range(self.layout().count()):
+            widget = self.layout().itemAt(i).widget()
+            if isinstance(widget, QtWidgets.QLabel) and "GPU" in widget.text() or "CPU" in widget.text():
+                widget.setText(device_info)
+                break
 
     def _refresh_class_combo(self):
         current_class = self.current_class
@@ -2224,16 +2802,92 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             f"BBox mode active for [{self.current_class}]. Click and drag to segment.", "processing")
         self.canvas.setMapTool(self.bboxTool)
 
+    def _activate_similar_tool(self):
+        """Activate similar object detection mode (SAM3 exemplar)"""
+        if self.model_choice != "SAM3":
+            QtWidgets.QMessageBox.warning(
+                self, "Not Available",
+                "Similar Objects mode requires SAM3 model.\n\n"
+                "Please select SAM3 from the Model Selection dropdown."
+            )
+            # Revert to point mode
+            self.pointModeBtn.setChecked(True)
+            return
+
+        if not self._validate_class_selection():
+            self.pointModeBtn.setChecked(True)
+            return
+
+        self.current_mode = "similar"
+        self.original_map_tool = self.canvas.mapTool()
+
+        # Disable batch mode for similar mode
+        self.batchModeSwitch.setEnabled(False)
+
+        # Update button states
+        self.pointModeBtn.setProperty("active", False)
+        self.bboxModeBtn.setProperty("active", False)
+        self.similarModeBtn.setProperty("active", True)
+        self.pointModeBtn.style().polish(self.pointModeBtn)
+        self.bboxModeBtn.style().polish(self.bboxModeBtn)
+        self.similarModeBtn.style().polish(self.similarModeBtn)
+
+        self._update_status(
+            f"Similar Objects mode: Click on reference object for [{self.current_class}]",
+            "processing"
+        )
+        # Use point tool to select reference object
+        self.canvas.setMapTool(self.pointTool)
+
     def _point_done(self, pt):
-        # Add to queue instead of blocking
-        request = {
-            'type': 'point',
-            'point': pt,
-            'bbox': None,
-            'class': self.current_class,
-            'timestamp': datetime.datetime.now()
-        }
+        # Handle similar mode differently - convert point to exemplar bbox
+        if self.current_mode == "similar":
+            bbox = self._point_to_exemplar_bbox(pt)
+            request = {
+                'type': 'similar',
+                'point': pt,
+                'bbox': bbox,  # Used as exemplar
+                'class': self.current_class,
+                'timestamp': datetime.datetime.now()
+            }
+        else:
+            # Regular point mode
+            request = {
+                'type': 'point',
+                'point': pt,
+                'bbox': None,
+                'class': self.current_class,
+                'timestamp': datetime.datetime.now()
+            }
         self._add_to_queue(request)
+
+    def _point_to_exemplar_bbox(self, pt):
+        """Convert point click to exemplar bounding box for similar mode"""
+        # Create small bbox around point for exemplar
+        # Size varies by class - larger for buildings, smaller for vehicles
+        if self.current_class in ['Buildings', 'Residential']:
+            pixel_radius = 50  # 100x100 px bbox for large objects
+        elif self.current_class in ['Vehicle', 'Vessels']:
+            pixel_radius = 25  # 50x50 px bbox for small objects
+        else:
+            pixel_radius = 35  # Default 70x70 px
+
+        # Convert map point to pixel coordinates
+        transform = self.canvas.getCoordinateTransform()
+        pixel_pt = transform.transform(pt)
+
+        # Create bbox in pixel space
+        x1_px = pixel_pt.x() - pixel_radius
+        y1_px = pixel_pt.y() - pixel_radius
+        x2_px = pixel_pt.x() + pixel_radius
+        y2_px = pixel_pt.y() + pixel_radius
+
+        # Convert back to map coordinates
+        pt1 = transform.toMapCoordinates(x1_px, y1_px)
+        pt2 = transform.toMapCoordinates(x2_px, y2_px)
+
+        from qgis.core import QgsRectangle
+        return QgsRectangle(pt1, pt2)
 
     def _bbox_done(self, rect):
         # Add to queue instead of blocking
@@ -2254,12 +2908,22 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if request['type'] == 'point':
             pt = request['point']
             self._update_status(
-                f"🔄 Queued point ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}] - Position {queue_position}", 
+                f"🔄 Queued point ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}] - Position {queue_position}",
                 "info")
-        else:
+        elif request['type'] == 'text':
+            text = request.get('text', 'unknown')
+            self._update_status(
+                f"🔄 Queued text prompt '{text}' for [{request['class']}] - Position {queue_position}",
+                "info")
+        elif request['type'] == 'similar':
+            pt = request['point']
+            self._update_status(
+                f"🔄 Queued similar objects at ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}] - Position {queue_position}",
+                "info")
+        else:  # bbox
             rect = request['bbox']
             self._update_status(
-                f"🔄 Queued bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}] - Position {queue_position}", 
+                f"🔄 Queued bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}] - Position {queue_position}",
                 "info")
 
         # Start processing if not already running
@@ -2278,12 +2942,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.point = request['point']
         self.bbox = request['bbox']
         self.current_class = request['class']
+        self.text_prompt = request.get('text', None)  # Extract text prompt if present
+        self.request_type = request['type']  # Store request type for mode determination
 
         # Update status with queue info
         if request['type'] == 'point':
             pt = request['point']
             status_msg = f"Processing point ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}]"
-        else:
+        elif request['type'] == 'text':
+            text = request.get('text', 'unknown')
+            status_msg = f"Processing text prompt '{text}' for [{request['class']}]"
+        elif request['type'] == 'similar':
+            pt = request['point']
+            status_msg = f"Processing similar objects at ({pt.x():.1f}, {pt.y():.1f}) for [{request['class']}]"
+        else:  # bbox
             rect = request['bbox']
             status_msg = f"Processing bbox ({rect.width():.1f}×{rect.height():.1f}) for [{request['class']}]"
 
@@ -2328,8 +3000,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Update stored reference to current layer
         self.original_raster_layer = current_layer
 
-        if self.point is None and self.bbox is None:
-            self._update_status("No selection found", "error")
+        # Validation: need point, bbox, or text prompt
+        has_prompt = (self.point is not None or self.bbox is not None or
+                     (hasattr(self, 'text_prompt') and self.text_prompt))
+        if not has_prompt:
+            self._update_status("No selection or text prompt found", "error")
             self.is_processing = False
             return
 
@@ -2369,10 +3044,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._set_ui_enabled(True)
             return
 
-        # Determine processing mode
-        mode = "point" if self.point is not None else "bbox"
-        if mode == "bbox" and self.batch_mode_enabled:
-            mode = "bbox_batch"
+        # Determine processing mode based on request type
+        if hasattr(self, 'request_type'):
+            # Use stored request type from queue
+            if self.request_type == 'text':
+                mode = "text"
+            elif self.request_type == 'similar':
+                mode = "similar"
+            elif self.request_type == 'bbox' and self.batch_mode_enabled:
+                mode = "bbox_batch"
+            elif self.request_type == 'bbox':
+                mode = "bbox"
+            else:  # point
+                mode = "point"
+        else:
+            # Fallback for backward compatibility (direct calls, not from queue)
+            mode = "point" if self.point is not None else "bbox"
+            if mode == "bbox" and self.batch_mode_enabled:
+                mode = "bbox_batch"
 
         # Continue with worker thread...
         self.worker = OptimizedSAM2Worker(
@@ -2389,7 +3078,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Pass batch settings
             min_object_size=self.min_object_size,
             arr_multispectral=arr_multispectral,
-            max_objects=self.max_objects
+            max_objects=self.max_objects,
+            text_prompt=getattr(self, 'text_prompt', None)
         )
 
         self.worker.finished.connect(self._on_segmentation_finished)

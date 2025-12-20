@@ -155,16 +155,36 @@ For current limitations and upcoming fixes, see:
 
 **🎯 Windows: Use OSGeo4W Shell (Recommended)**
 
+**IMPORTANT: Choose CPU or CUDA version based on your hardware!**
+
 ```bash
 # Open OSGeo4W Shell (Start Menu → OSGeo4W → OSGeo4W Shell)
-# This ensures you're using the same Python environment as QGIS
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+# Check if you have NVIDIA GPU:
+nvidia-smi
+
+# If nvidia-smi shows your GPU, install CUDA version:
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+
+# If no NVIDIA GPU or nvidia-smi fails, install CPU version:
+# pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
-**🍎 macOS/🐧 Linux: Use Terminal**
+**🍎 macOS: Use Terminal**
 
 ```bash
 pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+```
+
+**🐧 Linux: Use Terminal**
+
+```bash
+# For NVIDIA GPU with CUDA:
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+
+# For CPU-only:
+# pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
 ```
 
 **🔧 Alternative: QGIS Python Console (All Platforms)**
@@ -176,6 +196,20 @@ import sys
 packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 ```
+
+**⚠️ IMPORTANT: Verify CUDA for Windows/Linux GPU Users**
+
+```python
+# After installation, verify CUDA is working (QGIS Python Console):
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+```
+
+**Expected:** `CUDA available: True` + your GPU name
+
+**If False:** You installed CPU-only PyTorch by mistake! See [Installation Guide](docs/installation.md) for fix.
 
 ### Model Download (Automatic)
 
