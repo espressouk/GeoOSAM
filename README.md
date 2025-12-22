@@ -8,13 +8,16 @@
 
 ## 🌟 Features
 
+- **🤖 SAM3 Auto-Segment**: Automatic instance segmentation finds all objects (NEW in v1.3!)
+- **⚙️ Model Size Selection**: Choose from 4-5 sizes for both Meta & Ultralytics models (NEW in v1.3!)
+- **🗺️ Tiled Processing**: Process entire rasters with auto-tiling for large imagery (NEW in v1.3!)
+- **📥 Automatic Downloads**: All models download automatically with progress bars (NEW in v1.3!)
+- **🔐 Hugging Face Integration**: SAM3 downloads via token authentication (NEW in v1.3!)
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
-- **🧠 Intelligent Model Selection**: Automatically chooses the best AI model for your hardware
-- **🚀 Optimized Performance**: SAM 2.1 for GPU, Ultralytics SAM2.1_B for CPU
+- **🧠 Intelligent Hardware Detection**: Automatically selects best models for GPU/CPU
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
-- **🎯 Three Modes**: Point-click, bounding box, and bbox batch processing
+- **🎯 Multiple Modes**: Point-click, bounding box, batch, auto-segment (text/similar experimental)
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
-- **⚠️ Batch Mode Status**: Currently in development - some classes perform better than others
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **🌐 Online Map Support**: Works with ESRI, Google Satellite, and XYZ/WMS/WMTS tile services
 - **↶ Undo Support**: Mistake correction with polygon-level undo
@@ -26,20 +29,34 @@
 
 ## 📊 Performance & Model Selection
 
-| Hardware       | Model Used | Download Size | Typical Speed | Improvement       |
-| -------------- | ---------- | ------------- | ------------- | ----------------- |
-| NVIDIA RTX GPU | SAM 2.1    | ~160MB        | 0.2-0.5s      | **10-50x faster** |
-| Apple M1/M2    | SAM 2.1    | ~160MB        | 1-2s          | **5-15x faster**  |
-| 24+ Core CPU   | SAM2.1_B   | ~162MB        | **<1s**       | **20-30x faster** |
-| 8-16 Core CPU  | SAM2.1_B   | ~162MB        | 1-2s          | **10-15x faster** |
-| 4-8 Core CPU   | SAM2.1_B   | ~162MB        | 2-4s          | **5-10x faster**  |
+### Available Models (v1.3.0)
 
-**🎯 Smart Model Selection:**
+| Hardware Type      | Available Models                                | User Selection         |
+| ------------------ | ----------------------------------------------- | ---------------------- |
+| **GPU (>3GB)**     | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3    | 5 models via dropdown  |
+| **Apple Silicon**  | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3    | 5 models via dropdown  |
+| **CPU / Low GPU**  | SAM2.1_T/B/L (Ultralytics, CPU-optimized)      | 3 models via dropdown  |
 
-- **GPU Available** (CUDA/Apple Silicon) → **SAM 2.1** (latest accuracy)
-- **High-Core CPU** (16+ cores) → **SAM2.1_B** (Ultralytics, optimized threading, <1s performance)
-- **Standard CPU** → **SAM2.1_B** (Ultralytics, efficient multi-threading)
-- **Automatic Fallback** → SAM 2.1 if Ultralytics unavailable
+### Model Sizes & Performance
+
+| Model              | Size   | Best For          | Speed (GPU) | Speed (CPU 24+) |
+| ------------------ | ------ | ----------------- | ----------- | --------------- |
+| **SAM2.1 Tiny**    | 156MB  | Fast processing   | 0.2-0.4s    | 1-2s            |
+| **SAM2.1 Small**   | 184MB  | Balanced          | 0.3-0.6s    | 1.5-3s          |
+| **SAM2.1 Base+**   | 323MB  | High accuracy     | 0.5-1s      | 3-5s            |
+| **SAM2.1 Large**   | 898MB  | Best quality      | 0.8-1.5s    | 5-8s            |
+| **SAM3**           | ~160MB | Auto-segment/Text | 0.3-0.7s    | N/A             |
+| **SAM2.1_T (CPU)** | ~40MB  | Fast CPU          | N/A         | **<1s**         |
+| **SAM2.1_B (CPU)** | ~80MB  | Balanced CPU      | N/A         | 1-2s            |
+| **SAM2.1_L (CPU)** | ~224MB | Quality CPU       | N/A         | 2-3s            |
+
+**🎯 Intelligent Selection:**
+
+- **GPU Systems (>3GB)**: Dropdown offers 4 SAM2.1 sizes + SAM3 for flexibility
+- **CPU Systems**: Dropdown offers 3 CPU-optimized SAM2.1 variants (T/B/L)
+- **Automatic Detection**: Plugin detects your hardware on startup
+- **One-Click Download**: Select any model, it downloads automatically with progress bar
+- **Default Choice**: SAM3 for GPU (if available), SAM2.1_B for CPU
 
 ## 🚀 Quick Start
 
@@ -69,6 +86,53 @@ Select a class (Buildings, Water, etc.) and click on objects in your imagery. Wo
 
 ![Export Functionality](screenshots/export_shape.png)
 _Export segmented polygons as shapefiles with detailed attributes_
+
+## 🤖 SAM3 Features (v1.3.0)
+
+**SAM3 integration with automatic instance segmentation:**
+
+### Auto-Segment 🎯 ✅ WORKING
+Automatically find ALL objects in an area without clicking:
+- Segments everything visible automatically
+- No prompts or clicking needed
+- Great for dense object detection
+- Uses SAM3's automatic instance segmentation
+
+**How to use:**
+1. Select SAM3 from model dropdown (GPU required)
+2. Select "Auto-Segment" mode button
+3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"
+4. Click anywhere to trigger automatic segmentation
+
+### Text Prompts 📝 ⚠️ EXPERIMENTAL
+**Status: Currently limited due to Ultralytics CLIP bug**
+- Text input available in UI
+- Uses automatic segmentation with text as filter hint
+- Not true text-based segmentation yet
+- Waiting for Ultralytics CLIP fixes
+
+### Similar Objects 🔍 ⚠️ EXPERIMENTAL
+**Status: Currently limited due to Ultralytics CLIP bug**
+- Click one object to use as reference
+- Uses automatic segmentation on area
+- Not true exemplar-based detection yet
+- Waiting for Ultralytics semantic predictor fixes
+
+**💡 Current Implementation:**
+SAM3 currently uses **automatic instance segmentation** (stable) instead of `SAM3SemanticPredictor` (has CLIP/tokenizer issues). This means:
+- ✅ **Auto-segment works perfectly**: Finds all objects automatically
+- ⚠️ **Text prompts are hints only**: Not true semantic segmentation
+- ⚠️ **Similar objects is approximated**: Not true exemplar matching
+
+**📥 SAM3 Download:**
+- Downloads via Hugging Face with access token
+- Token prompt appears in QGIS on first use
+- Requires Read token from https://huggingface.co/settings/tokens
+
+**⚠️ Requirements:**
+- GPU with >3GB memory (CUDA or Apple Silicon)
+- Ultralytics >= 8.3.237
+- Hugging Face account with access token
 
 ## 🛠 Known Issues
 
@@ -225,37 +289,42 @@ if torch.cuda.is_available():
 
 ### Model Download (Automatic)
 
-**Models are automatically downloaded when you first use the plugin - no manual intervention needed!**
+**✨ NEW in v1.3.0: All models download automatically with progress bars!**
 
-**🔄 Download Process:**
+**🔄 How It Works:**
 
-- **CPU Systems**: Ultralytics automatically downloads SAM2.1_B (~162MB) on first use
-- **GPU Systems**: Plugin auto-downloads SAM 2.1 checkpoint (~160MB) on first use
-- **Total Size**: ~160-162MB depending on model (SAM 2.1: ~160MB, SAM2.1_B: ~162MB)
+1. **Select Model Size**: Choose from dropdown (4 GPU models or 3 CPU models)
+2. **Automatic Download**: First-time use triggers download with progress bar
+3. **One-Time Setup**: Models cached locally for instant future use
+4. **No Manual Steps**: Everything happens automatically!
 
-**📥 What happens automatically:**
+**📥 Download Details:**
 
-1. **Device Detection**: Plugin detects your hardware (GPU/CPU)
-2. **Smart Download**: Downloads only the model needed for your system
-3. **Background Process**: Models download automatically during first segmentation
-4. **One-time Setup**: Subsequent runs use cached models
+| Model Type           | How It Downloads                          | Where Stored                       |
+| -------------------- | ----------------------------------------- | ---------------------------------- |
+| **SAM2.1 (GPU)**     | Direct download with progress dialog      | Plugin checkpoints folder          |
+| **SAM2.1 T/B/L (CPU)**| Ultralytics auto-download (notification) | `~/.ultralytics/weights/`          |
+| **SAM3**             | Hugging Face with token prompt            | Plugin folder or Ultralytics cache |
 
 **⚡ Performance Highlights:**
 
-- **24+ Core CPUs**: Sub-second segmentation rivals GPU performance
-- **Intelligent Threading**: Automatically uses 75% of available cores on high-end systems
-- **SAM2.1_B Scaling**: Exceptional multi-core efficiency via Ultralytics optimization
-- **Memory Optimized**: Efficient processing even on large imagery datasets
+- **Multiple Size Options**: Choose speed vs accuracy tradeoff
+- **24+ Core CPUs**: Sub-second segmentation with SAM2.1_T
+- **Intelligent Threading**: Automatically uses 75% of available cores
+- **Memory Optimized**: Efficient processing for large imagery
+- **GPU Acceleration**: Full CUDA/Apple Silicon support
 
-**🔧 Manual Download (if auto-download fails):**
+**🔧 Manual Download (if needed):**
 
 ```bash
-# For SAM 2.1 (GPU users only)
-cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
-bash download_sam2_checkpoints.sh
+# SAM2.1 models (GPU) are auto-downloaded on first use
+# SAM2.1 T/B/L (CPU) are auto-downloaded by Ultralytics
+# SAM3 requires Hugging Face token (prompted in UI)
 
-# For SAM2.1_B (CPU users) - handled automatically by Ultralytics
-# No manual download needed - Ultralytics manages this automatically
+# Manual fallback for SAM2.1 (rare):
+cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
+wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
+# Replace 'tiny' with 'small', 'base_plus', or 'large' as needed
 ```
 
 ## 🎯 Use Cases
@@ -312,17 +381,30 @@ For vegetation mapping, GeoOSAM automatically:
 
 ### Model Architecture
 
-- **SAM 2.1**: Latest from Meta AI with improved accuracy for small objects
-- **SAM2.1_B**: Ultralytics optimized version with enhanced CPU performance
-- **Automatic Selection**: Based on available GPU memory and compute capability
+- **SAM 2.1 (Meta)**: Latest from Meta AI with 4 size variants (Tiny/Small/Base+/Large)
+  - Sept 2024 release with improved accuracy for small objects
+  - Optimized for GPU inference (CUDA/Apple Silicon)
+  - Sizes: 156MB - 898MB with speed/accuracy tradeoffs
+- **SAM2.1 T/B/L (Ultralytics)**: CPU-optimized variants
+  - T=Tiny (40MB), B=Base (80MB), L=Large (224MB)
+  - Enhanced multi-core CPU performance
+  - Efficient threading for sub-second segmentation
+- **SAM3 (Ultralytics)**: Advanced instance segmentation
+  - ✅ Automatic instance segmentation (find all objects) - WORKING
+  - ⚠️ Text prompts - EXPERIMENTAL (limited by CLIP bug)
+  - ⚠️ Similar objects mode - EXPERIMENTAL (limited by CLIP bug)
+  - Requires Ultralytics >= 8.3.237 and GPU >3GB
+- **Automatic Selection**: Based on hardware detection and user preference
 
 ### Performance Optimization
 
 - **Intelligent Threading**: High-core CPUs (16+) use 75% of cores for optimal performance
-- **SAM2.1_B Efficiency**: Ultralytics optimization with exceptional multi-core scaling
+- **Model Size Selection**: User can choose speed vs accuracy tradeoff per task
 - **Adaptive Crop Sizes**: Zoom-level aware processing
 - **Memory Management**: Efficient handling of large imagery
 - **Device Detection**: Automatic CUDA/MPS/CPU optimization with core-count awareness
+- **Tiled Processing**: 1024x1024 tiles with 128px overlap for large rasters
+- **Threaded Workers**: Non-blocking UI during intensive operations
 
 ## 📚 Documentation
 
@@ -374,14 +456,35 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
-### v1.3.0 - SAM3 & Model Management Updates (2025-09-20)
+### v1.3.0 - SAM3 & Model Management Updates (2025-12-22)
 
-- **🤖 NEW**: SAM3 support with text prompts, auto-segmentation, and similar objects
-- **🗺️ NEW**: Scope selector (AOI vs full raster) with tiled processing for large rasters
-- **⚙️ NEW**: Model selection dropdown with size variants per hardware (GPU/CPU)
-- **⬇️ NEW**: SAM3 download flow with Hugging Face token prompt
-- **✨ ENHANCED**: Automatic model detection and availability checks
+**🎯 Major Features:**
+
+- **🤖 SAM3 Support**: Automatic instance segmentation (text prompts/similar objects experimental)
+  - Auto-segment: ✅ WORKING - Automatically find all objects in area
+  - Text prompts: ⚠️ EXPERIMENTAL - Limited by Ultralytics CLIP bug (uses auto-segment with filter hint)
+  - Similar objects: ⚠️ EXPERIMENTAL - Limited by Ultralytics CLIP bug (uses auto-segment approximation)
+- **⚙️ Model Size Selection**: Choose optimal model for your needs
+  - GPU: 4 SAM2.1 sizes (Tiny/Small/Base+/Large, 156MB-898MB) + SAM3
+  - CPU: 3 SAM2.1 sizes (T/B/L, 40MB-224MB, Ultralytics optimized)
+  - User-friendly dropdown with size and performance info
+- **🗺️ Scope Selector**: Process visible area (AOI) or entire raster
+  - AOI mode: Fast processing of visible extent
+  - Full raster mode: Auto-tiling with 1024px tiles, 128px overlap
+  - Progress tracking for tiled operations
+- **📥 Automatic Downloads**: All models download on-demand
+  - SAM2.1 (GPU): Progress bar with percentage complete
+  - SAM2.1 T/B/L (CPU): Ultralytics auto-download with notification
+  - SAM3: Hugging Face token prompt for secure download
+  - Manual download URLs provided if auto-download fails
+
+**🔧 Improvements:**
+
+- **✨ ENHANCED**: Automatic hardware detection and model availability checks
+- **✨ ENHANCED**: UI dynamically shows/hides SAM3 features based on availability
 - **✅ FIXED**: Similar mode bbox handling and mask result processing
+- **✅ FIXED**: Threaded tiled processing for responsive UI during large raster operations
+- **🚀 OPTIMIZED**: All SAM2.1 model URLs verified and updated to September 2024 release
 
 ### v1.2.2 - Threading Configuration Fix (2025-09-20)
 
@@ -473,6 +576,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2025-07-08
-**Plugin Version:** 1.2.1
+**Last updated:** 2025-12-22
+**Plugin Version:** 1.3.0
 **QGIS Compatibility:** 3.16+

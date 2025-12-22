@@ -682,7 +682,7 @@ def auto_download_checkpoint():
 
     # Python fallback
     try:
-        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt"
+        url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
         urllib.request.urlretrieve(url, checkpoint_path)
         if os.path.exists(checkpoint_path) and os.path.getsize(checkpoint_path) > 1000000:
             print("✅ Checkpoint downloaded via Python")
