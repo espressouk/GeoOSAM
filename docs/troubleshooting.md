@@ -78,6 +78,22 @@ print(f"CPU cores: {os.cpu_count()}")
 5. **Check image quality** (contrast, resolution)
 6. **For multi-spectral images** - Verify bands contain data (not all zeros)
 
+### SAM3 Text/Similar Prompts Not Working
+
+**Cause:** SAM3 text/exemplar (PCS) relies on Ultralytics' semantic predictor and CLIP, which can be unstable across versions.  
+**Status:** In active development; auto-segmentation is stable.
+
+**Fixes:**
+- Ensure Ultralytics is up to date (>= 8.3.237).
+- Install CLIP dependencies:
+
+```bash
+pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
+```
+
+- Confirm SAM3 weights exist at `~/.ultralytics/weights/sam3.pt`.
+- If text/similar still fails, use auto‑segmentation or point/bbox mode.
+
 ---
 
 ## 🛰️ Multi-spectral Image Issues

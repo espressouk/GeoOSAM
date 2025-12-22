@@ -164,16 +164,28 @@ nvidia-smi
 
 # If nvidia-smi shows your GPU, install CUDA version:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # If no NVIDIA GPU or nvidia-smi fails, install CPU version:
-# pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+# pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
+
+**Optional for SAM3 text/similar (PCS)**
+
+SAM3 text and exemplar prompts are still under active development in Ultralytics and may be unstable. If you want to use them:
+
+```bash
+pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
+```
+
+**Hugging Face Access (SAM3 Weights)**
+
+To download SAM3 weights from within QGIS, create a Hugging Face **Access Token** with **Token type: Read** and paste it into the download dialog.
 
 **🍎 macOS: Use Terminal**
 
 ```bash
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **🐧 Linux: Use Terminal**
@@ -181,10 +193,10 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 ```bash
 # For NVIDIA GPU with CUDA:
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # For CPU-only:
-# pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+# pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **🔧 Alternative: QGIS Python Console (All Platforms)**
@@ -193,7 +205,7 @@ pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
 # Open QGIS > Plugins > Python Console, paste and run:
 import subprocess
 import sys
-packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
+packages = ["torch", "torchvision", "ultralytics>=8.3.237", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath", "pillow", "numpy"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 ```
 
@@ -361,6 +373,15 @@ If you use GeoOSAM in your research, please cite:
 ```
 
 ## 🔄 Changelog
+
+### v1.3.0 - SAM3 & Model Management Updates (2025-09-20)
+
+- **🤖 NEW**: SAM3 support with text prompts, auto-segmentation, and similar objects
+- **🗺️ NEW**: Scope selector (AOI vs full raster) with tiled processing for large rasters
+- **⚙️ NEW**: Model selection dropdown with size variants per hardware (GPU/CPU)
+- **⬇️ NEW**: SAM3 download flow with Hugging Face token prompt
+- **✨ ENHANCED**: Automatic model detection and availability checks
+- **✅ FIXED**: Similar mode bbox handling and mask result processing
 
 ### v1.2.2 - Threading Configuration Fix (2025-09-20)
 

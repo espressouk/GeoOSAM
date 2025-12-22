@@ -28,25 +28,25 @@ nvidia-smi
 # Install PyTorch with CUDA su
 pport (CUDA 11.8 - most compatible)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # OR for newer GPUs with CUDA 12.1+:
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# pip install ultralytics opencv-python rasterio shapely hydra-core iopath
+# pip install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **If you DON'T have NVIDIA GPU or want CPU-only:**
 
 ```bash
 # Install CPU-only version
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **🍎 macOS Users: Use Terminal**
 
 ```bash
 # macOS (CPU or Apple Silicon MPS)
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **🐧 Linux Users: Use Terminal**
@@ -54,10 +54,10 @@ pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-
 ```bash
 # For NVIDIA GPU with CUDA support:
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # For CPU-only:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **🔧 Alternative: QGIS Python Console (All Platforms)**
@@ -69,6 +69,14 @@ import subprocess, sys
 packages = ["torch", "torchvision", "ultralytics", "opencv-python", "rasterio", "shapely", "hydra-core", "iopath"]
 for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "install", pkg]); print(f"✅ Installed {pkg}")
 
+```
+
+**Optional: SAM3 Text/Similar (PCS) Dependencies**
+
+SAM3 text and exemplar prompts require CLIP and are still evolving in Ultralytics:
+
+```bash
+pip install git+https://github.com/"ultralytics>=8.3.237"/CLIP.git ftfy wcwidth pillow numpy
 ```
 
 **✅ Verify CUDA Installation (Windows/Linux with NVIDIA GPU)**
@@ -103,6 +111,17 @@ See troubleshooting section: [CUDA Not Detected on Windows](#issue-cuda-not-dete
    - **⚡ High-core CPU**: Optimized for sub-second performance
 3. **Control panel opens** on the right side showing your hardware
 4. **Start segmenting!** 🚀
+
+### SAM3 Weights Download (Optional)
+
+If you select SAM3 and the weights are missing, GeoOSAM will prompt you to download:
+
+1. Request access at https://huggingface.co/facebook/sam3
+2. Click **Download Now** in the dialog
+3. Create a Hugging Face **Access Token** with **Token type: Read**
+4. Paste the token (used once, not stored)
+
+Weights are saved to `~/.ultralytics/weights/sam3.pt`.
 
 ---
 
@@ -140,14 +159,14 @@ See troubleshooting section: [CUDA Not Detected on Windows](#issue-cuda-not-dete
 # 2. Open OSGeo4W Shell (comes with QGIS installation)
 #    Start Menu → OSGeo4W → OSGeo4W Shell
 # 3. Install dependencies in the correct Python environment:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 **Alternative Methods:**
 
 ```powershell
 # Method A: Command Prompt (may use different Python than QGIS)
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # Method B: QGIS Python Console (always works but slower)
 # Open QGIS → Plugins → Python Console
@@ -161,11 +180,11 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 ```bash
 # 1. Install plugin through QGIS interface
 # 2. Install dependencies via Terminal:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # For Apple Silicon Macs (automatic optimization):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # Alternative: Use QGIS Python Console (recommended)
 ```
@@ -175,7 +194,7 @@ pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
 ```bash
 # 1. Install plugin through QGIS interface
 # 2. Install dependencies:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # Ubuntu/Debian additional dependencies:
 sudo apt update
@@ -183,7 +202,7 @@ sudo apt install python3-pip python3-dev
 
 # NVIDIA GPU support (auto-detected):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 ### Installation Method 2: Manual GitHub Installation
@@ -231,7 +250,7 @@ cp -r . ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 
 ```bash
 # Install required Python packages:
-pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 #### Enable Plugin
@@ -290,7 +309,7 @@ nvidia-smi
 
 # Install PyTorch with CUDA support (auto-detected):
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip3 install ultralytics iopath
+pip3 install "ultralytics>=8.3.237" iopath pillow numpy
 
 # Verify CUDA in QGIS Python Console:
 import torch
@@ -302,7 +321,7 @@ print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N
 
 ```bash
 # Install optimized PyTorch for Apple Silicon:
-pip3 install torch torchvision ultralytics iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" iopath pillow numpy
 
 # Verify MPS support in QGIS Python Console:
 import torch
@@ -313,7 +332,7 @@ print(f"MPS available: {torch.backends.mps.is_available()}")
 
 ```bash
 # For 16+ core systems (auto-optimized):
-pip3 install torch torchvision ultralytics iopath
+pip3 install torch torchvision "ultralytics>=8.3.237" iopath pillow numpy
 
 # Verify threading in QGIS Python Console:
 import torch
@@ -336,7 +355,7 @@ source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
 # Install all dependencies:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # Link to QGIS plugins directory:
 ln -s $(pwd)/geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
@@ -349,7 +368,7 @@ ln -s $(pwd)/geo_osam ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/
 FROM qgis/qgis:release-3_28
 
 # Install dependencies with Ultralytics
-RUN pip3 install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+RUN pip3 install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 
 # Copy plugin
 COPY geo_osam /root/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
@@ -446,10 +465,10 @@ else:
 
 ```bash
 # Install Ultralytics separately:
-pip install ultralytics
+pip install "ultralytics>=8.3.237" pillow numpy
 
 # Or reinstall all dependencies:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 #### Issue: "Import error: torch"
@@ -459,7 +478,7 @@ pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-c
 ```bash
 # Reinstall PyTorch:
 pip uninstall torch torchvision
-pip install torch torchvision ultralytics iopath
+pip install torch torchvision "ultralytics>=8.3.237" iopath pillow numpy
 ```
 
 #### Issue: "Import error: iopath"
@@ -471,7 +490,7 @@ pip install torch torchvision ultralytics iopath
 pip install iopath
 
 # Or reinstall all dependencies:
-pip install torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 #### Issue: "Permission denied" (Windows)
@@ -601,7 +620,7 @@ print(f"OMP threads: {os.environ.get('OMP_NUM_THREADS', 'not set')}")
 ```bash
 # Ensure native ARM packages:
 pip uninstall torch torchvision ultralytics
-pip install torch torchvision ultralytics iopath
+pip install torch torchvision "ultralytics>=8.3.237" iopath pillow numpy
 ```
 
 ### Getting Help
@@ -651,7 +670,7 @@ git pull origin main
 
 ```bash
 # Update Python packages:
-pip install --upgrade torch torchvision ultralytics opencv-python rasterio shapely hydra-core iopath
+pip install --upgrade torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
 ### Model Updates
