@@ -33,7 +33,8 @@ plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
 changelog=1.3.0 - SAM3 & Model Management Updates
-    - NEW: SAM3 auto-segmentation (WORKING) - text prompts/similar objects experimental (Ultralytics CLIP bug)
+    - NEW: SAM3 auto-segmentation ✅ WORKING (tested 2025-12-26)
+    - NOTE: Text/exemplar modes ❌ NOT WORKING (CLIP tokenizer bug in v8.3.240)
     - NEW: Scope selector (AOI vs full raster) with tiled processing for large rasters
     - NEW: Model selection dropdown with size variants per hardware (GPU/CPU)
     - NEW: SAM3 download flow with Hugging Face token prompt

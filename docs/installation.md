@@ -71,13 +71,21 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 
 ```
 
-**Optional: SAM3 Text/Similar (PCS) Dependencies**
+**Optional: SAM3 Text/Similar Dependencies (❌ NOT WORKING as of v8.3.240)**
 
-SAM3 text and exemplar prompts require CLIP and are still evolving in Ultralytics:
+⚠️ **UPDATE 2025-12-26:** SAM3 text and exemplar modes are currently broken due to CLIP tokenizer bug.
+- **Auto-segmentation works perfectly** ✅ (no CLIP needed)
+- **Text prompts NOT working** ❌ (CLIP tokenizer error)
+- **Exemplar mode NOT working** ❌ (same CLIP tokenizer issue)
+
+If you want to install CLIP for future fixes:
 
 ```bash
-pip install git+https://github.com/"ultralytics>=8.3.237"/CLIP.git ftfy wcwidth pillow numpy
+pip install git+https://github.com/openai/CLIP.git ftfy wcwidth
 ```
+
+**Note:** Installing CLIP won't fix the issue - waiting for Ultralytics bug fix.
+**Issue tracking:** https://github.com/ultralytics/ultralytics/issues/22647
 
 **✅ Verify CUDA Installation (Windows/Linux with NVIDIA GPU)**
 

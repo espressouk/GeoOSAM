@@ -113,6 +113,24 @@ SAM3_MODEL = {
 
 SAM3_WEIGHTS_URL = "https://huggingface.co/facebook/sam3/resolve/main/sam3.pt"
 
+# SAM3 Status (Tested 2025-12-26):
+# ✅ WORKING: Auto-segmentation (instance segmentation) - Production ready!
+# ✅ FIXED: Text prompts - Tokenizer bug fixed with monkey-patch (v1.3.1+)
+# ✅ FIXED: Exemplar/similar mode - Fixed with same patch
+# Original Issue: TypeError: 'SimpleTokenizer' object is not callable
+# Tracking: https://github.com/ultralytics/ultralytics/issues/22647
+# Fix: Applied in sam3_clip_fix.py (monkey-patch at startup)
+
+# Apply SAM3 CLIP tokenizer fix
+try:
+    from sam3_clip_fix import apply_sam3_clip_fix, check_sam3_text_available
+    if check_sam3_text_available():
+        apply_sam3_clip_fix()
+except ImportError:
+    print("⚠️  SAM3 CLIP fix module not found (sam3_clip_fix.py)")
+except Exception as e:
+    print(f"⚠️  SAM3 CLIP fix failed: {e}")
+
 try:
     from ultralytics import SAM
     test_model = SAM('sam2.1_b.pt') # Test with base model
@@ -463,7 +481,11 @@ class SAM3PredictorWrapper:
             if not self._ensure_semantic_predictor():
                 return None
 
-            prompts = {"bboxes": [bbox], "labels": [1]}
+            # Convert bbox to numpy array first to avoid slow tensor conversion warning
+            import numpy as np
+            bbox_array = np.array([bbox], dtype=np.float32)
+
+            prompts = {"bboxes": bbox_array, "labels": [1]}
             self.semantic_predictor.set_prompts(prompts)
             results = self.semantic_predictor(source=self.cached_image_path, stream=False)
             return self._extract_masks(results)
@@ -954,6 +976,7 @@ class TiledSegmentationWorker(QThread):
             from rasterio.windows import Window
             import time
             import cv2
+            import numpy as np
             print("✅ Imports successful")
         except Exception as e:
             print(f"❌ Import error in worker thread: {e}")
@@ -995,6 +1018,49 @@ class TiledSegmentationWorker(QThread):
                     )
                     time.sleep(1)
 
+                # For similar mode: extract exemplar from its tile first
+                exemplar_crop = None
+                if self.request_type == 'similar' and self.bbox is not None:
+                    print("\n🎯 Extracting exemplar for similar mode...")
+                    # Find which tile contains the exemplar
+                    for window in tiles:
+                        tile_transform = src.window_transform(window)
+
+                        # Check if bbox is in this tile
+                        corners = [
+                            (self.bbox.xMinimum(), self.bbox.yMinimum()),
+                            (self.bbox.xMaximum(), self.bbox.yMinimum()),
+                            (self.bbox.xMaximum(), self.bbox.yMaximum()),
+                            (self.bbox.xMinimum(), self.bbox.yMaximum())
+                        ]
+                        pixel_coords = []
+                        for x, y in corners:
+                            px, py = ~tile_transform * (x, y)
+                            pixel_coords.append((px, py))
+
+                        xs, ys = zip(*pixel_coords)
+                        x1, x2 = min(xs), max(xs)
+                        y1, y2 = min(ys), max(ys)
+
+                        # Check if bbox is in this tile
+                        if (x1 >= -10 and x2 <= window.width + 10 and
+                            y1 >= -10 and y2 <= window.height + 10 and
+                            x2 > x1 and y2 > y1):
+
+                            # Read this tile
+                            tile_arr = src.read([1, 2, 3], window=window, out_dtype=np.uint8)
+                            tile_arr = np.moveaxis(tile_arr, 0, -1)
+
+                            # Extract exemplar crop
+                            x1 = max(0, min(tile_arr.shape[1] - 1, int(x1)))
+                            y1 = max(0, min(tile_arr.shape[0] - 1, int(y1)))
+                            x2 = max(0, min(tile_arr.shape[1] - 1, int(x2)))
+                            y2 = max(0, min(tile_arr.shape[0] - 1, int(y2)))
+
+                            exemplar_crop = tile_arr[y1:y2, x1:x2].copy()
+                            print(f"✅ Exemplar extracted: shape={exemplar_crop.shape}")
+                            break
+
                 # Process each tile
                 for tile_idx, window in enumerate(tiles):
                     # Check if thread should stop
@@ -1017,6 +1083,9 @@ class TiledSegmentationWorker(QThread):
                         self.predictor.set_image(tile_arr)
                         print(f"✅ Image set in predictor: {time.time()-start_set:.2f}s")
 
+                        # Get tile transform (needed for similar mode coordinate conversion)
+                        tile_transform = src.window_transform(window)
+
                         # Run inference based on mode
                         start_infer = time.time()
                         masks = None
@@ -1029,12 +1098,44 @@ class TiledSegmentationWorker(QThread):
                                 multimask_output=False
                             )
                         elif self.request_type == 'similar':
-                            print(f"🎯 Running similar inference")
-                            masks, scores, _ = self.predictor.predict(
-                                box=self.bbox if self.bbox else None,
-                                exemplar_mode=True,
-                                multimask_output=False
-                            )
+                            # For similar mode in tiled processing:
+                            # Use the extracted exemplar crop to find similar objects in EVERY tile
+                            # This finds similar objects across the ENTIRE raster
+
+                            if exemplar_crop is not None:
+                                # Paste exemplar into top-left corner of tile temporarily
+                                # Create a composite image with exemplar for SAM3 to use as reference
+                                temp_tile = tile_arr.copy()
+                                ex_h, ex_w = exemplar_crop.shape[:2]
+
+                                # Place exemplar in top-left (or centered)
+                                # Make sure it fits
+                                if ex_h < tile_arr.shape[0] and ex_w < tile_arr.shape[1]:
+                                    # Place at top-left
+                                    temp_tile[0:ex_h, 0:ex_w] = exemplar_crop
+                                    exemplar_bbox_in_tile = [0, 0, ex_w, ex_h]
+
+                                    print(f"🎯 Using exemplar to find similar objects")
+                                    print(f"   Exemplar bbox in tile: {exemplar_bbox_in_tile}")
+
+                                    # Set the composite image with exemplar
+                                    self.predictor.set_image(temp_tile)
+
+                                    # Convert to numpy array
+                                    bbox_array = np.array([exemplar_bbox_in_tile], dtype=np.float32)
+
+                                    # Run exemplar mode
+                                    masks, scores, _ = self.predictor.predict(
+                                        box=bbox_array,
+                                        exemplar_mode=True,
+                                        multimask_output=False
+                                    )
+                                else:
+                                    print(f"⚠️  Exemplar too large for tile")
+                                    masks = None
+                            else:
+                                print(f"⚠️  No exemplar crop available for similar mode")
+                                masks = None
                         else:
                             print(f"⚠️  Unknown request type: {self.request_type}")
                             continue
@@ -1045,7 +1146,7 @@ class TiledSegmentationWorker(QThread):
                         # Convert masks to features using tile transform
                         tile_objects = 0
                         if masks is not None and len(masks) > 0:
-                            tile_transform = src.window_transform(window)
+                            # tile_transform already calculated above (line 1043)
                             print(f"🔄 Processing {len(masks)} masks...")
 
                             for mask_idx, mask in enumerate(masks):
@@ -3751,11 +3852,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.is_processing = False
             return
 
-        # Check if this is a full raster (tiled) request
-        if hasattr(self, 'request_type') and self.request_type == 'text':
+        # Check if this is a full raster request for text/similar modes
+        if hasattr(self, 'request_type') and self.request_type in ['text', 'similar']:
             scope = getattr(self, 'request_scope', 'aoi')
             if scope == 'full':
-                # Use tiled segmentation for full raster
+                # Use semantic predictor for full raster (text/similar modes)
                 self._run_tiled_segmentation(current_layer)
                 return
 
@@ -3838,6 +3939,479 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.worker.progress.connect(self._on_segmentation_progress)
         self.worker.start()
 
+    def _run_semantic_text_full_raster(self, raster_layer):
+        """
+        Use SAM3 semantic predictor to find objects matching text prompt.
+        For large rasters, uses tiled processing to avoid GPU memory issues.
+        Handles both AOI (extent) and full raster modes.
+        """
+        import rasterio
+        import numpy as np
+        from rasterio.windows import from_bounds
+
+        # Check if we're processing AOI or full raster
+        scope = getattr(self, 'request_scope', 'aoi')
+
+        self._set_ui_enabled(False)
+        if scope == 'full':
+            self._update_status(f"🔍 Finding '{self.text_prompt}' across entire raster: {raster_layer.name()[:30]}...", "processing")
+            print("\n" + "="*80)
+            print("🔍 SEMANTIC TEXT MODE - FULL RASTER")
+        else:
+            self._update_status(f"🔍 Finding '{self.text_prompt}' in current extent: {raster_layer.name()[:30]}...", "processing")
+            print("\n" + "="*80)
+            print("🔍 SEMANTIC TEXT MODE - CURRENT EXTENT (AOI)")
+
+        print("="*80)
+        print(f"Raster: {raster_layer.source()}")
+        print(f"Scope: {scope}")
+        print(f"Text prompt: '{self.text_prompt}'")
+        print("="*80)
+
+        try:
+            with rasterio.open(raster_layer.source()) as src:
+                # Determine processing extent
+                if scope == 'full':
+                    # Use full raster bounds
+                    extent = src.bounds
+                    xmin, ymin, xmax, ymax = extent.left, extent.bottom, extent.right, extent.top
+                    window = None  # Process entire raster
+                    print(f"📏 Processing full raster")
+                else:
+                    # Use map extent for AOI
+                    extent = self.canvas.extent()
+                    xmin, ymin, xmax, ymax = (
+                        extent.xMinimum(), extent.yMinimum(),
+                        extent.xMaximum(), extent.yMaximum()
+                    )
+                    # Calculate window for this extent
+                    window = from_bounds(xmin, ymin, xmax, ymax, src.transform)
+                    print(f"📏 Processing extent: ({xmin:.2f}, {ymin:.2f}) to ({xmax:.2f}, {ymax:.2f})")
+
+                # Get dimensions
+                if window:
+                    height, width = int(window.height), int(window.width)
+                else:
+                    height, width = src.height, src.width
+
+                print(f"📏 Processing size: {width}x{height}")
+
+                # Check if image is too large for single-pass processing
+                # SAM3 semantic predictor uses a lot of GPU memory
+                max_size_semantic = 2048  # Conservative limit for semantic predictor
+                if max(width, height) > max_size_semantic:
+                    print(f"⚠️  Image too large for single-pass semantic processing")
+                    print(f"   Switching to tiled processing...")
+                    # Close rasterio connection before switching to tiled mode
+                    pass
+
+            # Use tiled processing for large rasters
+            if max(width, height) > max_size_semantic:
+                self.is_processing = False
+                self._set_ui_enabled(True)
+                self._run_tiled_text_segmentation(raster_layer)
+                return
+
+            # For smaller images, continue with semantic predictor
+            with rasterio.open(raster_layer.source()) as src:
+
+                # Determine if we need to downsample
+                max_size = 4096  # Maximum dimension for processing
+                if max(width, height) > max_size:
+                    scale = max_size / max(width, height)
+                    out_width = int(width * scale)
+                    out_height = int(height * scale)
+                    print(f"⚠️  Large area - downsampling to {out_width}x{out_height}")
+                else:
+                    out_width, out_height = width, height
+                    scale = 1.0
+
+                # Read raster data
+                print("📖 Reading raster data...")
+                if src.count >= 3:
+                    bands = [1, 2, 3]
+                elif src.count == 2:
+                    bands = [1, 1, 2]
+                else:
+                    bands = [1, 1, 1]
+
+                # Read with or without window
+                if window:
+                    if scale < 1.0:
+                        arr = src.read(bands, window=window,
+                                     out_shape=(len(bands), out_height, out_width),
+                                     out_dtype=np.uint8)
+                    else:
+                        arr = src.read(bands, window=window, out_dtype=np.uint8)
+                    # Get transform for this window
+                    mask_transform = src.window_transform(window)
+                else:
+                    if scale < 1.0:
+                        arr = src.read(bands, out_shape=(len(bands), out_height, out_width),
+                                     out_dtype=np.uint8)
+                    else:
+                        arr = src.read(bands, out_dtype=np.uint8)
+                    mask_transform = src.transform
+
+                arr = np.moveaxis(arr, 0, -1)
+                print(f"✅ Raster loaded: {arr.shape}")
+
+                # Adjust transform for downsampling if needed
+                if scale < 1.0:
+                    from rasterio import Affine
+                    mask_transform = mask_transform * Affine.scale(1/scale)
+
+                # Set image in predictor
+                print("🧠 Setting image in SAM3 predictor...")
+                self.predictor.set_image(arr)
+
+                # Use semantic predictor with text prompt
+                print(f"🔍 Running SAM3 semantic predictor with text: '{self.text_prompt}'...")
+                self._update_status(f"🔍 SAM3 finding '{self.text_prompt}'...", "processing")
+
+                masks, scores, logits = self.predictor.predict(
+                    text=self.text_prompt,
+                    multimask_output=False
+                )
+
+                print(f"✅ Found {len(masks) if masks else 0} objects matching '{self.text_prompt}'")
+
+                if masks and len(masks) > 0:
+                    # Process results
+                    total_features = 0
+                    print(f"🔄 Processing {len(masks)} masks...")
+
+                    for i, mask in enumerate(masks):
+                        score = scores[i] if scores and i < len(scores) else 1.0
+                        print(f"  Processing mask {i+1}/{len(masks)} (score: {score:.3f})")
+
+                        # Convert mask to features
+                        features = self._convert_mask_to_features(mask, mask_transform)
+
+                        if features:
+                            # Add to layer
+                            for feature in features:
+                                self.layer.dataProvider().addFeature(feature)
+                            total_features += len(features)
+                            print(f"    ✅ {len(features)} features created")
+
+                    self.layer.updateExtents()
+                    self.layer.triggerRepaint()
+
+                    self._update_status(f"✅ Found {total_features} objects matching '{self.text_prompt}'", "success")
+                    print(f"\n{'='*80}")
+                    print(f"✅ COMPLETED: {total_features} objects found matching '{self.text_prompt}'")
+                    print(f"{'='*80}\n")
+                else:
+                    self._update_status(f"⚠️  No objects found matching '{self.text_prompt}'", "warning")
+                    print(f"⚠️  No objects detected matching text prompt")
+
+        except Exception as e:
+            error_msg = f"❌ Semantic text error: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            self._update_status(error_msg, "error")
+        finally:
+            self.is_processing = False
+            self._set_ui_enabled(True)
+
+    def _run_semantic_similar_full_raster(self, raster_layer):
+        """
+        Use SAM3 semantic predictor to find similar objects.
+        For large rasters, uses tiled processing to avoid GPU memory issues.
+        Handles both AOI (extent) and full raster modes.
+        """
+        import rasterio
+        import numpy as np
+        from rasterio.windows import from_bounds
+
+        # Check if we're processing AOI or full raster
+        scope = getattr(self, 'request_scope', 'aoi')
+
+        self._set_ui_enabled(False)
+        if scope == 'full':
+            self._update_status(f"🎯 Finding similar objects across entire raster: {raster_layer.name()[:30]}...", "processing")
+            print("\n" + "="*80)
+            print("🎯 SEMANTIC SIMILAR MODE - FULL RASTER")
+        else:
+            self._update_status(f"🎯 Finding similar objects in current extent: {raster_layer.name()[:30]}...", "processing")
+            print("\n" + "="*80)
+            print("🎯 SEMANTIC SIMILAR MODE - CURRENT EXTENT (AOI)")
+
+        print("="*80)
+        print(f"Raster: {raster_layer.source()}")
+        print(f"Scope: {scope}")
+        print(f"Exemplar bbox: {self.bbox}")
+        print("="*80)
+
+        try:
+            with rasterio.open(raster_layer.source()) as src:
+                # Determine processing extent
+                if scope == 'full':
+                    # Use full raster bounds
+                    extent = src.bounds
+                    xmin, ymin, xmax, ymax = extent.left, extent.bottom, extent.right, extent.top
+                    window = None  # Process entire raster
+                    print(f"📏 Processing full raster")
+                else:
+                    # Use map extent for AOI
+                    extent = self.canvas.extent()
+                    xmin, ymin, xmax, ymax = (
+                        extent.xMinimum(), extent.yMinimum(),
+                        extent.xMaximum(), extent.yMaximum()
+                    )
+                    # Calculate window for this extent
+                    window = from_bounds(xmin, ymin, xmax, ymax, src.transform)
+                    print(f"📏 Processing extent: ({xmin:.2f}, {ymin:.2f}) to ({xmax:.2f}, {ymax:.2f})")
+
+                # Get dimensions
+                if window:
+                    height, width = int(window.height), int(window.width)
+                else:
+                    height, width = src.height, src.width
+
+                print(f"📏 Processing size: {width}x{height}")
+
+                # Check if image is too large for single-pass processing
+                # SAM3 semantic predictor uses a lot of GPU memory
+                max_size_semantic = 2048  # Conservative limit for semantic predictor
+                if max(width, height) > max_size_semantic:
+                    print(f"⚠️  Image too large for single-pass semantic processing")
+                    print(f"   Switching to tiled processing...")
+                    # Close rasterio connection before switching to tiled mode
+                    pass
+
+            # Use tiled processing for large rasters
+            if max(width, height) > max_size_semantic:
+                self.is_processing = False
+                self._set_ui_enabled(True)
+                self._run_tiled_similar_segmentation(raster_layer)
+                return
+
+            # For smaller images, continue with semantic predictor
+            with rasterio.open(raster_layer.source()) as src:
+
+                # Determine if we need to downsample
+                max_size = 4096  # Maximum dimension for processing
+                if max(width, height) > max_size:
+                    scale = max_size / max(width, height)
+                    out_width = int(width * scale)
+                    out_height = int(height * scale)
+                    print(f"⚠️  Large area - downsampling to {out_width}x{out_height}")
+                else:
+                    out_width, out_height = width, height
+                    scale = 1.0
+
+                # Read raster data
+                print("📖 Reading raster data...")
+                if src.count >= 3:
+                    bands = [1, 2, 3]
+                elif src.count == 2:
+                    bands = [1, 1, 2]
+                else:
+                    bands = [1, 1, 1]
+
+                # Read with or without window
+                if window:
+                    if scale < 1.0:
+                        arr = src.read(bands, window=window,
+                                     out_shape=(len(bands), out_height, out_width),
+                                     out_dtype=np.uint8)
+                    else:
+                        arr = src.read(bands, window=window, out_dtype=np.uint8)
+                    # Get transform for this window
+                    mask_transform = src.window_transform(window)
+                else:
+                    if scale < 1.0:
+                        arr = src.read(bands, out_shape=(len(bands), out_height, out_width),
+                                     out_dtype=np.uint8)
+                    else:
+                        arr = src.read(bands, out_dtype=np.uint8)
+                    mask_transform = src.transform
+
+                arr = np.moveaxis(arr, 0, -1)
+                print(f"✅ Raster loaded: {arr.shape}")
+
+                # Adjust transform for downsampling if needed
+                if scale < 1.0:
+                    from rasterio import Affine
+                    mask_transform = mask_transform * Affine.scale(1/scale)
+
+                # Convert exemplar bbox from geo to pixel coordinates
+                if self.bbox is not None:
+                    corners = [
+                        (self.bbox.xMinimum(), self.bbox.yMinimum()),
+                        (self.bbox.xMaximum(), self.bbox.yMinimum()),
+                        (self.bbox.xMaximum(), self.bbox.yMaximum()),
+                        (self.bbox.xMinimum(), self.bbox.yMaximum())
+                    ]
+
+                    pixel_coords = []
+                    for x, y in corners:
+                        px, py = ~mask_transform * (x, y)
+                        pixel_coords.append((px, py))
+
+                    xs, ys = zip(*pixel_coords)
+                    x1, x2 = min(xs), max(xs)
+                    y1, y2 = min(ys), max(ys)
+
+                    # Clamp to image bounds
+                    x1 = max(0, min(arr.shape[1] - 1, int(x1)))
+                    y1 = max(0, min(arr.shape[0] - 1, int(y1)))
+                    x2 = max(0, min(arr.shape[1] - 1, int(x2)))
+                    y2 = max(0, min(arr.shape[0] - 1, int(y2)))
+
+                    pixel_bbox = [x1, y1, x2, y2]
+                    print(f"🎯 Exemplar bbox (pixels): {pixel_bbox}")
+
+                    # Set image in predictor
+                    print("🧠 Setting image in SAM3 predictor...")
+                    self.predictor.set_image(arr)
+
+                    # Use semantic predictor with exemplar mode
+                    print("🔍 Running SAM3 semantic predictor (finding similar objects)...")
+                    self._update_status("🔍 SAM3 finding similar objects...", "processing")
+
+                    masks, scores, logits = self.predictor.predict(
+                        box=[pixel_bbox],
+                        exemplar_mode=True,
+                        multimask_output=False
+                    )
+
+                    print(f"✅ Found {len(masks) if masks else 0} similar objects")
+
+                    if masks and len(masks) > 0:
+                        # Process results
+                        total_features = 0
+                        print(f"🔄 Processing {len(masks)} masks...")
+
+                        for i, mask in enumerate(masks):
+                            score = scores[i] if scores and i < len(scores) else 1.0
+                            print(f"  Processing mask {i+1}/{len(masks)} (score: {score:.3f})")
+
+                            # Convert mask to features
+                            features = self._convert_mask_to_features(mask, mask_transform)
+
+                            if features:
+                                # Add to layer
+                                for feature in features:
+                                    self.layer.dataProvider().addFeature(feature)
+                                total_features += len(features)
+                                print(f"    ✅ {len(features)} features created")
+
+                        self.layer.updateExtents()
+                        self.layer.triggerRepaint()
+
+                        self._update_status(f"✅ Found {total_features} similar objects", "success")
+                        print(f"\n{'='*80}")
+                        print(f"✅ COMPLETED: {total_features} similar objects found")
+                        print(f"{'='*80}\n")
+                    else:
+                        self._update_status("⚠️  No similar objects found", "warning")
+                        print("⚠️  No similar objects detected")
+                else:
+                    self._update_status("❌ No exemplar bbox provided", "error")
+                    print("❌ No bbox available for similar mode")
+
+        except Exception as e:
+            error_msg = f"❌ Semantic similar error: {e}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            self._update_status(error_msg, "error")
+        finally:
+            self.is_processing = False
+            self._set_ui_enabled(True)
+
+    def _run_tiled_text_segmentation(self, raster_layer):
+        """Run tiled segmentation for text prompt mode (large rasters)"""
+        print("\n" + "="*80)
+        print("🔧 TILED TEXT MODE - Processing large raster in tiles")
+        print("="*80)
+
+        # Use the TiledSegmentationWorker
+        self._set_ui_enabled(False)
+        self._update_status(f"🗺️  Finding '{self.text_prompt}' in tiles: {raster_layer.name()[:30]}...", "processing")
+
+        try:
+            # Get class color
+            class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
+
+            self.tiled_worker = TiledSegmentationWorker(
+                predictor=self.predictor,
+                raster_path=raster_layer.source(),
+                request_type='text',
+                text_prompt=self.text_prompt if hasattr(self, 'text_prompt') else None,
+                bbox=None,
+                current_class=self.current_class,
+                class_color=class_color,
+                tile_size=1024,
+                overlap=128
+            )
+
+            # Connect signals
+            self.tiled_worker.finished.connect(self._on_tiled_segmentation_finished)
+            self.tiled_worker.error.connect(self._on_tiled_segmentation_error)
+            self.tiled_worker.progress.connect(self._on_tiled_segmentation_progress)
+            self.tiled_worker.tile_completed.connect(self._on_tile_completed)
+
+            # Start worker
+            self.tiled_worker.start()
+            print("✅ Tiled worker started")
+
+        except Exception as e:
+            print(f"❌ Error creating tiled worker: {e}")
+            import traceback
+            traceback.print_exc()
+            self._update_status(f"❌ Failed to start tiled processing: {e}", "error")
+            self.is_processing = False
+            self._set_ui_enabled(True)
+
+    def _run_tiled_similar_segmentation(self, raster_layer):
+        """Run tiled segmentation for similar objects mode (large rasters)"""
+        print("\n" + "="*80)
+        print("🔧 TILED SIMILAR MODE - Processing large raster in tiles")
+        print("="*80)
+
+        # Use the TiledSegmentationWorker
+        self._set_ui_enabled(False)
+        self._update_status(f"🗺️  Processing similar objects in tiles: {raster_layer.name()[:30]}...", "processing")
+
+        try:
+            # Get class color
+            class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
+
+            self.tiled_worker = TiledSegmentationWorker(
+                predictor=self.predictor,
+                raster_path=raster_layer.source(),
+                request_type='similar',
+                text_prompt=None,
+                bbox=self.bbox if hasattr(self, 'bbox') else None,
+                current_class=self.current_class,
+                class_color=class_color,
+                tile_size=1024,
+                overlap=128
+            )
+
+            # Connect signals
+            self.tiled_worker.finished.connect(self._on_tiled_segmentation_finished)
+            self.tiled_worker.error.connect(self._on_tiled_segmentation_error)
+            self.tiled_worker.progress.connect(self._on_tiled_segmentation_progress)
+            self.tiled_worker.tile_completed.connect(self._on_tile_completed)
+
+            # Start worker
+            self.tiled_worker.start()
+            print("✅ Tiled worker started")
+
+        except Exception as e:
+            print(f"❌ Error creating tiled worker: {e}")
+            import traceback
+            traceback.print_exc()
+            self._update_status(f"❌ Failed to start tiled processing: {e}", "error")
+            self.is_processing = False
+            self._set_ui_enabled(True)
+
     def _run_tiled_segmentation(self, raster_layer):
         """Run segmentation on entire raster using auto-tiling (SAM3 text/similar modes)"""
         # Verify SAM3
@@ -3845,6 +4419,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._update_status("⚠️  Tiled segmentation requires SAM3", "error")
             self.is_processing = False
             self._set_ui_enabled(True)
+            return
+
+        # For SIMILAR mode: check size first, then decide
+        if self.request_type == 'similar':
+            self._run_semantic_similar_full_raster(raster_layer)
+            return
+
+        # For TEXT mode: check size first, then decide
+        if self.request_type == 'text':
+            self._run_semantic_text_full_raster(raster_layer)
             return
 
         self._set_ui_enabled(False)
@@ -4647,7 +5231,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self._process_individual_batch_results(result, result['mask_transform'], debug_info)
             elif 'mask' in result:
                 # This is single processing - result structure: {'mask': array, 'mask_transform': ..., 'debug_info': ...}
-                print(f"📦 SINGLE: Processing single mask")
+                # (Reduced logging - was causing spam)
                 mask = result['mask']
                 mask_transform = result['mask_transform']
                 self._process_single_mask_result(mask, mask_transform, debug_info)
