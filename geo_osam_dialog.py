@@ -431,7 +431,6 @@ class SAM3PredictorWrapper:
 
                         # Only add non-empty masks
                         num_pixels = np.sum(mask > 0)
-                        print(f"   Mask {i}: shape={mask.shape}, pixels={num_pixels}")
 
                         if num_pixels > 0:
                             masks_list.append(mask)
@@ -444,9 +443,9 @@ class SAM3PredictorWrapper:
                             else:
                                 score = 1.0
                             scores_list.append(score)
-                            print(f"   Added mask {i} with score {score}")
 
-                    print(f"✅ Total masks extracted: {len(masks_list)}")
+                    if len(masks_list) > 0:
+                        print(f"✅ Extracted {len(masks_list)} masks")
 
                     if len(masks_list) > 0:
                         return masks_list, scores_list, None
@@ -1199,18 +1198,11 @@ class TiledSegmentationWorker(QThread):
                             for mask_idx, mask in enumerate(masks):
                                 features = self._convert_mask_to_features(mask, tile_transform)
                                 if features:
-                                    print(f"  Mask {mask_idx+1}: {len(features)} features created")
                                     # Store results for main thread to add to layer
                                     debug_info = {'mode': f'TILE_{tile_idx+1}/{total_tiles}'}
                                     self.tile_results.append((features, debug_info, tile_transform))
                                     tile_objects += len(features)
                                     self.total_objects_found += len(features)
-                                else:
-                                    print(f"  Mask {mask_idx+1}: No features created")
-
-                            print(f"✅ Found {tile_objects} objects in this tile")
-                        else:
-                            print(f"⚠️  No masks found in this tile")
 
                         # Emit progress
                         progress_msg = f"🔄 Tile {tile_idx+1}/{total_tiles} - Found {self.total_objects_found} objects"
@@ -1224,10 +1216,7 @@ class TiledSegmentationWorker(QThread):
                         continue
 
                 # Done
-                print(f"\n{'='*80}")
-                print(f"✅ COMPLETED: {total_tiles} tiles, {self.total_objects_found} objects found")
-                print(f"{'='*80}\n")
-
+                print(f"✅ Completed {total_tiles} tiles, {self.total_objects_found} objects found")
                 self.finished.emit(self.total_objects_found)
 
         except Exception as e:
@@ -1448,13 +1437,50 @@ class OptimizedSAM2Worker(QThread):
 
     def _run_similar_segmentation(self):
         """Run SAM3 exemplar-based (find similar) segmentation"""
-        self.progress.emit("🧠 SAM3 exemplar inference: finding similar objects...")
+        self.progress.emit("🧠 SAM3 similar mode: segmenting exemplar first...")
 
         try:
             with torch.no_grad():
-                masks, scores, logits = self.predictor.predict(
+                # STEP 1: First segment the object in the bbox to get a clean exemplar
+                self.progress.emit("🎯 Step 1/2: Segmenting reference object...")
+
+                exemplar_masks, exemplar_scores, _ = self.predictor.predict(
                     box=self.box,
-                    exemplar_mode=True,  # Flag for SAM3PredictorWrapper
+                    multimask_output=True
+                )
+
+                if not exemplar_masks or len(exemplar_masks) == 0:
+                    self.error.emit("Could not segment reference object")
+                    return
+
+                # Select best exemplar mask based on score
+                if len(exemplar_masks) > 1 and exemplar_scores is not None:
+                    best_idx = np.argmax(exemplar_scores)
+                    exemplar_mask = exemplar_masks[best_idx]
+                    print(f"✅ Exemplar segmented (score: {exemplar_scores[best_idx]:.3f})")
+                else:
+                    exemplar_mask = exemplar_masks[0]
+
+                # STEP 2: Use the segmented mask as exemplar to find similar objects
+                self.progress.emit("🔍 Step 2/2: Finding similar objects...")
+
+                # Get tight bbox around the segmented exemplar
+                ys, xs = np.where(exemplar_mask > 127)
+                if len(xs) == 0 or len(ys) == 0:
+                    self.error.emit("Exemplar mask is empty")
+                    return
+
+                tight_box = np.array([[xs.min(), ys.min(), xs.max(), ys.max()]], dtype=np.float32)
+                tight_width = tight_box[0][2] - tight_box[0][0]
+                tight_height = tight_box[0][3] - tight_box[0][1]
+
+                # Warn if exemplar is too small
+                if tight_width < 10 or tight_height < 10:
+                    print(f"⚠️  WARNING: Exemplar very small ({tight_width:.0f}x{tight_height:.0f}px) - try zooming in more")
+
+                masks, scores, logits = self.predictor.predict(
+                    box=tight_box,
+                    exemplar_mode=True,
                     multimask_output=False
                 )
 
@@ -1725,9 +1751,6 @@ class OptimizedSAM2Worker(QThread):
                     'max_objects_used': self.max_objects
                 }
             }
-
-            print(f"   Result keys: {list(result.keys())}")
-            print(f"   Final individual_processing: {result['debug_info'].get('individual_processing')}")
 
             self.finished.emit(result)
 
@@ -2904,6 +2927,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.scopeComboBox = QtWidgets.QComboBox()
         self.scopeComboBox.addItem("Visible Extent (AOI)", "aoi")
         self.scopeComboBox.addItem("Entire Raster (Auto-slice)", "full")
+        self.scopeComboBox.setMinimumWidth(200)  # Make dropdown wider
         self.scopeComboBox.setStyleSheet("""
             QComboBox {
                 font-size: 11px; padding: 6px; border-radius: 6px;
@@ -3440,7 +3464,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self,
             "Change Model?",
             f"Switch from {self.model_choice} to {new_model}?\n\n"
-            "This will reload the model and clear current segmentation.",
+            "This will reload the model.\n"
+            "Your existing layers and features will be preserved.",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
 
@@ -4186,14 +4211,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                     for i, mask in enumerate(masks):
                         score = scores[i] if scores and i < len(scores) else 1.0
-                        print(f"  Processing mask {i+1}/{len(masks)} (score: {score:.3f})")
 
                         # Convert mask to features
                         features = self._convert_mask_to_features(mask, mask_transform)
 
                         if features:
                             all_features.extend(features)
-                            print(f"    ✅ {len(features)} features created")
 
                     # Add all features to layer with undo tracking
                     if all_features:
@@ -4391,14 +4414,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                         for i, mask in enumerate(masks):
                             score = scores[i] if scores and i < len(scores) else 1.0
-                            print(f"  Processing mask {i+1}/{len(masks)} (score: {score:.3f})")
 
                             # Convert mask to features
                             features = self._convert_mask_to_features(mask, mask_transform)
 
                             if features:
                                 all_features.extend(features)
-                                print(f"    ✅ {len(features)} features created")
 
                         # Add all features to layer with undo tracking
                         if all_features:
@@ -4651,9 +4672,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _on_tiled_segmentation_finished(self, total_objects):
         """Handle completion of tiled segmentation"""
-        print(f"\n{'='*80}")
-        print(f"✅ TILED SEGMENTATION COMPLETED: {total_objects} objects found")
-        print(f"{'='*80}\n")
 
         # Quick deduplication pass - only for similar mode where duplicates are common
         if hasattr(self.tiled_worker, 'request_type') and self.tiled_worker.request_type == 'similar':
@@ -4816,7 +4834,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if feature_count <= 1:
                 return
 
-            print(f"\n🔍 Deduplicating {feature_count} features in layer...")
+            print(f"🔍 Deduplicating {feature_count} features...")
 
             # Get all features
             features = list(result_layer.getFeatures())
@@ -4872,10 +4890,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 result_layer.startEditing()
                 result_layer.deleteFeatures(to_delete)
                 result_layer.commitChanges()
-                print(f"✅ Removed {len(to_delete)} duplicate features (IoU > {iou_threshold})")
-                print(f"   Final count: {result_layer.featureCount()} features")
-            else:
-                print(f"✅ No duplicates found")
+                print(f"✅ Removed {len(to_delete)} duplicates, {result_layer.featureCount()} features remaining")
 
         except Exception as e:
             print(f"⚠️  Deduplication failed: {e}")
@@ -5029,8 +5044,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             rasterio.windows.Window(0, 0, src.width, src.height)
                         )
 
-                        # Limit size for performance (match full raster limit for consistency)
-                        max_size = 2048  # Same as full raster semantic processing
+                        # Limit size for performance
+                        # Similar mode is more memory-intensive, use smaller max size
+                        if self.request_type == 'similar':
+                            max_size = 1024  # More conservative for similar mode (GPU memory intensive)
+                        else:
+                            max_size = 2048  # Text mode can handle larger
+
                         scale = 1.0
                         if window.width > max_size or window.height > max_size:
                             scale = min(max_size / window.width, max_size / window.height)
@@ -5076,7 +5096,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             x2 = max(0, min(arr.shape[1] - 1, int(x2)))
                             y2 = max(0, min(arr.shape[0] - 1, int(y2)))
 
+                            # Expand if bbox is too small
                             if (x2 - x1) < 5 or (y2 - y1) < 5:
+                                print(f"⚠️  Bbox too small ({x2-x1}x{y2-y1}px), expanding to minimum size")
                                 center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                                 x1 = max(0, center_x - 10)
                                 y1 = max(0, center_y - 10)
