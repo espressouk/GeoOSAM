@@ -113,6 +113,7 @@ SAM3_MODEL = {
 
 SAM3_WEIGHTS_URL = "https://huggingface.co/facebook/sam3/resolve/main/sam3.pt"
 
+
 # SAM3 Status (Tested 2025-12-26):
 # ✅ WORKING: Auto-segmentation (instance segmentation) - Production ready!
 # ✅ FIXED: Text prompts - Tokenizer bug fixed with monkey-patch (v1.3.1+)
@@ -1130,6 +1131,52 @@ class TiledSegmentationWorker(QThread):
                                         exemplar_mode=True,
                                         multimask_output=False
                                     )
+
+                                    # Filter out the exemplar itself from results
+                                    # The exemplar was pasted at top-left, so remove masks overlapping that region
+                                    if masks is not None and len(masks) > 0:
+                                        filtered_masks = []
+                                        filtered_scores = []
+                                        exemplar_region = exemplar_bbox_in_tile  # [0, 0, ex_w, ex_h]
+
+                                        for i, mask in enumerate(masks):
+                                            # Check if this mask overlaps significantly with exemplar location
+                                            # Get mask bounding box
+                                            ys, xs = np.where(mask > 127)
+                                            if len(xs) == 0 or len(ys) == 0:
+                                                continue
+
+                                            mask_x1, mask_x2 = xs.min(), xs.max()
+                                            mask_y1, mask_y2 = ys.min(), ys.max()
+
+                                            # Calculate overlap with exemplar region
+                                            ex_x1, ex_y1, ex_x2, ex_y2 = exemplar_region
+                                            overlap_x1 = max(mask_x1, ex_x1)
+                                            overlap_y1 = max(mask_y1, ex_y1)
+                                            overlap_x2 = min(mask_x2, ex_x2)
+                                            overlap_y2 = min(mask_y2, ex_y2)
+
+                                            if overlap_x1 < overlap_x2 and overlap_y1 < overlap_y2:
+                                                # There is overlap - calculate IoU
+                                                overlap_area = (overlap_x2 - overlap_x1) * (overlap_y2 - overlap_y1)
+                                                mask_area = (mask_x2 - mask_x1) * (mask_y2 - mask_y1)
+
+                                                if mask_area > 0:
+                                                    overlap_ratio = overlap_area / mask_area
+                                                    # If >80% of mask overlaps with exemplar, skip it (it's the exemplar itself)
+                                                    if overlap_ratio > 0.8:
+                                                        print(f"  Skipping mask {i+1}: exemplar itself (overlap {overlap_ratio:.1%})")
+                                                        continue
+
+                                            # Keep this mask
+                                            filtered_masks.append(mask)
+                                            if scores is not None and i < len(scores):
+                                                filtered_scores.append(scores[i])
+
+                                        masks = filtered_masks if filtered_masks else None
+                                        scores = filtered_scores if filtered_scores else None
+                                        if masks:
+                                            print(f"✅ After filtering exemplar: {len(masks)} similar objects remain")
                                 else:
                                     print(f"⚠️  Exemplar too large for tile")
                                     masks = None
@@ -1388,13 +1435,11 @@ class OptimizedSAM2Worker(QThread):
                     multimask_output=False
                 )
 
-            # Process all returned masks
+            # Process all returned masks together
             if masks and len(masks) > 0:
                 self.progress.emit(f"✅ Found {len(masks)} instances")
-                # Process each mask individually
-                for i, mask in enumerate(masks):
-                    score = scores[i] if scores and i < len(scores) else 1.0
-                    self._process_single_mask(mask, [score], None, batch_count=(i+1, len(masks)))
+                # Emit all masks together as a single result for undo tracking
+                self._process_all_masks(masks, scores, logits)
             else:
                 self.error.emit("No objects found matching text prompt")
 
@@ -1413,17 +1458,48 @@ class OptimizedSAM2Worker(QThread):
                     multimask_output=False
                 )
 
-            # Process all similar objects found
+            # Process all similar objects found together
             if masks and len(masks) >= 1:
                 self.progress.emit(f"✅ Found {len(masks)} similar objects")
-                for i, mask in enumerate(masks):
-                    score = scores[i] if scores and i < len(scores) else 1.0
-                    self._process_single_mask(mask, [score], None, batch_count=(i+1, len(masks)))
+                # Emit all masks together as a single result for undo tracking
+                self._process_all_masks(masks, scores, logits)
             else:
                 self.error.emit("No similar objects found")
 
         except Exception as e:
             self.error.emit(f"Similar objects error: {e}")
+
+    def _process_all_masks(self, masks, scores, logits):
+        """Process multiple masks and emit as single result for undo tracking"""
+        self.progress.emit("⚡ Processing masks...")
+
+        # Convert all masks to numpy
+        processed_masks = []
+        for mask in masks:
+            if hasattr(mask, 'cpu'):
+                mask = mask.cpu().numpy()
+            elif torch.is_tensor(mask):
+                mask = mask.detach().cpu().numpy()
+
+            if mask.dtype != np.uint8:
+                mask = (mask * 255).astype(np.uint8)
+
+            processed_masks.append(mask)
+
+        # Emit all masks together
+        result = {
+            'masks': processed_masks,  # Multiple masks
+            'scores': scores,
+            'logits': logits,
+            'mask_transform': self.mask_transform,
+            'debug_info': {
+                **self.debug_info,
+                'model': self.model_choice,
+                'batch_count': (len(processed_masks), len(processed_masks))
+            }
+        }
+
+        self.finished.emit(result)
 
     def _validate_mask_for_class(self, mask, class_name, center_point):
         """Validate segmented mask based on class-specific criteria"""
@@ -2163,6 +2239,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxTool = EnhancedBBoxClickTool(self.canvas, self._bbox_done)
         self.original_map_tool = None
 
+        # Connect to map tool changes to detect when user switches tools
+        self.canvas.mapToolSet.connect(self._on_map_tool_changed)
+
         # Batch mode settings
         self.batch_mode_enabled = False
         self.min_object_size = 50  # Minimum pixels for valid object
@@ -2870,11 +2949,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxModeBtn.setCheckable(True)
         self.bboxModeBtn.setVisible(True)
 
-        # Auto-Segment mode button (SAM3 only)
-        self.similarModeBtn = QtWidgets.QPushButton("Auto-Segment")
+        # Find Similar mode button (SAM3 only)
+        self.similarModeBtn = QtWidgets.QPushButton("Find Similar")
         self.similarModeBtn.setCheckable(True)
         self.similarModeBtn.setVisible(self.model_choice == "SAM3")
-        self.similarModeBtn.setToolTip("Auto-segment all objects in the area (SAM3 automatic mode)")
+        self.similarModeBtn.setToolTip("Find similar objects: Click on a reference object to find all similar objects in the area (SAM3 exemplar mode)")
 
         # Button group for mutual exclusion
         self.mode_button_group = QtWidgets.QButtonGroup()
@@ -3615,8 +3694,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Update button states
         self.pointModeBtn.setProperty("active", True)
         self.bboxModeBtn.setProperty("active", False)
+        self.similarModeBtn.setProperty("active", False)
         self.pointModeBtn.style().polish(self.pointModeBtn)
         self.bboxModeBtn.style().polish(self.bboxModeBtn)
+        self.similarModeBtn.style().polish(self.similarModeBtn)
 
         self._update_status(
             f"Point mode active for [{self.current_class}]. Click on map to segment.", "processing")
@@ -3635,8 +3716,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Update button states
         self.pointModeBtn.setProperty("active", False)
         self.bboxModeBtn.setProperty("active", True)
+        self.similarModeBtn.setProperty("active", False)
         self.pointModeBtn.style().polish(self.pointModeBtn)
         self.bboxModeBtn.style().polish(self.bboxModeBtn)
+        self.similarModeBtn.style().polish(self.similarModeBtn)
 
         self._update_status(
             f"BBox mode active for [{self.current_class}]. Click and drag to segment.", "processing")
@@ -3678,6 +3761,26 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         )
         # Use point tool to select reference object
         self.canvas.setMapTool(self.pointTool)
+
+    def _on_map_tool_changed(self, new_tool, old_tool):
+        """Detect when user switches away from plugin tools to external QGIS tools"""
+        # Check if the new tool is NOT one of our plugin tools
+        if new_tool != self.pointTool and new_tool != self.bboxTool:
+            # User switched to a different tool (e.g., hand/pan tool)
+            # Uncheck all mode buttons to reflect that our tools are inactive
+            self.pointModeBtn.setProperty("active", False)
+            self.bboxModeBtn.setProperty("active", False)
+            self.similarModeBtn.setProperty("active", False)
+            self.pointModeBtn.style().polish(self.pointModeBtn)
+            self.bboxModeBtn.style().polish(self.bboxModeBtn)
+            self.similarModeBtn.style().polish(self.similarModeBtn)
+
+            # Uncheck all buttons in the button group
+            self.mode_button_group.setExclusive(False)
+            self.pointModeBtn.setChecked(False)
+            self.bboxModeBtn.setChecked(False)
+            self.similarModeBtn.setChecked(False)
+            self.mode_button_group.setExclusive(True)
 
     def _point_done(self, pt):
         # Handle similar mode differently - convert point to exemplar bbox
@@ -4077,8 +4180,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 print(f"✅ Found {len(masks) if masks else 0} objects matching '{self.text_prompt}'")
 
                 if masks and len(masks) > 0:
-                    # Process results
-                    total_features = 0
+                    # Process results - collect all features first
+                    all_features = []
                     print(f"🔄 Processing {len(masks)} masks...")
 
                     for i, mask in enumerate(masks):
@@ -4089,19 +4192,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         features = self._convert_mask_to_features(mask, mask_transform)
 
                         if features:
-                            # Add to layer
-                            for feature in features:
-                                self.layer.dataProvider().addFeature(feature)
-                            total_features += len(features)
+                            all_features.extend(features)
                             print(f"    ✅ {len(features)} features created")
 
-                    self.layer.updateExtents()
-                    self.layer.triggerRepaint()
-
-                    self._update_status(f"✅ Found {total_features} objects matching '{self.text_prompt}'", "success")
-                    print(f"\n{'='*80}")
-                    print(f"✅ COMPLETED: {total_features} objects found matching '{self.text_prompt}'")
-                    print(f"{'='*80}\n")
+                    # Add all features to layer with undo tracking
+                    if all_features:
+                        debug_info = {'mode': 'TEXT_EXTENT'}
+                        self._add_features_to_layer(all_features, debug_info, len(all_features))
+                        self._update_status(f"✅ Found {len(all_features)} objects matching '{self.text_prompt}'", "success")
+                        print(f"\n{'='*80}")
+                        print(f"✅ COMPLETED: {len(all_features)} objects found matching '{self.text_prompt}'")
+                        print(f"{'='*80}\n")
+                    else:
+                        self._update_status(f"⚠️  No features created from masks", "warning")
                 else:
                     self._update_status(f"⚠️  No objects found matching '{self.text_prompt}'", "warning")
                     print(f"⚠️  No objects detected matching text prompt")
@@ -4282,8 +4385,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     print(f"✅ Found {len(masks) if masks else 0} similar objects")
 
                     if masks and len(masks) > 0:
-                        # Process results
-                        total_features = 0
+                        # Process results - collect all features first
+                        all_features = []
                         print(f"🔄 Processing {len(masks)} masks...")
 
                         for i, mask in enumerate(masks):
@@ -4294,19 +4397,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             features = self._convert_mask_to_features(mask, mask_transform)
 
                             if features:
-                                # Add to layer
-                                for feature in features:
-                                    self.layer.dataProvider().addFeature(feature)
-                                total_features += len(features)
+                                all_features.extend(features)
                                 print(f"    ✅ {len(features)} features created")
 
-                        self.layer.updateExtents()
-                        self.layer.triggerRepaint()
-
-                        self._update_status(f"✅ Found {total_features} similar objects", "success")
-                        print(f"\n{'='*80}")
-                        print(f"✅ COMPLETED: {total_features} similar objects found")
-                        print(f"{'='*80}\n")
+                        # Add all features to layer with undo tracking
+                        if all_features:
+                            debug_info = {'mode': 'SIMILAR_EXTENT'}
+                            self._add_features_to_layer(all_features, debug_info, len(all_features))
+                            self._update_status(f"✅ Found {len(all_features)} similar objects", "success")
+                            print(f"\n{'='*80}")
+                            print(f"✅ COMPLETED: {len(all_features)} similar objects found")
+                            print(f"{'='*80}\n")
+                        else:
+                            self._update_status("⚠️  No features created from masks", "warning")
                     else:
                         self._update_status("⚠️  No similar objects found", "warning")
                         print("⚠️  No similar objects detected")
@@ -4333,6 +4436,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
         self._update_status(f"🗺️  Finding '{self.text_prompt}' in tiles: {raster_layer.name()[:30]}...", "processing")
+
+        # Track initial feature IDs before processing (for undo)
+        result_layer = self._get_or_create_class_layer(self.current_class)
+        if result_layer and result_layer.isValid():
+            self._tiled_initial_feature_ids = set(f.id() for f in result_layer.getFeatures())
+        else:
+            self._tiled_initial_feature_ids = set()
 
         try:
             # Get class color
@@ -4377,6 +4487,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
         self._update_status(f"🗺️  Processing similar objects in tiles: {raster_layer.name()[:30]}...", "processing")
+
+        # Track initial feature IDs before processing (for undo)
+        result_layer = self._get_or_create_class_layer(self.current_class)
+        if result_layer and result_layer.isValid():
+            self._tiled_initial_feature_ids = set(f.id() for f in result_layer.getFeatures())
+        else:
+            self._tiled_initial_feature_ids = set()
 
         try:
             # Get class color
@@ -4514,7 +4631,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             qgs_features.append(feature)
 
                     if qgs_features:
+                        # Temporarily disable undo tracking for individual tiles
+                        # (will be tracked as single operation at the end)
+                        undo_was_enabled = self.undoBtn.isEnabled()
+                        undo_stack_size = len(self.undo_stack)
+
                         self._add_features_to_layer(qgs_features, debug_info, len(qgs_features))
+
+                        # Remove the undo entry that was just added (we'll add one big entry at the end)
+                        if len(self.undo_stack) > undo_stack_size:
+                            self.undo_stack.pop()
+
+                        # Keep undo button disabled during tiled processing
+                        if not undo_was_enabled:
+                            self.undoBtn.setEnabled(False)
 
             # Clear processed results
             self.tiled_worker.tile_results.clear()
@@ -4524,6 +4654,30 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         print(f"\n{'='*80}")
         print(f"✅ TILED SEGMENTATION COMPLETED: {total_objects} objects found")
         print(f"{'='*80}\n")
+
+        # Quick deduplication pass - only for similar mode where duplicates are common
+        if hasattr(self.tiled_worker, 'request_type') and self.tiled_worker.request_type == 'similar':
+            self._deduplicate_layer_features(iou_threshold=0.5)
+
+        # Add all tiled operation features to undo stack as a single operation
+        # Use the difference between current and initial feature IDs (accounts for deduplication)
+        if hasattr(self, '_tiled_initial_feature_ids'):
+            result_layer = self._get_or_create_class_layer(self.current_class)
+            if result_layer and result_layer.isValid():
+                # Get current feature IDs after all processing (including deduplication)
+                current_feature_ids = set(f.id() for f in result_layer.getFeatures())
+                # Find new features (ones that weren't there before)
+                new_feature_ids = list(current_feature_ids - self._tiled_initial_feature_ids)
+
+                if new_feature_ids:
+                    self.undo_stack.append((self.current_class, new_feature_ids))
+                    self.undoBtn.setEnabled(True)
+                    print(f"✅ Added {len(new_feature_ids)} features to undo stack (single operation)")
+                else:
+                    print(f"⚠️  No new features were added")
+
+            # Clean up initial tracking
+            delattr(self, '_tiled_initial_feature_ids')
 
         self._update_status(f"✅ Tiled segmentation complete - Found {total_objects} objects", "success")
 
@@ -4643,6 +4797,90 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 return 0.1              # 10% padding
             else:                       # Small area
                 return 0.2              # 20% padding
+
+    def _deduplicate_layer_features(self, iou_threshold=0.5):
+        """
+        Quick deduplication pass on the current class layer.
+        Removes duplicate features from tile overlap zones.
+
+        Args:
+            iou_threshold: IoU threshold for considering features as duplicates
+        """
+        try:
+            # Get the current class layer
+            result_layer = self._get_or_create_class_layer(self.current_class)
+            if not result_layer or not result_layer.isValid():
+                return
+
+            feature_count = result_layer.featureCount()
+            if feature_count <= 1:
+                return
+
+            print(f"\n🔍 Deduplicating {feature_count} features in layer...")
+
+            # Get all features
+            features = list(result_layer.getFeatures())
+            to_delete = []
+
+            # Find duplicates based on IoU
+            for i in range(len(features)):
+                if features[i].id() in to_delete:
+                    continue
+
+                geom_i = features[i].geometry()
+                if not geom_i or geom_i.isEmpty():
+                    continue
+
+                for j in range(i + 1, len(features)):
+                    if features[j].id() in to_delete:
+                        continue
+
+                    geom_j = features[j].geometry()
+                    if not geom_j or geom_j.isEmpty():
+                        continue
+
+                    # Calculate IoU
+                    intersection = geom_i.intersection(geom_j)
+                    if not intersection.isEmpty():
+                        area_i = geom_i.area()
+                        area_j = geom_j.area()
+                        area_intersection = intersection.area()
+
+                        # Check if one is contained in the other (95% overlap)
+                        if area_i > 0 and area_intersection / area_i > 0.95:
+                            to_delete.append(features[i].id())
+                            break
+                        elif area_j > 0 and area_intersection / area_j > 0.95:
+                            to_delete.append(features[j].id())
+                            continue
+
+                        # Check IoU for overlapping duplicates
+                        if area_i > 0 and area_j > 0:
+                            area_union = area_i + area_j - area_intersection
+                            if area_union > 0:
+                                iou = area_intersection / area_union
+                                if iou > iou_threshold:
+                                    # Keep the larger one
+                                    if area_i >= area_j:
+                                        to_delete.append(features[j].id())
+                                    else:
+                                        to_delete.append(features[i].id())
+                                        break
+
+            # Delete duplicates
+            if to_delete:
+                result_layer.startEditing()
+                result_layer.deleteFeatures(to_delete)
+                result_layer.commitChanges()
+                print(f"✅ Removed {len(to_delete)} duplicate features (IoU > {iou_threshold})")
+                print(f"   Final count: {result_layer.featureCount()} features")
+            else:
+                print(f"✅ No duplicates found")
+
+        except Exception as e:
+            print(f"⚠️  Deduplication failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _add_features_to_layer(self, features, debug_info, object_count, filename=None):
         """Add features to the appropriate class layer"""
@@ -4791,8 +5029,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             rasterio.windows.Window(0, 0, src.width, src.height)
                         )
 
-                        # Limit size for performance
-                        max_size = 1024
+                        # Limit size for performance (match full raster limit for consistency)
+                        max_size = 2048  # Same as full raster semantic processing
+                        scale = 1.0
                         if window.width > max_size or window.height > max_size:
                             scale = min(max_size / window.width, max_size / window.height)
                             out_width = int(window.width * scale)
@@ -4808,6 +5047,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         input_labels = None
                         input_box = None
                         mask_transform = src.window_transform(window)
+
+                        # CRITICAL: Adjust transform if we downsampled
+                        if scale < 1.0:
+                            from rasterio import Affine
+                            mask_transform = mask_transform * Affine.scale(1/scale)
+                            print(f"⚠️  Downsampled to {arr.shape[1]}x{arr.shape[0]} (scale={scale:.3f}), adjusted transform")
 
                         # For SIMILAR mode, convert exemplar bbox to pixel coords in this crop
                         if self.request_type == 'similar' and self.bbox is not None:
@@ -5229,6 +5474,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # This is batch processing - result structure: {'individual_masks': [...], 'mask_transform': ..., 'debug_info': ...}
                 print(f"🔄 BATCH: Processing {len(result['individual_masks'])} individual masks")
                 self._process_individual_batch_results(result, result['mask_transform'], debug_info)
+            elif 'masks' in result:
+                # This is text/similar mode with multiple masks - process all together for single undo
+                print(f"🔄 TEXT/SIMILAR: Processing {len(result['masks'])} masks together")
+                masks = result['masks']
+                mask_transform = result['mask_transform']
+                self._process_multiple_masks_result(masks, mask_transform, debug_info)
             elif 'mask' in result:
                 # This is single processing - result structure: {'mask': array, 'mask_transform': ..., 'debug_info': ...}
                 # (Reduced logging - was causing spam)
@@ -5237,7 +5488,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self._process_single_mask_result(mask, mask_transform, debug_info)
             else:
                 # Error case - unexpected result structure
-                raise KeyError(f"Unexpected result structure. Expected 'mask' or 'individual_masks', got keys: {list(result.keys())}")
+                raise KeyError(f"Unexpected result structure. Expected 'mask', 'masks' or 'individual_masks', got keys: {list(result.keys())}")
 
             process_time = time.time() - start_process_time
             prep_time = debug_info.get('prep_time', 0)
@@ -5528,6 +5779,30 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         except Exception as e:
             self._update_status(f"Error adding individual features: {e}", "error")
             return
+
+    def _process_multiple_masks_result(self, masks, mask_transform, debug_info):
+        """Process multiple masks together for text/similar mode (single undo)"""
+        # Convert all masks to features
+        all_features = []
+        for i, mask in enumerate(masks):
+            features = self._convert_mask_to_features(mask, mask_transform)
+            if features:
+                all_features.extend(features)
+                print(f"  Mask {i+1}/{len(masks)}: {len(features)} features")
+
+        if not all_features:
+            self._update_status("No segments found", "warning")
+            return
+
+        # Add ALL features to layer in one call (single undo entry)
+        self._add_features_to_layer(all_features, debug_info, len(masks))
+
+        # Update status
+        undo_hint = " (↶ Undo available)"
+        source_info = debug_info.get('source_layer', 'unknown')[:15]
+        self._update_status(
+            f"✅ Added {len(all_features)} [{self.current_class}] polygons from {len(masks)} objects on {source_info}!{undo_hint}", "info")
+        self._update_stats()
 
     def _process_single_mask_result(self, mask, mask_transform, debug_info):
         """Process a single combined mask (original behavior)"""
