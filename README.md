@@ -91,9 +91,9 @@ _Export segmented polygons as shapefiles with detailed attributes_
 
 ## 🤖 SAM3 Features (v1.3)
 
-**SAM3 integration with semantic segmentation - CLIP tokenizer fixed!**
+**SAM3 integration with semantic segmentation**
 
-### Auto-Segment 🎯 ✅ PRODUCTION READY
+### Auto-Segment 🎯
 
 Automatically find ALL objects in an area without clicking:
 
@@ -110,9 +110,9 @@ Automatically find ALL objects in an area without clicking:
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"
 4. Click anywhere to trigger automatic segmentation
 
-### Text Prompts 📝 ✅ WORKING
+### Text Prompts 📝
 
-**Status: CLIP tokenizer bug FIXED in v1.3**
+**Status: CLIP tokenizer bug FIXED**
 
 - **Fix:** Custom CLIP tokenizer monkey-patch applied at runtime
 - **Functionality:** Enter text like "building", "car", "tree" to find matching objects
@@ -126,9 +126,9 @@ Automatically find ALL objects in an area without clicking:
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"\*
 4. Click "Auto-Segment All Objects"
 
-### Similar Objects 🔍 ✅ WORKING
+### Similar Objects 🔍
 
-**Status: Exemplar mode FIXED in v1.3**
+**Status: Exemplar mode**
 
 - **Fix:** Same CLIP tokenizer fix enables exemplar-based search
 - **Functionality:** Click one object to find all similar objects
@@ -161,7 +161,7 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
 - **Get License:** Contact **geoosamplugin@gmail.com**
 - **Activation:** Click "Manage License" button in plugin (offline validation)
 
-**Test Results (2025-12-28 - v1.3):**
+**Test Results (v1.3):**
 
 - ✅ SAM3 initialization: SUCCESS
 - ✅ Auto-segmentation: SUCCESS
