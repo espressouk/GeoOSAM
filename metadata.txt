@@ -32,16 +32,21 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.3.0 - SAM3 & Model Management Updates
+changelog=1.3.0 - SAM3 Integration & Pro Licensing (2025-12-28)
     - NEW: SAM3 auto-segmentation ✅ WORKING (tested 2025-12-26)
-    - NOTE: Text/exemplar modes ❌ NOT WORKING (CLIP tokenizer bug in v8.3.240)
+    - NEW: SAM3 text prompts ✅ WORKING (CLIP tokenizer fixed with runtime patch!)
+    - NEW: SAM3 similar object detection ✅ WORKING (CLIP tokenizer fixed!)
+    - NEW: SAM3 Pro licensing system with device limits and offline validation
+    - NEW: Free tier (extent/AOI) + Pro tier (entire raster) for SAM3 text/similar modes
+    - NEW: Cancel button for tiled operations - abort long-running processes anytime
     - NEW: Scope selector (AOI vs full raster) with tiled processing for large rasters
     - NEW: Model selection dropdown with size variants per hardware (GPU/CPU)
     - NEW: SAM3 download flow with Hugging Face token prompt
-    - ENHANCED: Automatic model detection and availability checks
-    - ENHANCED: Improved UI state updates for model changes
+    - FIXED: CLIP tokenizer bug preventing SAM3 text/exemplar modes (runtime patch applied)
     - FIXED: Similar mode bbox handling and mask result processing
     - FIXED: Threaded tiled processing stability and progress reporting
+    - ENHANCED: Automatic model detection and availability checks
+    - ENHANCED: Improved UI state updates for model changes
 
     1.2.2 - Threading Configuration Fix
     - FIXED: PyTorch threading initialization error when other plugins pre-configure threads
@@ -133,4 +138,4 @@ changelog=1.3.0 - SAM3 & Model Management Updates
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-12-22
+update_date=2025-12-28
