@@ -7,7 +7,7 @@ about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralyt
 
 version=1.3.0
 author=Ofer Butbega
-email=bkst.dev@gmail.com
+email=geoosamplugin@gmail.com
 
 tracker=https://github.com/espressouk/GeoOSAM/issues
 repository=https://github.com/espressouk/GeoOSAM

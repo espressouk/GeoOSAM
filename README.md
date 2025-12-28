@@ -438,10 +438,9 @@ For vegetation mapping, GeoOSAM automatically:
   - Efficient threading for sub-second segmentation
 - **SAM3 (Ultralytics)**: Advanced instance segmentation
   - ✅ Auto-segmentation - WORKING (tested 2025-12-26, 5 objects detected)
-  - ❌ Text prompts - NOT WORKING (CLIP tokenizer bug in v8.3.240)
-  - ❌ Similar objects mode - NOT WORKING (same CLIP tokenizer issue)
+  - ✅ Text prompts - WORKING (CLIP tokenizer fixed in v1.3 with runtime patch)
+  - ✅ Similar objects mode - WORKING (CLIP tokenizer fixed in v1.3)
   - Requires Ultralytics >= 8.3.237 and GPU >3GB
-  - Issue: https://github.com/ultralytics/ultralytics/issues/22647
 - **Automatic Selection**: Based on hardware detection and user preference
 
 ### Performance Optimization
@@ -468,7 +467,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/espressouk/GeoOSAM/issues)
-- **Email**: bkst.dev@gmail.com
+- **Email**: geoosamplugin@gmail.com
 - **Documentation**: [Wiki](https://github.com/espressouk/GeoOSAM/wiki)
 
 ## 🙏 Acknowledgments
@@ -510,9 +509,9 @@ If you use GeoOSAM in your research, please cite:
 
 - **🤖 SAM3 Support**: Automatic instance segmentation (tested 2025-12-26)
   - Auto-segment: ✅ PRODUCTION READY - Automatically find all objects (5 objects detected in test)
-  - Text prompts: ❌ NOT WORKING - CLIP tokenizer bug in v8.3.240 (uses auto-segment fallback)
-  - Similar objects: ❌ NOT WORKING - Same CLIP tokenizer issue (uses auto-segment approximation)
-  - Issue tracking: https://github.com/ultralytics/ultralytics/issues/22647
+  - Text prompts: ✅ WORKING - CLIP tokenizer fixed in v1.3 with runtime patch
+  - Similar objects: ✅ WORKING - CLIP tokenizer fixed in v1.3 with runtime patch
+  - Free tier (extent) + Pro tier (entire raster) licensing
 - **⚙️ Model Size Selection**: Choose optimal model for your needs
   - GPU: 4 SAM2.1 sizes (Tiny/Small/Base+/Large, 156MB-898MB) + SAM3
   - CPU: 3 SAM2.1 sizes (T/B/L, 40MB-224MB, Ultralytics optimized)

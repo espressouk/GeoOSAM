@@ -643,7 +643,7 @@ pip install torch torchvision "ultralytics>=8.3.237" iopath pillow numpy
 #### Support Channels
 
 - **GitHub Issues:** https://github.com/espressouk/GeoOSAM/issues
-- **Email:** bkst.dev@gmail.com
+- **Email:** geoosamplugin@gmail.com
 - **QGIS Community:** https://qgis.org/en/site/forusers/support.html
 
 #### Bug Reports

@@ -928,7 +928,7 @@ print("=== End Enhanced Diagnostic ===")
   - Specify which model was being used
   - Note performance expectations vs. reality
 
-- **Email:** bkst.dev@gmail.com
+- **Email:** geoosamplugin@gmail.com
   - For complex performance issues
   - Hardware-specific problems
 

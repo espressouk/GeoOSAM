@@ -8,7 +8,7 @@
 
 """
 
-__author__ = 'bkst.dev@gmail.com'
+__author__ = 'geoosamplugin@gmail.com'
 __date__ = '2025-06-26'
 __copyright__ = 'Copyright 2025, Ofer Butbega'
 

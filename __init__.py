@@ -8,7 +8,7 @@
                              -------------------
         begin                : 2025-06-26
         copyright            : (C) 2025 by Ofer Butbega
-        email                : bkst.dev@gmail.com
+        email                : geoosamplugin@gmail.com
         git sha              : $Format:%H$
  ***************************************************************************/
 

@@ -370,7 +370,7 @@ We use [Semantic Versioning](https://semver.org/):
 
 - **GitHub Discussions** - For general questions
 - **Issues** - For bug reports and feature requests
-- **Email** - bkst.dev@gmail.com for sensitive matters
+- **Email** - geoosamplugin@gmail.com for sensitive matters
 
 ### Development Chat
 
@@ -407,4 +407,4 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 **Ready to contribute? We're excited to work with you!** 🎉
 
-**Questions?** Open an issue or reach out at bkst.dev@gmail.com
+**Questions?** Open an issue or reach out at geoosamplugin@gmail.com

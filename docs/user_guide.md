@@ -528,7 +528,7 @@ except:
 ### Support Channels
 
 - **GitHub Issues:** Bug reports and feature requests
-- **Email:** bkst.dev@gmail.com for direct support
+- **Email:** geoosamplugin@gmail.com for direct support
 - **Documentation:** Check troubleshooting guide for common solutions
 
 ### Community
