@@ -5121,18 +5121,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Cleanup
         self.is_processing = False
-
-        # Debug: Check undo stack state
-        print(f"🔍 DEBUG: undo_stack length = {len(self.undo_stack) if hasattr(self, 'undo_stack') else 'NO STACK'}")
-        print(f"🔍 DEBUG: undo button enabled before _set_ui_enabled = {self.undoBtn.isEnabled()}")
-
         self._set_ui_enabled(True)
-
-        print(f"🔍 DEBUG: undo button enabled after _set_ui_enabled = {self.undoBtn.isEnabled()}")
-
         self._remove_cancel_button()
-
-        print(f"🔍 DEBUG: undo button enabled after _remove_cancel_button = {self.undoBtn.isEnabled()}")
 
         if hasattr(self, 'tiled_worker'):
             self.tiled_worker.deleteLater()
@@ -5191,9 +5181,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             print("✅ Cancel button hidden")
 
         # Restore undo button visibility
-        print(f"🔍 DEBUG _remove_cancel_button: undo button state before setVisible = enabled:{self.undoBtn.isEnabled()}, visible:{self.undoBtn.isVisible()}")
         self.undoBtn.setVisible(True)
-        print(f"🔍 DEBUG _remove_cancel_button: undo button state after setVisible = enabled:{self.undoBtn.isEnabled()}, visible:{self.undoBtn.isVisible()}")
 
     def _cancel_tiled_processing(self):
         """Cancel ongoing tiled processing"""
@@ -6585,10 +6573,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.selectFolderBtn.setEnabled(True)
         self.saveDebugSwitch.setEnabled(True)
 
-        print(f"🔍 DEBUG _set_ui_enabled: enabled={enabled}, undo_stack={len(self.undo_stack) if hasattr(self, 'undo_stack') else 'NO STACK'}")
-
         if enabled and self.undo_stack:
-            print(f"🔍 DEBUG _set_ui_enabled: Setting undo button to ENABLED (stack has {len(self.undo_stack)} items)")
             self.undoBtn.setEnabled(True)
         elif not enabled:
             pass  # Keep undo available during processing
