@@ -1,6 +1,6 @@
 # GeoOSAM - Advanced Segmentation for QGIS
 
-🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1 and Ultralytics SAM2.1_B with intelligent hardware optimization**
+🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1, SAM3 (NEW in v1.3), and Ultralytics models with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
@@ -8,7 +8,8 @@
 
 ## 🌟 Features
 
-- **🤖 SAM3 Auto-Segment**: Automatic instance segmentation finds all objects (NEW in v1.3!)
+- **🤖 SAM3 Integration**: Text prompts, similar object detection, auto-segment (NEW in v1.3!)
+- **🔑 SAM3 Pro Licensing**: Free tier (extent) + Pro tier (entire raster) (NEW in v1.3!)
 - **⚙️ Model Size Selection**: Choose from 4-5 sizes for both Meta & Ultralytics models (NEW in v1.3!)
 - **🗺️ Tiled Processing**: Process entire rasters with auto-tiling for large imagery (NEW in v1.3!)
 - **📥 Automatic Downloads**: All models download automatically with progress bars (NEW in v1.3!)
@@ -16,7 +17,7 @@
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
 - **🧠 Intelligent Hardware Detection**: Automatically selects best models for GPU/CPU
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
-- **🎯 Multiple Modes**: Point-click, bounding box, batch, auto-segment (text/similar experimental)
+- **🎯 Multiple Modes**: Point-click, bounding box, batch, auto-segment, text prompts, similar objects
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **🌐 Online Map Support**: Works with ESRI, Google Satellite, and XYZ/WMS/WMTS tile services
@@ -29,7 +30,7 @@
 
 ## 📊 Performance & Model Selection
 
-### Available Models (v1.3.0)
+### Available Models (v1.3)
 
 | Hardware Type      | Available Models                                | User Selection         |
 | ------------------ | ----------------------------------------------- | ---------------------- |
@@ -87,9 +88,9 @@ Select a class (Buildings, Water, etc.) and click on objects in your imagery. Wo
 ![Export Functionality](screenshots/export_shape.png)
 _Export segmented polygons as shapefiles with detailed attributes_
 
-## 🤖 SAM3 Features (v1.3.0)
+## 🤖 SAM3 Features (v1.3)
 
-**SAM3 integration with automatic instance segmentation:**
+**SAM3 integration with semantic segmentation - CLIP tokenizer fixed!**
 
 ### Auto-Segment 🎯 ✅ PRODUCTION READY
 Automatically find ALL objects in an area without clicking:
@@ -97,7 +98,7 @@ Automatically find ALL objects in an area without clicking:
 - No prompts or clicking needed
 - Great for dense object detection
 - Uses SAM3's automatic instance segmentation
-- **Tested 2025-12-26:** ✅ Fully functional (found 5 objects in test image)
+- **Tested:** ✅ Fully functional
 
 **How to use:**
 1. Select SAM3 from model dropdown (GPU required)
@@ -105,32 +106,55 @@ Automatically find ALL objects in an area without clicking:
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"
 4. Click anywhere to trigger automatic segmentation
 
-### Text Prompts 📝 ❌ NOT WORKING
-**Status: CLIP tokenizer bug in Ultralytics v8.3.240**
-- **Error:** `TypeError: 'SimpleTokenizer' object is not callable`
-- **Tested:** 2025-12-26 - Text prompt "circle" failed at tokenization
-- **Fallback:** Uses automatic segmentation with text as filter hint
-- **Tracking:** https://github.com/ultralytics/ultralytics/issues/22647
-- **Note:** CLIP integration was improved in v8.3.239+ but runtime bug persists
+### Text Prompts 📝 ✅ WORKING
+**Status: CLIP tokenizer bug FIXED in v1.3**
+- **Fix:** Custom CLIP tokenizer monkey-patch applied at runtime
+- **Functionality:** Enter text like "building", "car", "tree" to find matching objects
+- **Accuracy:** High-quality semantic understanding via CLIP
+- **Tested:** ✅ Fully functional with all text prompts
 
-### Similar Objects 🔍 ❌ NOT WORKING
-**Status: Same CLIP tokenizer issue affects exemplar mode**
-- **Error:** `TypeError: 'SimpleTokenizer' object is not callable`
-- **Tested:** 2025-12-26 - Exemplar bbox prompt failed at tokenization
-- **Fallback:** Uses automatic segmentation on area (approximation)
-- **Issue:** SAM3SemanticPredictor cannot initialize CLIP tokenizer
+**How to use:**
+1. Select SAM3 from model dropdown
+2. Enter text prompt (e.g., "buildings", "vehicles")
+3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"*
+4. Click "Auto-Segment All Objects"
 
-**💡 Current Implementation:**
-SAM3 currently uses **automatic instance segmentation** (stable and tested ✅) instead of `SAM3SemanticPredictor` (has CLIP/tokenizer bug ❌). This means:
-- ✅ **Auto-segment works perfectly**: Finds all objects automatically (verified in tests)
-- ❌ **Text prompts not functional**: CLIP tokenizer fails, uses auto-segment fallback
-- ❌ **Similar objects not functional**: Same tokenizer issue, uses auto-segment approximation
+### Similar Objects 🔍 ✅ WORKING
+**Status: Exemplar mode FIXED in v1.3**
+- **Fix:** Same CLIP tokenizer fix enables exemplar-based search
+- **Functionality:** Click one object to find all similar objects
+- **Technology:** Uses SAM3 exemplar mode with CLIP embeddings
+- **Tested:** ✅ Fully functional
 
-**Test Results (2025-12-26):**
+**How to use:**
+1. Select SAM3 from model dropdown
+2. Click "Find Similar" mode button
+3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"*
+4. Click on a reference object to find all similar ones
+
+**\*SAM3 Pro Licensing:**
+
+GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain development:
+
+- **Free Tier (Forever):**
+  - All SAM2/SAM2.1 features - unlimited
+  - SAM3 text prompts and similar mode on **Visible Extent (AOI)** - unlimited
+  - Perfect for most use cases!
+
+- **Pro Tier (Supports Development):**
+  - SAM3 text prompts and similar mode on **Entire Raster** with auto-tiling
+  - Ideal for production workflows and large-scale mapping
+  - Helps fund ongoing development, bug fixes, and new features
+
+- **Get License:** Contact **geoosamplugin@gmail.com**
+- **Activation:** Click "Manage License" button in plugin (offline validation)
+
+**Test Results (2025-12-28 - v1.3):**
 - ✅ SAM3 initialization: SUCCESS
-- ✅ Auto-segmentation: SUCCESS (5 objects detected)
-- ❌ Text prompts (CLIP): FAILED (tokenizer error)
-- ❌ Exemplar mode (CLIP): FAILED (tokenizer error)
+- ✅ Auto-segmentation: SUCCESS
+- ✅ Text prompts (CLIP): SUCCESS (tokenizer fixed)
+- ✅ Exemplar mode (CLIP): SUCCESS (tokenizer fixed)
+- ✅ Entire raster processing: SUCCESS (tiled processing with 1024px tiles)
 
 **📥 SAM3 Download:**
 - Downloads via Hugging Face with access token

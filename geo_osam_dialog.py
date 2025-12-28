@@ -2667,7 +2667,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Show activation form
             info_label = QtWidgets.QLabel(
                 "<h3>Activate SAM3 Pro License</h3>"
-                "<p>To purchase a license, please contact: <b>geoosamplugin@gmail.com</b></p>"
+                "<p>GeoOSAM is free and open-source. SAM3 Pro helps fund ongoing development.</p>"
+                "<p><b>Purchase License:</b> Contact <b>geoosamplugin@gmail.com</b></p>"
                 "<p><i>Note: Your email is used to validate the license key</i></p>"
             )
             info_label.setTextFormat(Qt.RichText)
@@ -2842,16 +2843,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if LicenseManager.has_raster_access():
             return True
 
-        # Show upgrade dialog
-        reply = QtWidgets.QMessageBox.information(
-            self,
-            "SAM3 Pro Feature",
-            "Entire raster processing is a SAM3 Pro feature.\n\n"
-            "<b>Free Tier:</b> Extent mode (visible area) - unlimited\n"
-            "<b>Pro Tier:</b> Entire raster with auto-tiling - requires license\n\n"
-            "Would you like to activate a license?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        # Show upgrade dialog with HTML support
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("SAM3 Pro Feature")
+        msg.setTextFormat(Qt.RichText)
+        msg.setText(
+            "Entire raster processing is a <b>SAM3 Pro</b> feature.<br><br>"
+            "<b>✓ Free Tier:</b> Extent mode (visible area) - unlimited<br>"
+            "<b>⭐ Pro Tier:</b> Entire raster with auto-tiling<br><br>"
+            "<i>Pro licensing helps fund development of GeoOSAM</i><br><br>"
+            "Would you like to activate a license?"
         )
+        msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+        reply = msg.exec_()
 
         if reply == QtWidgets.QMessageBox.Yes:
             self._show_license_dialog()
@@ -2871,10 +2876,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         if license_info['type'] == 'pro':
             self.licenseStatusLabel.setText(f"✅ {license_info['status']}")
-            self.licenseStatusLabel.setStyleSheet("color: green; font-weight: bold;")
+            self.licenseStatusLabel.setStyleSheet("color: green; font-weight: bold; font-size: 11px; padding: 5px;")
         else:
             self.licenseStatusLabel.setText(f"ℹ️ {license_info['status']}")
-            self.licenseStatusLabel.setStyleSheet("color: gray;")
+            self.licenseStatusLabel.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
 
     def _on_scope_changed(self, index):
         """Handle scope selection change"""
@@ -2888,16 +2893,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # If user selects 'full' without license, show upgrade dialog
         if scope == 'full' and not LicenseManager.has_raster_access():
-            # Show upgrade dialog
-            reply = QtWidgets.QMessageBox.information(
-                self,
-                "SAM3 Pro Feature",
-                "Entire raster processing is a SAM3 Pro feature.\n\n"
-                "<b>Free Tier:</b> Extent mode (visible area) - unlimited\n"
-                "<b>Pro Tier:</b> Entire raster with auto-tiling\n\n"
-                "Would you like to activate a license?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            # Show upgrade dialog with HTML support
+            msg = QtWidgets.QMessageBox(self)
+            msg.setWindowTitle("SAM3 Pro Feature")
+            msg.setTextFormat(Qt.RichText)
+            msg.setText(
+                "Entire raster processing is a <b>SAM3 Pro</b> feature.<br><br>"
+                "<b>✓ Free Tier:</b> Extent mode (visible area) - unlimited<br>"
+                "<b>⭐ Pro Tier:</b> Entire raster with auto-tiling<br><br>"
+                "<i>Pro licensing helps fund development of GeoOSAM</i><br><br>"
+                "Would you like to activate a license?"
             )
+            msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            msg.setIcon(QtWidgets.QMessageBox.Information)
+            reply = msg.exec_()
 
             if reply == QtWidgets.QMessageBox.Yes:
                 self._show_license_dialog()
