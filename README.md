@@ -32,11 +32,11 @@
 
 ### Available Models (v1.3)
 
-| Hardware Type      | Available Models                                | User Selection         |
-| ------------------ | ----------------------------------------------- | ---------------------- |
-| **GPU (>3GB)**     | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3    | 5 models via dropdown  |
-| **Apple Silicon**  | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3    | 5 models via dropdown  |
-| **CPU / Low GPU**  | SAM2.1_T/B/L (Ultralytics, CPU-optimized)      | 3 models via dropdown  |
+| Hardware Type     | Available Models                            | User Selection        |
+| ----------------- | ------------------------------------------- | --------------------- |
+| **GPU (>3GB)**    | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3 | 5 models via dropdown |
+| **Apple Silicon** | SAM2.1 Tiny/Small/Base+/Large (Meta) + SAM3 | 5 models via dropdown |
+| **CPU / Low GPU** | SAM2.1_T/B/L (Ultralytics, CPU-optimized)   | 3 models via dropdown |
 
 ### Model Sizes & Performance
 
@@ -68,6 +68,7 @@ Enable in QGIS Plugin Manager or download from GitHub
 ### 2. Load Imagery & Select Class
 
 **Supported Data Sources:**
+
 - 🗂️ Local raster files (GeoTIFF, JP2, etc.)
 - 🌐 ESRI services
 - 🗺️ Google Satellite, Bing Aerial (XYZ tiles)
@@ -93,7 +94,9 @@ _Export segmented polygons as shapefiles with detailed attributes_
 **SAM3 integration with semantic segmentation - CLIP tokenizer fixed!**
 
 ### Auto-Segment 🎯 ✅ PRODUCTION READY
+
 Automatically find ALL objects in an area without clicking:
+
 - Segments everything visible automatically
 - No prompts or clicking needed
 - Great for dense object detection
@@ -101,35 +104,42 @@ Automatically find ALL objects in an area without clicking:
 - **Tested:** ✅ Fully functional
 
 **How to use:**
+
 1. Select SAM3 from model dropdown (GPU required)
 2. Select "Auto-Segment" mode button
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"
 4. Click anywhere to trigger automatic segmentation
 
 ### Text Prompts 📝 ✅ WORKING
+
 **Status: CLIP tokenizer bug FIXED in v1.3**
+
 - **Fix:** Custom CLIP tokenizer monkey-patch applied at runtime
 - **Functionality:** Enter text like "building", "car", "tree" to find matching objects
 - **Accuracy:** High-quality semantic understanding via CLIP
 - **Tested:** ✅ Fully functional with all text prompts
 
 **How to use:**
+
 1. Select SAM3 from model dropdown
 2. Enter text prompt (e.g., "buildings", "vehicles")
-3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"*
+3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"\*
 4. Click "Auto-Segment All Objects"
 
 ### Similar Objects 🔍 ✅ WORKING
+
 **Status: Exemplar mode FIXED in v1.3**
+
 - **Fix:** Same CLIP tokenizer fix enables exemplar-based search
 - **Functionality:** Click one object to find all similar objects
 - **Technology:** Uses SAM3 exemplar mode with CLIP embeddings
 - **Tested:** ✅ Fully functional
 
 **How to use:**
+
 1. Select SAM3 from model dropdown
 2. Click "Find Similar" mode button
-3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"*
+3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"\*
 4. Click on a reference object to find all similar ones
 
 **\*SAM3 Pro Licensing:**
@@ -137,11 +147,13 @@ Automatically find ALL objects in an area without clicking:
 GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain development:
 
 - **Free Tier (Forever):**
+
   - All SAM2/SAM2.1 features - unlimited
   - SAM3 text prompts and similar mode on **Visible Extent (AOI)** - unlimited
   - Perfect for most use cases!
 
 - **Pro Tier (Supports Development):**
+
   - SAM3 text prompts and similar mode on **Entire Raster** with auto-tiling
   - Ideal for production workflows and large-scale mapping
   - Helps fund ongoing development, bug fixes, and new features
@@ -150,6 +162,7 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
 - **Activation:** Click "Manage License" button in plugin (offline validation)
 
 **Test Results (2025-12-28 - v1.3):**
+
 - ✅ SAM3 initialization: SUCCESS
 - ✅ Auto-segmentation: SUCCESS
 - ✅ Text prompts (CLIP): SUCCESS (tokenizer fixed)
@@ -157,11 +170,13 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
 - ✅ Entire raster processing: SUCCESS (tiled processing with 1024px tiles)
 
 **📥 SAM3 Download:**
+
 - Downloads via Hugging Face with access token
 - Token prompt appears in QGIS on first use
 - Requires Read token from https://huggingface.co/settings/tokens
 
 **⚠️ Requirements:**
+
 - GPU with >3GB memory (CUDA or Apple Silicon)
 - Ultralytics >= 8.3.237
 - Hugging Face account with access token
@@ -332,11 +347,11 @@ if torch.cuda.is_available():
 
 **📥 Download Details:**
 
-| Model Type           | How It Downloads                          | Where Stored                       |
-| -------------------- | ----------------------------------------- | ---------------------------------- |
-| **SAM2.1 (GPU)**     | Direct download with progress dialog      | Plugin checkpoints folder          |
-| **SAM2.1 T/B/L (CPU)**| Ultralytics auto-download (notification) | `~/.ultralytics/weights/`          |
-| **SAM3**             | Hugging Face with token prompt            | Plugin folder or Ultralytics cache |
+| Model Type             | How It Downloads                         | Where Stored                       |
+| ---------------------- | ---------------------------------------- | ---------------------------------- |
+| **SAM2.1 (GPU)**       | Direct download with progress dialog     | Plugin checkpoints folder          |
+| **SAM2.1 T/B/L (CPU)** | Ultralytics auto-download (notification) | `~/.ultralytics/weights/`          |
+| **SAM3**               | Hugging Face with token prompt           | Plugin folder or Ultralytics cache |
 
 **⚡ Performance Highlights:**
 
@@ -506,6 +521,7 @@ If you use GeoOSAM in your research, please cite:
   - AOI mode: Fast processing of visible extent
   - Full raster mode: Auto-tiling with 1024px tiles, 128px overlap
   - Progress tracking for tiled operations
+  - **🛑 Cancel button**: Abort long-running tiled operations at any time
 - **📥 Automatic Downloads**: All models download on-demand
   - SAM2.1 (GPU): Progress bar with percentage complete
   - SAM2.1 T/B/L (CPU): Ultralytics auto-download with notification

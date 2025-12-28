@@ -934,6 +934,7 @@ class TiledSegmentationWorker(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(str, int, int)  # message, current_tile, total_tiles
     tile_completed = pyqtSignal(int, int)  # objects_found, tile_index
+    cancelled = pyqtSignal()  # Emitted when processing is cancelled
 
     def __init__(self, predictor, raster_path, request_type, text_prompt=None, bbox=None,
                  current_class=None, class_color=None, tile_size=1024, overlap=128):
@@ -959,9 +960,15 @@ class TiledSegmentationWorker(QThread):
         self.overlap = overlap
         self.total_objects_found = 0
         self.tile_results = []  # List of (features, debug_info, transform) tuples
+        self.cancel_requested = False  # Flag for cancellation
 
         print("🔧 TiledSegmentationWorker.__init__() COMPLETE")
         sys.stdout.flush()
+
+    def cancel(self):
+        """Request cancellation of processing"""
+        print("🛑 Cancellation requested")
+        self.cancel_requested = True
 
     def run(self):
         """Process raster in tiles"""
@@ -1063,10 +1070,11 @@ class TiledSegmentationWorker(QThread):
 
                 # Process each tile
                 for tile_idx, window in enumerate(tiles):
-                    # Check if thread should stop
-                    if self.isInterruptionRequested():
-                        print("⚠️  Processing cancelled by user")
-                        break
+                    # Check for cancellation request
+                    if self.cancel_requested:
+                        print("🛑 Processing cancelled by user")
+                        self.cancelled.emit()
+                        return
 
                     try:
                         print(f"\n--- Tile {tile_idx+1}/{total_tiles} ---")
@@ -4838,6 +4846,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.tiled_worker.error.connect(self._on_tiled_segmentation_error)
             self.tiled_worker.progress.connect(self._on_tiled_segmentation_progress)
             self.tiled_worker.tile_completed.connect(self._on_tile_completed)
+            self.tiled_worker.cancelled.connect(self._on_tiled_segmentation_cancelled)
+
+            # Create and show cancel button
+            self._create_cancel_button()
 
             # Start worker
             self.tiled_worker.start()
@@ -4889,6 +4901,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.tiled_worker.error.connect(self._on_tiled_segmentation_error)
             self.tiled_worker.progress.connect(self._on_tiled_segmentation_progress)
             self.tiled_worker.tile_completed.connect(self._on_tile_completed)
+            self.tiled_worker.cancelled.connect(self._on_tiled_segmentation_cancelled)
+
+            # Create and show cancel button
+            self._create_cancel_button()
 
             # Start worker
             self.tiled_worker.start()
@@ -5054,6 +5070,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Cleanup
         self.is_processing = False
         self._set_ui_enabled(True)
+        self._remove_cancel_button()
 
         if hasattr(self, 'tiled_worker'):
             self.tiled_worker.deleteLater()
@@ -5069,6 +5086,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Cleanup
         self.is_processing = False
         self._set_ui_enabled(True)
+        self._remove_cancel_button()
 
         if hasattr(self, 'tiled_worker'):
             self.tiled_worker.deleteLater()
@@ -5076,6 +5094,116 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Process next in queue
         self._process_queue()
+
+    def _on_tiled_segmentation_cancelled(self):
+        """Handle cancellation of tiled processing"""
+        print("⚠️ Tiled processing cancelled by user")
+        self._update_status("⚠️ Processing cancelled by user", "warning")
+
+        # Add any features that were created before cancellation to undo stack
+        # This allows user to undo partial results from cancelled operation
+        if hasattr(self, '_tiled_initial_feature_ids'):
+            result_layer = self._get_or_create_class_layer(self.current_class)
+            if result_layer and result_layer.isValid():
+                # Get current feature IDs after partial processing
+                current_feature_ids = set(f.id() for f in result_layer.getFeatures())
+                # Find new features (ones that were added before cancellation)
+                new_feature_ids = list(current_feature_ids - self._tiled_initial_feature_ids)
+
+                if new_feature_ids:
+                    self.undo_stack.append((self.current_class, new_feature_ids))
+                    print(f"✅ Added {len(new_feature_ids)} partially completed features to undo stack")
+                else:
+                    print(f"⚠️  No features were added before cancellation")
+
+            # Clean up initial tracking
+            delattr(self, '_tiled_initial_feature_ids')
+
+        # Cleanup
+        self.is_processing = False
+
+        # Debug: Check undo stack state
+        print(f"🔍 DEBUG: undo_stack length = {len(self.undo_stack) if hasattr(self, 'undo_stack') else 'NO STACK'}")
+        print(f"🔍 DEBUG: undo button enabled before _set_ui_enabled = {self.undoBtn.isEnabled()}")
+
+        self._set_ui_enabled(True)
+
+        print(f"🔍 DEBUG: undo button enabled after _set_ui_enabled = {self.undoBtn.isEnabled()}")
+
+        self._remove_cancel_button()
+
+        print(f"🔍 DEBUG: undo button enabled after _remove_cancel_button = {self.undoBtn.isEnabled()}")
+
+        if hasattr(self, 'tiled_worker'):
+            self.tiled_worker.deleteLater()
+            self.tiled_worker = None
+
+        # Process next in queue
+        self._process_queue()
+
+    def _create_cancel_button(self):
+        """Create and show cancel button for tiled processing (replaces undo button during processing)"""
+        # Simply hide undo button and show cancel button (swap them)
+        if not hasattr(self, 'cancelTiledBtn'):
+            # Create cancel button with same style as undo button
+            self.cancelTiledBtn = QtWidgets.QPushButton("🛑 Cancel Processing")
+            self.cancelTiledBtn.setCursor(Qt.PointingHandCursor)
+            self.cancelTiledBtn.setStyleSheet("""
+                QPushButton {
+                    font-size: 11px; font-weight: 600; padding: 10px;
+                    border-radius: 8px; background: #DC2626; color: #FFF;
+                    border: 1px solid #DC2626;
+                }
+                QPushButton:hover { background: #B91C1C; }
+                QPushButton:disabled {
+                    background: #FCA5A5; color: #FFFFFF;
+                    border: 1px solid #DC2626;
+                }
+            """)
+            self.cancelTiledBtn.setAutoDefault(False)
+            self.cancelTiledBtn.setDefault(False)
+            self.cancelTiledBtn.setFocusPolicy(Qt.NoFocus)
+            self.cancelTiledBtn.clicked.connect(self._cancel_tiled_processing)
+
+            # Find the undo button's parent layout and insert cancel button at same position
+            parent_layout = self.undoBtn.parent().layout()
+            if parent_layout:
+                # Get undo button index
+                for i in range(parent_layout.count()):
+                    item = parent_layout.itemAt(i)
+                    if item and item.widget() == self.undoBtn:
+                        parent_layout.insertWidget(i, self.cancelTiledBtn)
+                        break
+
+        # Hide undo button and show cancel button
+        self.undoBtn.setVisible(False)
+
+        # Reset button state
+        self.cancelTiledBtn.setEnabled(True)
+        self.cancelTiledBtn.setText("🛑 Cancel Processing")
+        self.cancelTiledBtn.setVisible(True)
+        print("✅ Cancel button shown (undo button hidden)")
+
+    def _remove_cancel_button(self):
+        """Remove/hide cancel button after tiled processing (restore undo button)"""
+        if hasattr(self, 'cancelTiledBtn'):
+            self.cancelTiledBtn.setVisible(False)
+            print("✅ Cancel button hidden")
+
+        # Restore undo button visibility
+        print(f"🔍 DEBUG _remove_cancel_button: undo button state before setVisible = enabled:{self.undoBtn.isEnabled()}, visible:{self.undoBtn.isVisible()}")
+        self.undoBtn.setVisible(True)
+        print(f"🔍 DEBUG _remove_cancel_button: undo button state after setVisible = enabled:{self.undoBtn.isEnabled()}, visible:{self.undoBtn.isVisible()}")
+
+    def _cancel_tiled_processing(self):
+        """Cancel ongoing tiled processing"""
+        if hasattr(self, 'tiled_worker') and self.tiled_worker:
+            print("🛑 User clicked cancel button")
+            self.tiled_worker.cancel()
+            # Disable cancel button to prevent double-clicks
+            if hasattr(self, 'cancelTiledBtn'):
+                self.cancelTiledBtn.setEnabled(False)
+                self.cancelTiledBtn.setText("Cancelling...")
 
     def _convert_mask_to_features(self, mask, mask_transform):
         """Convert a single mask to QgsFeature objects"""
@@ -6457,7 +6585,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.selectFolderBtn.setEnabled(True)
         self.saveDebugSwitch.setEnabled(True)
 
+        print(f"🔍 DEBUG _set_ui_enabled: enabled={enabled}, undo_stack={len(self.undo_stack) if hasattr(self, 'undo_stack') else 'NO STACK'}")
+
         if enabled and self.undo_stack:
+            print(f"🔍 DEBUG _set_ui_enabled: Setting undo button to ENABLED (stack has {len(self.undo_stack)} items)")
             self.undoBtn.setEnabled(True)
         elif not enabled:
             pass  # Keep undo available during processing

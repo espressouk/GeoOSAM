@@ -103,7 +103,6 @@ def apply_sam3_clip_fix():
         VETextEncoder.forward = _fixed_forward
 
         print("✅ SAM3 CLIP tokenizer fix applied successfully!")
-        print("   Text prompts and exemplar mode should now work")
         return True
 
     except Exception as e:
