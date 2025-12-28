@@ -2618,6 +2618,295 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QtWidgets.QMessageBox.critical(self, "Download Error", str(e))
             return False
 
+    def _show_license_dialog(self):
+        """Show license key entry/management dialog"""
+        from geo_osam_license import LicenseManager
+
+        # Create dialog
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("GeoOSAM SAM3 Pro License")
+        dialog.setMinimumWidth(500)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        # Check if already licensed
+        license_info = LicenseManager.get_license_info()
+        is_licensed = license_info['type'] == 'pro'
+
+        if is_licensed:
+            # Show current license info with option to change
+            info_label = QtWidgets.QLabel(
+                f"<h3>✅ License Active</h3>"
+                f"<p><b>Email:</b> {license_info['email']}</p>"
+                f"<p><b>Status:</b> {license_info['status']}</p>"
+            )
+            info_label.setTextFormat(Qt.RichText)
+            layout.addWidget(info_label)
+
+            # Add spacer
+            layout.addSpacing(20)
+
+            # Buttons
+            button_layout = QtWidgets.QHBoxLayout()
+
+            change_btn = QtWidgets.QPushButton("Change License")
+            change_btn.clicked.connect(lambda: self._change_license(dialog))
+            button_layout.addWidget(change_btn)
+
+            remove_btn = QtWidgets.QPushButton("Remove License")
+            remove_btn.clicked.connect(lambda: self._remove_license(dialog))
+            button_layout.addWidget(remove_btn)
+
+            close_btn = QtWidgets.QPushButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            button_layout.addWidget(close_btn)
+
+            layout.addLayout(button_layout)
+
+        else:
+            # Show activation form
+            info_label = QtWidgets.QLabel(
+                "<h3>Activate SAM3 Pro License</h3>"
+                "<p>To purchase a license, please contact: <b>geoosamplugin@gmail.com</b></p>"
+                "<p><i>Note: Your email is used to validate the license key</i></p>"
+            )
+            info_label.setTextFormat(Qt.RichText)
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+
+            layout.addSpacing(10)
+
+            # Email input
+            email_label = QtWidgets.QLabel("Email Address:")
+            layout.addWidget(email_label)
+
+            email_input = QtWidgets.QLineEdit()
+            email_input.setPlaceholderText("your.email@example.com")
+            layout.addWidget(email_input)
+
+            layout.addSpacing(10)
+
+            # License key input
+            key_label = QtWidgets.QLabel("License Key:")
+            layout.addWidget(key_label)
+
+            key_input = QtWidgets.QLineEdit()
+            key_input.setPlaceholderText("GEOSAM3-XXXXX-XXXXX-XXXXX-XXXXX")
+            layout.addWidget(key_input)
+
+            layout.addSpacing(20)
+
+            # Feature info
+            features_label = QtWidgets.QLabel(
+                "<b>SAM3 Pro Features:</b><br>"
+                "✅ Text prompts on entire raster (unlimited)<br>"
+                "✅ Similar object detection on entire raster (unlimited)<br>"
+                "✅ Automatic tile processing for large rasters"
+            )
+            features_label.setTextFormat(Qt.RichText)
+            features_label.setStyleSheet("background-color: #f0f0f0; padding: 10px; border-radius: 5px;")
+            layout.addWidget(features_label)
+
+            layout.addSpacing(20)
+
+            # Buttons
+            button_layout = QtWidgets.QHBoxLayout()
+
+            activate_btn = QtWidgets.QPushButton("Activate License")
+            activate_btn.setDefault(True)
+            activate_btn.clicked.connect(
+                lambda: self._activate_license(dialog, email_input.text(), key_input.text())
+            )
+            button_layout.addWidget(activate_btn)
+
+            cancel_btn = QtWidgets.QPushButton("Cancel")
+            cancel_btn.clicked.connect(dialog.reject)
+            button_layout.addWidget(cancel_btn)
+
+            layout.addLayout(button_layout)
+
+        dialog.exec_()
+
+    def _activate_license(self, dialog, email, key):
+        """Validate and activate entered license key"""
+        from geo_osam_license import LicenseManager
+
+        # Validate inputs
+        email = email.strip()
+        key = key.strip()
+
+        if not email:
+            QtWidgets.QMessageBox.warning(
+                dialog,
+                "Email Required",
+                "Please enter your email address."
+            )
+            return
+
+        if not key:
+            QtWidgets.QMessageBox.warning(
+                dialog,
+                "License Key Required",
+                "Please enter your license key."
+            )
+            return
+
+        # Validate license
+        if LicenseManager.validate_license(key, email):
+            # Save license
+            if LicenseManager.save_license(key, email):
+                QtWidgets.QMessageBox.information(
+                    dialog,
+                    "License Activated",
+                    f"✅ License activated successfully!\n\n"
+                    f"Email: {email}\n"
+                    f"You now have access to SAM3 Pro features:\n"
+                    f"• Entire raster processing\n"
+                    f"• Unlimited text prompts\n"
+                    f"• Unlimited similar object detection"
+                )
+
+                # Update UI
+                self._update_license_status()
+
+                # Close dialog
+                dialog.accept()
+            else:
+                QtWidgets.QMessageBox.critical(
+                    dialog,
+                    "Activation Failed",
+                    "Failed to save license. Please try again."
+                )
+        else:
+            QtWidgets.QMessageBox.critical(
+                dialog,
+                "Invalid License",
+                "❌ Invalid license key for this email address.\n\n"
+                "Please check:\n"
+                "• Email address is correct\n"
+                "• License key is copied correctly\n"
+                "• No extra spaces or characters\n\n"
+                "If the problem persists, contact support."
+            )
+
+    def _change_license(self, dialog):
+        """Allow user to change their license"""
+        from geo_osam_license import LicenseManager
+
+        reply = QtWidgets.QMessageBox.question(
+            dialog,
+            "Change License",
+            "Are you sure you want to change your license?\n\n"
+            "Your current license will be removed.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            LicenseManager.clear_license()
+            self._update_license_status()
+            dialog.accept()
+            # Reopen dialog in activation mode
+            self._show_license_dialog()
+
+    def _remove_license(self, dialog):
+        """Remove the current license"""
+        from geo_osam_license import LicenseManager
+
+        reply = QtWidgets.QMessageBox.question(
+            dialog,
+            "Remove License",
+            "Are you sure you want to remove your license?\n\n"
+            "You will lose access to SAM3 Pro features:\n"
+            "• Entire raster processing\n"
+            "• You'll be limited to extent mode only\n\n"
+            "You can re-activate later with the same key.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            LicenseManager.clear_license()
+            self._update_license_status()
+            QtWidgets.QMessageBox.information(
+                dialog,
+                "License Removed",
+                "License removed successfully.\n\n"
+                "You now have SAM3 Free tier access:\n"
+                "• Extent mode (visible area) - unlimited"
+            )
+            dialog.accept()
+
+    def _check_raster_access(self):
+        """Check if user can access entire raster mode"""
+        from geo_osam_license import LicenseManager
+
+        if LicenseManager.has_raster_access():
+            return True
+
+        # Show upgrade dialog
+        reply = QtWidgets.QMessageBox.information(
+            self,
+            "SAM3 Pro Feature",
+            "Entire raster processing is a SAM3 Pro feature.\n\n"
+            "<b>Free Tier:</b> Extent mode (visible area) - unlimited\n"
+            "<b>Pro Tier:</b> Entire raster with auto-tiling - requires license\n\n"
+            "Would you like to activate a license?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply == QtWidgets.QMessageBox.Yes:
+            self._show_license_dialog()
+            # Check again after dialog
+            return LicenseManager.has_raster_access()
+
+        return False
+
+    def _update_license_status(self):
+        """Update license status label in UI"""
+        from geo_osam_license import LicenseManager
+
+        if not hasattr(self, 'licenseStatusLabel'):
+            return
+
+        license_info = LicenseManager.get_license_info()
+
+        if license_info['type'] == 'pro':
+            self.licenseStatusLabel.setText(f"✅ {license_info['status']}")
+            self.licenseStatusLabel.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            self.licenseStatusLabel.setText(f"ℹ️ {license_info['status']}")
+            self.licenseStatusLabel.setStyleSheet("color: gray;")
+
+    def _on_scope_changed(self, index):
+        """Handle scope selection change"""
+        from geo_osam_license import LicenseManager
+
+        # Only check if SAM3 model is selected
+        if self.model_choice != "SAM3":
+            return
+
+        scope = self.scopeComboBox.currentData()
+
+        # If user selects 'full' without license, show upgrade dialog
+        if scope == 'full' and not LicenseManager.has_raster_access():
+            # Show upgrade dialog
+            reply = QtWidgets.QMessageBox.information(
+                self,
+                "SAM3 Pro Feature",
+                "Entire raster processing is a SAM3 Pro feature.\n\n"
+                "<b>Free Tier:</b> Extent mode (visible area) - unlimited\n"
+                "<b>Pro Tier:</b> Entire raster with auto-tiling\n\n"
+                "Would you like to activate a license?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                self._show_license_dialog()
+
+            # Revert to extent mode
+            self.scopeComboBox.blockSignals(True)  # Prevent recursive calls
+            self.scopeComboBox.setCurrentIndex(0)  # Back to 'aoi'
+            self.scopeComboBox.blockSignals(False)
+
     def _init_save_directories(self):
         """Initialize output directories"""
         self.shapefile_save_dir = pathlib.Path.home() / "GeoOSAM_shapefiles"
@@ -2811,6 +3100,42 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         main_layout.addWidget(model_card)
 
+        # --- SAM3 License Status (only show if SAM3 available or selected) ---
+        self.licenseCard = None
+        self.licenseStatusLabel = None
+        self.manageLicenseBtn = None
+
+        if self.model_choice == "SAM3" or self.available_models.get('SAM3', False):
+            license_card, license_layout = create_card("SAM3 Pro License", "🔑")
+            self.licenseCard = license_card
+
+            # License status label
+            self.licenseStatusLabel = QtWidgets.QLabel()
+            self.licenseStatusLabel.setWordWrap(True)
+            self.licenseStatusLabel.setStyleSheet("font-size: 11px; padding: 5px;")
+            license_layout.addWidget(self.licenseStatusLabel)
+
+            # Manage License button
+            self.manageLicenseBtn = QtWidgets.QPushButton("Manage License")
+            self.manageLicenseBtn.setCursor(Qt.PointingHandCursor)
+            self.manageLicenseBtn.setStyleSheet("""
+                QPushButton {
+                    font-size: 11px; padding: 6px 16px; border-radius: 8px;
+                    background: #1570EF; color: #FFF; border: none;
+                }
+                QPushButton:hover { background: #1366D6; }
+            """)
+            self.manageLicenseBtn.setAutoDefault(False)
+            self.manageLicenseBtn.setDefault(False)
+            self.manageLicenseBtn.setFocusPolicy(Qt.NoFocus)
+            self.manageLicenseBtn.clicked.connect(self._show_license_dialog)
+            license_layout.addWidget(self.manageLicenseBtn)
+
+            # Update license status
+            self._update_license_status()
+
+            main_layout.addWidget(license_card)
+
         # --- Output Settings ---
         output_card, output_layout = create_card("Output Settings", "📂")
         folder_layout = QtWidgets.QHBoxLayout()
@@ -2936,6 +3261,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QComboBox:hover { border-color: #1570EF; }
         """)
         self.scopeComboBox.setFocusPolicy(Qt.NoFocus)
+        self.scopeComboBox.currentIndexChanged.connect(self._on_scope_changed)
         scope_layout.addWidget(scope_label)
         scope_layout.addWidget(self.scopeComboBox)
         scope_layout.setSpacing(8)
@@ -3431,6 +3757,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Get scope setting
         scope = self.scopeComboBox.currentData()  # 'aoi' or 'full'
 
+        # Check license for full raster mode
+        if scope == 'full':
+            if not self._check_raster_access():
+                return  # User denied or no license
+
         # Determine bbox based on scope
         bbox = None
         if scope == 'aoi':
@@ -3500,6 +3831,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Show/hide text prompt card
         self.textPromptCard.setVisible(is_sam3)
+
+        # Show/hide license card
+        if self.licenseCard:
+            self.licenseCard.setVisible(is_sam3)
+            if is_sam3:
+                self._update_license_status()
 
         # Update similar mode button visibility
         self.similarModeBtn.setVisible(is_sam3)
@@ -3813,6 +4150,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             bbox = self._point_to_exemplar_bbox(pt)
             # Get scope setting for similar mode
             scope = self.scopeComboBox.currentData() if hasattr(self, 'scopeComboBox') else 'aoi'
+
+            # Check license for full raster mode
+            if scope == 'full':
+                if not self._check_raster_access():
+                    return  # User denied or no license
+
             request = {
                 'type': 'similar',
                 'point': pt,

@@ -78,3 +78,6 @@ test/data/
 
 # SAM2 Model
 *.pt
+
+# License key generation tools (PRIVATE - DO NOT COMMIT)
+tools/
