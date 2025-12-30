@@ -149,7 +149,7 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
 - **Free Tier (Forever):**
 
   - All SAM2/SAM2.1 features - unlimited
-  - SAM3 text prompts and similar mode on **Visible Extent (AOI)** - unlimited
+  - SAM3 point, bbox, text prompts and similar mode on **Visible Extent (AOI)** - unlimited
   - Perfect for most use cases!
 
 - **Pro Tier - Early Access ($15):**
@@ -160,7 +160,7 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
   - Your support directly funds bug fixes and new features
   - One-time payment, lifetime v1.x updates, 1 device per license
   - Works offline (30-day cache), best-effort support
-  - **Early pricing:** $15 now → will increase to $45-99 when stable
+  - **Early supporter pricing** - price may increase as features stabilize
 
 - **Get License:** Email **geoosamplugin@gmail.com**
 - **Activation:** Click "Manage License" button in plugin
