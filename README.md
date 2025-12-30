@@ -152,14 +152,18 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
   - SAM3 text prompts and similar mode on **Visible Extent (AOI)** - unlimited
   - Perfect for most use cases!
 
-- **Pro Tier (Supports Development):**
+- **Pro Tier - Early Access ($15):**
 
   - SAM3 text prompts and similar mode on **Entire Raster** with auto-tiling
   - Ideal for production workflows and large-scale mapping
-  - Helps fund ongoing development, bug fixes, and new features
+  - **⚠️ Experimental:** SAM3 is under active development - bugs expected!
+  - Your support directly funds bug fixes and new features
+  - One-time payment, lifetime v1.x updates, 1 device per license
+  - Works offline (30-day cache), best-effort support
+  - **Early pricing:** $15 now → will increase to $45-99 when stable
 
-- **Get License:** Contact **geoosamplugin@gmail.com**
-- **Activation:** Click "Manage License" button in plugin (offline validation)
+- **Get License:** Email **geoosamplugin@gmail.com**
+- **Activation:** Click "Manage License" button in plugin
 
 **Test Results (v1.3):**
 
@@ -177,9 +181,15 @@ GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain developm
 
 **⚠️ Requirements:**
 
-- GPU with >3GB memory (CUDA or Apple Silicon)
+- **GPU >3GB VRAM:**
+  - ✅ **NVIDIA GPU (CUDA)** - Recommended, best performance
+  - ✅ **Apple Silicon (M1/M2/M3)** - Supported, good performance
+  - ❌ **AMD GPU** - Not officially supported (ROCm is unreliable in practice)
+  - ❌ **CPU-only** - SAM3 not available (use SAM2.1 instead)
 - Ultralytics >= 8.3.237
 - Hugging Face account with access token
+
+**Note:** If you have AMD GPU or CPU-only, SAM3 features won't work. Use SAM2.1 with point/bbox/auto segmentation instead.
 
 ## 🛠 Known Issues
 
