@@ -93,6 +93,7 @@ _Export segmented polygons as shapefiles with detailed attributes_
 
 **SAM3 integration with semantic segmentation**
 
+<!--
 ### Auto-Segment 🎯
 
 Automatically find ALL objects in an area without clicking:
@@ -108,7 +109,7 @@ Automatically find ALL objects in an area without clicking:
 1. Select SAM3 from model dropdown (GPU required)
 2. Select "Auto-Segment" mode button
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"
-4. Click anywhere to trigger automatic segmentation
+4. Click anywhere to trigger automatic segmentation -->
 
 ### Text Prompts 📝
 
