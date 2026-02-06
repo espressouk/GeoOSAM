@@ -254,7 +254,7 @@ class SAM3PredictorWrapper:
         self.current_image = image
 
         # Hash image to avoid re-encoding same image
-        img_hash = hashlib.md5(image.tobytes()).hexdigest()
+        img_hash = hashlib.md5(image.tobytes(), usedforsecurity=False).hexdigest()
 
         if img_hash == self.image_hash and self.cached_image_path and os.path.exists(self.cached_image_path):
             # Reuse cached image
