@@ -1472,6 +1472,12 @@ class OptimizedSAM2Worker(QThread):
                 # STEP 2: Use the segmented mask as exemplar to find similar objects
                 self.progress.emit("🔍 Step 2/2: Finding similar objects...")
 
+                # Normalize exemplar_mask to uint8 (0-255) if needed
+                if exemplar_mask.max() <= 1.0:
+                    exemplar_mask = (exemplar_mask * 255).astype(np.uint8)
+                else:
+                    exemplar_mask = exemplar_mask.astype(np.uint8)
+
                 # Get tight bbox around the segmented exemplar
                 ys, xs = np.where(exemplar_mask > 127)
                 if len(xs) == 0 or len(ys) == 0:
