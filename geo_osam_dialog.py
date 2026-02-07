@@ -1,5 +1,13 @@
 import sys
 import os
+
+# Fix for QGIS on Windows setting sys.stderr/stdout to None during plugin loading,
+# which causes numpy import to crash with: AttributeError: 'NoneType' has no attribute 'write'
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+
 from hydra.core.global_hydra import GlobalHydra
 from hydra import initialize_config_module, compose
 from shapely.geometry import shape
@@ -39,7 +47,7 @@ from qgis.core import (
     QgsMapSettings,
     Qgis
 )
-from qgis.gui import QgsRubberBand, QgsMapTool
+from qgis.gui import QgsRubberBand, QgsMapTool, QgsVertexMarker
 from qgis.PyQt import QtWidgets, QtCore, QtGui
 
 # fmt: off
@@ -150,12 +158,18 @@ try:
             try:
                 if point_coords is not None:
                     if len(point_coords) > 0:
-                        point = point_coords[0]
-                        x, y = int(point[0]), int(point[1])
+                        points = [[int(p[0]), int(p[1])] for p in point_coords]
+                        labels = [int(l) for l in point_labels] if point_labels is not None else [1] * len(points)
+                        # Multi-point: wrap in extra list so Ultralytics treats all points as one object
+                        # Single-point: keep flat format for compatibility with all modes
+                        if len(points) > 1:
+                            pts_arg, lbl_arg = [points], [labels]
+                        else:
+                            pts_arg, lbl_arg = points, labels
                         results = self.model.predict(
                             source=self.image,
-                            points=[[x, y]],
-                            labels=[1],
+                            points=pts_arg,
+                            labels=lbl_arg,
                             verbose=False
                         )
                     else:
@@ -364,13 +378,19 @@ class SAM3PredictorWrapper:
         # Classic point/bbox mode - SAM3 supports these too
         if point_coords is not None:
             try:
-                point = point_coords[0]
-                x, y = int(point[0]), int(point[1])
+                points = [[int(p[0]), int(p[1])] for p in point_coords]
+                labels = [int(l) for l in point_labels] if point_labels is not None else [1] * len(points)
                 self._reset_predictor_if_semantic()
+                # Multi-point: wrap in extra list so Ultralytics treats all points as one object
+                # Single-point: keep flat format for compatibility with all modes
+                if len(points) > 1:
+                    pts_arg, lbl_arg = [points], [labels]
+                else:
+                    pts_arg, lbl_arg = points, labels
                 results = self.model.predict(
                     source=self.current_image,
-                    points=[[x, y]],
-                    labels=[1],
+                    points=pts_arg,
+                    labels=lbl_arg,
                     verbose=False,
                     save=False
                 )
@@ -2071,19 +2091,71 @@ class EnhancedPointClickTool(QgsMapTool):
         self.point_rubber.setIconSize(12)
         self.point_rubber.setWidth(4)
 
+        # Multi-point accumulation (Shift=positive, Ctrl=negative)
+        self.accumulated_points = []  # list of (QgsPointXY, label) where label=1 positive, 0 negative
+        self.point_markers = []  # QgsVertexMarker instances for visual feedback
+
     def canvasReleaseEvent(self, e):
         map_point = self.canvas.getCoordinateTransform().toMapCoordinates(e.pos())
+
+        if e.modifiers() & QtCore.Qt.ShiftModifier:
+            # Shift+click: accumulate positive point
+            self.accumulated_points.append((map_point, 1))
+            self._add_marker(map_point, positive=True)
+            return
+        elif e.modifiers() & QtCore.Qt.ControlModifier:
+            # Ctrl+click: accumulate negative point
+            self.accumulated_points.append((map_point, 0))
+            self._add_marker(map_point, positive=False)
+            return
+
+        # Normal click: show red dot and trigger prediction
         self.point_rubber.reset(QgsWkbTypes.PointGeometry)
         self.point_rubber.addPoint(map_point, True)
         self.canvas.refresh()
-        self.cb(map_point)
+
+        if self.accumulated_points:
+            # Multi-point mode: add this click as positive, send all points
+            self.accumulated_points.append((map_point, 1))
+            points = self.accumulated_points.copy()
+            self._clear_markers()
+            self.accumulated_points = []
+            self.cb(map_point, points)
+        else:
+            # Single-point mode (unchanged behavior)
+            self.cb(map_point, None)
+
+    def _add_marker(self, point, positive=True):
+        """Add a +/- marker on the map"""
+        marker = QgsVertexMarker(self.canvas)
+        if positive:
+            marker.setIconType(QgsVertexMarker.ICON_CROSS)
+            marker.setColor(QtGui.QColor(0, 200, 0))  # Green for positive
+        else:
+            marker.setIconType(QgsVertexMarker.ICON_X)
+            marker.setColor(QtGui.QColor(255, 0, 0))  # Red for negative
+        marker.setIconSize(14)
+        marker.setPenWidth(3)
+        marker.setCenter(point)
+        self.point_markers.append(marker)
+        self.canvas.refresh()
+
+    def _clear_markers(self):
+        """Remove all +/- markers from the map"""
+        for marker in self.point_markers:
+            self.canvas.scene().removeItem(marker)
+        self.point_markers = []
 
     def deactivate(self):
         self.point_rubber.reset(QgsWkbTypes.PointGeometry)
+        self._clear_markers()
+        self.accumulated_points = []
         super().deactivate()
 
     def clear_feedback(self):
         self.point_rubber.reset(QgsWkbTypes.PointGeometry)
+        self._clear_markers()
+        self.accumulated_points = []
         self.canvas.refresh()
 
 class EnhancedBBoxClickTool(QgsMapTool):
@@ -2229,6 +2301,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         '255,192,203', '165,42,42', '0,250,154', '255,0,255', '127,255,212'
     ]
 
+    EXPORT_FORMATS = {
+        'GeoPackage (.gpkg)': {'driver': 'GPKG', 'ext': '.gpkg'},
+        'ESRI Shapefile (.shp)': {'driver': 'ESRI Shapefile', 'ext': '.shp'},
+        'GeoJSON (.geojson)': {'driver': 'GeoJSON', 'ext': '.geojson'},
+        'FlatGeobuf (.fgb)': {'driver': 'FlatGeobuf', 'ext': '.fgb'},
+    }
+
     def __init__(self, iface, parent=None):
         super().__init__("", parent)
         self.iface = iface
@@ -2258,12 +2337,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.keep_raster_selected = True
 
         # Output management
-        self.shapefile_save_dir = None
+        self.export_save_dir = None
         self.mask_save_dir = None
         self.save_debug_masks = False
 
         # Undo functionality
         self.undo_stack = []
+
+        # Multi-point request context (for Shift/Ctrl point accumulation)
+        self.current_request = None
 
         # Processing queue system
         self.processing_queue = []
@@ -2932,9 +3014,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _init_save_directories(self):
         """Initialize output directories"""
-        self.shapefile_save_dir = pathlib.Path.home() / "GeoOSAM_shapefiles"
+        self.export_save_dir = pathlib.Path.home() / "GeoOSAM_output"
         self.mask_save_dir = pathlib.Path.home() / "GeoOSAM_masks"
-        self.shapefile_save_dir.mkdir(exist_ok=True)
+        self.export_save_dir.mkdir(exist_ok=True)
 
     def _connect_selection_signals(self):
         """Connect signals for layer management (simplified - no delete button)"""
@@ -3180,6 +3262,26 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         folder_layout.addStretch()
         folder_layout.addWidget(self.selectFolderBtn)
         output_layout.addLayout(folder_layout)
+
+        format_layout = QtWidgets.QHBoxLayout()
+        format_label = QtWidgets.QLabel("Export format")
+        format_label.setStyleSheet("font-size: 11px; color: #475467;")
+        self.formatComboBox = QtWidgets.QComboBox()
+        self.formatComboBox.setStyleSheet("""
+            QComboBox {
+                padding: 8px 10px; font-size: 11px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox:hover { border: 1px solid #1570EF; }
+        """)
+        self.formatComboBox.setFocusPolicy(Qt.NoFocus)
+        for fmt in self.EXPORT_FORMATS:
+            self.formatComboBox.addItem(fmt)
+        format_layout.addWidget(format_label)
+        format_layout.addStretch()
+        format_layout.addWidget(self.formatComboBox)
+        output_layout.addLayout(format_layout)
 
         debug_layout = QtWidgets.QHBoxLayout()
         debug_label = QtWidgets.QLabel("Save debug masks")
@@ -3549,21 +3651,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _select_output_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Output Folder for Shapefiles", str(self.shapefile_save_dir.parent))
+            self, "Select Output Folder", str(self.export_save_dir.parent))
 
         if folder:
-            self.shapefile_save_dir = pathlib.Path(
-                folder) / "GeoOSAM_shapefiles"
+            self.export_save_dir = pathlib.Path(
+                folder) / "GeoOSAM_output"
             self.mask_save_dir = pathlib.Path(folder) / "GeoOSAM_masks"
-            self.shapefile_save_dir.mkdir(exist_ok=True)
+            self.export_save_dir.mkdir(exist_ok=True)
             if self.save_debug_masks:
                 self.mask_save_dir.mkdir(exist_ok=True)
 
-            short_path = "..." + str(self.shapefile_save_dir)[-35:] if len(
-                str(self.shapefile_save_dir)) > 40 else str(self.shapefile_save_dir)
+            short_path = "..." + str(self.export_save_dir)[-35:] if len(
+                str(self.export_save_dir)) > 40 else str(self.export_save_dir)
             self.outputFolderLabel.setText(short_path)
             self._update_status(
-                f"📁 Output folder: {self.shapefile_save_dir}", "info")
+                f"📁 Output folder: {self.export_save_dir}", "info")
 
     def _on_debug_toggle(self, checked):
         self.save_debug_masks = checked
@@ -4167,7 +4269,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.similarModeBtn.setChecked(False)
             self.mode_button_group.setExclusive(True)
 
-    def _point_done(self, pt):
+    def _point_done(self, pt, multi_points=None):
         # Handle similar mode differently - convert point to exemplar bbox
         if self.current_mode == "similar":
             bbox = self._point_to_exemplar_bbox(pt)
@@ -4193,6 +4295,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 'type': 'point',
                 'point': pt,
                 'bbox': None,
+                'multi_points': multi_points,  # None for single, list of (QgsPointXY, label) for multi
                 'class': self.current_class,
                 'timestamp': datetime.datetime.now()
             }
@@ -4282,6 +4385,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.text_prompt = request.get('text', None)  # Extract text prompt if present
         self.request_type = request['type']  # Store request type for mode determination
         self.request_scope = request.get('scope', 'aoi')  # Extract scope (aoi or full)
+        self.current_request = request  # Store full request for modifier access in result callback
 
         # Update status with queue info
         if request['type'] == 'point':
@@ -5606,6 +5710,29 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     crop_size = adaptive_crop_size
                     half_size = crop_size // 2
 
+                    # For multi-point: expand crop to cover all points
+                    multi_points = self.current_request.get('multi_points') if self.current_request else None
+                    if multi_points:
+                        all_px = [center_pixel_x]
+                        all_py = [center_pixel_y]
+                        for map_pt, _ in multi_points:
+                            try:
+                                r, c = src.index(map_pt.x(), map_pt.y())
+                                all_px.append(c)
+                                all_py.append(r)
+                            except Exception:
+                                pass
+                        # Crop must contain all points with padding
+                        px_min, px_max = min(all_px), max(all_px)
+                        py_min, py_max = min(all_py), max(all_py)
+                        span_x = px_max - px_min
+                        span_y = py_max - py_min
+                        # Ensure crop is at least adaptive_crop_size and covers all points + padding
+                        needed = max(crop_size, int(max(span_x, span_y) * 1.5))
+                        half_size = needed // 2
+                        center_pixel_x = (px_min + px_max) // 2
+                        center_pixel_y = (py_min + py_max) // 2
+
                     x_min = max(0, center_pixel_x - half_size)
                     y_min = max(0, center_pixel_y - half_size)
                     x_max = min(src.width, center_pixel_x + half_size)
@@ -5664,13 +5791,36 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         else:
                             arr = np.zeros_like(arr, dtype=np.uint8)
 
-                    relative_x = center_pixel_x - x_min
-                    relative_y = center_pixel_y - y_min
-                    relative_x = max(0, min(arr.shape[1] - 1, relative_x))
-                    relative_y = max(0, min(arr.shape[0] - 1, relative_y))
+                    # Build input coordinates — single or multi-point
+                    multi_points = self.current_request.get('multi_points') if self.current_request else None
 
-                    input_coords = np.array([[relative_x, relative_y]])
-                    input_labels = np.array([1])
+                    if multi_points:
+                        # Multi-point mode: convert all map points to pixel coords
+                        coords_list = []
+                        labels_list = []
+                        for map_pt, label in multi_points:
+                            try:
+                                r, c = src.index(map_pt.x(), map_pt.y())
+                                rel_x = max(0, min(arr.shape[1] - 1, c - x_min))
+                                rel_y = max(0, min(arr.shape[0] - 1, r - y_min))
+                                coords_list.append([rel_x, rel_y])
+                                labels_list.append(label)
+                            except Exception:
+                                pass  # Skip points outside raster bounds
+                        if not coords_list:
+                            self._update_status("No valid points in raster bounds", "error")
+                            return None
+                        input_coords = np.array(coords_list)
+                        input_labels = np.array(labels_list)
+                    else:
+                        # Single-point mode (unchanged)
+                        relative_x = center_pixel_x - x_min
+                        relative_y = center_pixel_y - y_min
+                        relative_x = max(0, min(arr.shape[1] - 1, relative_x))
+                        relative_y = max(0, min(arr.shape[0] - 1, relative_y))
+                        input_coords = np.array([[relative_x, relative_y]])
+                        input_labels = np.array([1])
+
                     input_box = None
                     mask_transform = src.window_transform(window)
 
@@ -6322,7 +6472,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self._update_status(f"Failed to save debug mask: {e}", "warning")
                 filename = "save_failed"
 
-        # Convert mask to features  
+        # Convert mask to features
         features = self._convert_mask_to_features(mask, mask_transform)
         if not features:
             self._update_status("No segments found", "warning")
@@ -6332,10 +6482,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._add_features_to_layer(features, debug_info, 1, filename)
 
         # Update status
+        multi_points = self.current_request.get('multi_points') if self.current_request else None
+        point_info = f" ({len(multi_points)} points)" if multi_points else ""
         undo_hint = " (↶ Undo available)" if len(features) > 0 else ""
         source_info = debug_info.get('source_layer', 'unknown')[:15]
         self._update_status(
-            f"✅ Added {len(features)} [{self.current_class}] polygons from {source_info}!{undo_hint}", "info")
+            f"✅ Added {len(features)} [{self.current_class}] polygons{point_info} from {source_info}!{undo_hint}", "info")
         self._update_stats()
 
     def _get_or_create_class_layer(self, class_name):
@@ -6479,26 +6631,28 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         exported_count = 0
         for class_name, layer in self.result_layers.items():
             if layer and layer.featureCount() > 0:
-                if self._export_layer_to_shapefile(layer, class_name):
+                if self._export_layer(layer, class_name):
                     exported_count += 1
 
         if exported_count > 0:
             self._update_status(
-                f"💾 Exported {exported_count} class(es) to {self.shapefile_save_dir}", "info")
+                f"💾 Exported {exported_count} class(es) to {self.export_save_dir}", "info")
         else:
             self._update_status("No segments found to export!", "warning")
 
-    def _export_layer_to_shapefile(self, layer, class_name):
+    def _export_layer(self, layer, class_name):
         try:
+            fmt_name = self.formatComboBox.currentText()
+            fmt = self.EXPORT_FORMATS[fmt_name]
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            shapefile_name = f"SAM_{class_name}_{timestamp}.shp"
-            shapefile_path = str(self.shapefile_save_dir / shapefile_name)
+            export_name = f"SAM_{class_name}_{timestamp}{fmt['ext']}"
+            export_path = str(self.export_save_dir / export_name)
 
             error = QgsVectorFileWriter.writeAsVectorFormat(
-                layer, shapefile_path, "utf-8", layer.crs(), "ESRI Shapefile")
+                layer, export_path, "utf-8", layer.crs(), fmt['driver'])
 
             if error[0] == QgsVectorFileWriter.NoError:
-                print(f"💾 Exported {class_name}: {shapefile_path}")
+                print(f"💾 Exported {class_name}: {export_path}")
                 return True
             else:
                 print(f"❌ Export failed for {class_name}: {error}")

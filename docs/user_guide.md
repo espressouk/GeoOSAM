@@ -14,11 +14,12 @@
 
 ### 2. Basic Workflow
 
-1. **Select Output Folder** (optional - defaults to `~/GeoOSAM_shapefiles`)
-2. **Choose a Class** from the dropdown (e.g., "Buildings")
-3. **Point mode activates automatically** 🎯
-4. **Click on objects** to segment - supports rapid clicking with queue system (expect <1s on powerful systems!)
-5. **Export results** as professional shapefiles
+1. **Select Output Folder** (optional - defaults to `~/GeoOSAM_output`)
+2. **Choose Export Format** (optional - defaults to GeoPackage)
+3. **Choose a Class** from the dropdown (e.g., "Buildings")
+4. **Point mode activates automatically** 🎯
+5. **Click on objects** to segment - supports rapid clicking with queue system (expect <1s on powerful systems!)
+6. **Export results** via the Export All button
 
 ---
 
@@ -52,10 +53,18 @@ GeoOSAM automatically detects your hardware and optimizes accordingly:
 
 #### 📁 **Custom Output Folder**
 
-- Click **"📁 Choose"** to select where shapefiles are saved
-- Default: `~/GeoOSAM_shapefiles`
-- Creates separate folders for shapefiles and debug masks
+- Click **"📁 Choose"** to select where exports are saved
+- Default: `~/GeoOSAM_output`
+- Creates separate folders for exports and debug masks
 - **Tip**: Use project-specific folders for better organization
+
+#### 📄 **Export Format**
+
+- Choose your preferred vector format from the **Export format** dropdown
+- **GeoPackage (.gpkg)** — default, recommended for modern GIS workflows
+- **ESRI Shapefile (.shp)** — legacy compatibility
+- **GeoJSON (.geojson)** — web-friendly, human-readable
+- **FlatGeobuf (.fgb)** — fast, compact, streaming-capable
 
 #### 💾 **Debug Masks** (Optional)
 
@@ -193,9 +202,9 @@ Each polygon includes comprehensive metadata:
 
 ### Professional Export Options
 
-- **💾 Export All:** Saves all classes as separate shapefiles with timestamps
+- **💾 Export All:** Saves all classes as separate files with timestamps
 - **Individual Export:** Right-click layer → Export for specific classes
-- **Formats Supported:** Shapefile (recommended), GeoJSON, KML, GPX
+- **Formats Supported:** GeoPackage (default), ESRI Shapefile, GeoJSON, FlatGeobuf
 - **Projection Handling:** Maintains original raster CRS automatically
 - **Attributes Preserved**: All metadata included in exports
 
@@ -369,7 +378,7 @@ For **5+ band imagery**, vegetation detection uses:
 3. **Strategy:** Systematic clicking on building centers
 4. **Vehicles:** Switch to "Vehicle" class for parking areas
 5. **Quality Control:** Use Undo for any imprecise segments
-6. **Export:** Professional shapefiles with full attribute data
+6. **Export:** Professional vector files with full attribute data
 
 ### Environmental Monitoring with Multi-spectral Data
 

@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=Advanced segmentation tool with intelligent SAM 2.1/Ultralytics SAM2.1_B selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
 about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics SAM2.1_B to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and Ultralytics SAM2.1_B for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles SAM2.1_B downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
 
-version=1.3.2
+version=1.3.3
 author=Ofer Butbega
 email=geoosamplugin@gmail.com
 
@@ -32,7 +32,16 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.3.2 - Bug Fix (2026-02-06)
+changelog=1.3.3 - Multi-Point, Export Formats & Fixes (2026-02-07)
+    - NEW: Multi-point segmentation with Shift+click (add) and Ctrl+click (subtract) point accumulation
+    - NEW: Visual +/- markers on map showing accumulated positive/negative points
+    - NEW: Multi-format export support (GeoPackage, Shapefile, GeoJSON, FlatGeobuf)
+    - NEW: GeoPackage as default export format
+    - FIXED: License activation connectivity issue
+    - FIXED: SAM3 multi-point predictions returning separate objects instead of combined result
+    - FIXED: "NoneType has no attribute write" crash on Windows when sys.stderr is None during QGIS startup
+
+    1.3.2 - Bug Fix (2026-02-06)
     - FIXED: MD5 hash security flag (added usedforsecurity=False)
 
     1.3.1 - Bug Fix (2026-02-06)
@@ -144,4 +153,4 @@ changelog=1.3.2 - Bug Fix (2026-02-06)
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2025-12-28
+update_date=2026-02-07

@@ -445,6 +445,22 @@ torch.set_num_threads(8)  # Adjust based on your CPU
 - Install Visual C++ Redistributable for Visual Studio 2019+
 - Or use CPU fallback: `os.environ["GEOOSAM_FORCE_CPU"] = "1"`
 
+#### Issue: "NoneType object has no attribute 'write'" on startup
+
+**Cause:** QGIS on Windows can set `sys.stderr` to `None` during early plugin loading, causing numpy to crash.
+**Status:** Fixed in v1.3.3+. If running an older version:
+
+```python
+# Create or edit: Settings → User Profiles → Open Active Profile Folder → python/startup.py
+import sys, os
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+```
+
+Then restart QGIS.
+
 #### Issue: Ultralytics slow on Windows
 
 **Cause:** Windows Defender or antivirus scanning  

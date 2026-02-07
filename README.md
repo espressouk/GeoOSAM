@@ -25,7 +25,7 @@
 - **📁 Custom Output**: User-selectable output folders
 - **🎨 Class Management**: Custom classes with color coding
 - **📡 Smart Workflow**: Auto-raster selection, progress tracking
-- **💾 Professional Export**: Shapefile export with detailed attributes
+- **💾 Professional Export**: Multi-format export (GeoPackage, Shapefile, GeoJSON, FlatGeobuf)
 - **🔧 Adaptive Processing**: Optimized based on zoom level and hardware
 
 ## 📊 Performance & Model Selection
@@ -84,10 +84,10 @@ Select a class (Buildings, Water, etc.) and click on objects in your imagery. Wo
 
 ![Segmentation Results](screenshots/results_view.png)
 
-### 5. Export Professional Shapefiles
+### 5. Export Results
 
 ![Export Functionality](screenshots/export_shape.png)
-_Export segmented polygons as shapefiles with detailed attributes_
+_Export segmented polygons in GeoPackage, Shapefile, GeoJSON, or FlatGeobuf format_
 
 ## 🤖 SAM3 Features (v1.3)
 
@@ -514,6 +514,24 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.3.3 - Multi-Point, Export Formats & Fixes (2026-02-07)
+
+- **🎯 NEW**: Multi-point segmentation — Shift+click to add positive points, Ctrl+click for negative, normal click to run prediction
+- **🎯 NEW**: Visual +/- markers on map showing accumulated points before prediction
+- **📄 NEW**: Multi-format export support (GeoPackage, Shapefile, GeoJSON, FlatGeobuf)
+- **📄 NEW**: GeoPackage as default export format
+- **🔧 FIXED**: License activation connectivity issue
+- **🔧 FIXED**: SAM3 multi-point predictions returning separate objects instead of combined result
+- **🔧 FIXED**: "NoneType has no attribute write" crash on Windows when sys.stderr is None during QGIS startup
+
+### v1.3.2 - Bug Fix (2026-02-06)
+
+- **🔧 FIXED**: MD5 hash security flag (added usedforsecurity=False)
+
+### v1.3.1 - Bug Fix (2026-02-06)
+
+- **🔧 FIXED**: Exemplar mask normalization in SAM3 similar object detection
+
 ### v1.3.0 - SAM3 & Model Management Updates (2025-12-22)
 
 **🎯 Major Features:**
@@ -636,6 +654,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2025-12-22
-**Plugin Version:** 1.3.0
+**Last updated:** 2026-02-07
+**Plugin Version:** 1.3.3
 **QGIS Compatibility:** 3.16+

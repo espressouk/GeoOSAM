@@ -151,7 +151,10 @@ class LicenseManager:
             req = urllib.request.Request(
                 LicenseManager._WORKER_URL,
                 data=json.dumps(data).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'GeoOSAM-QGIS-Plugin/1.3'
+                },
                 method='POST'
             )
 
