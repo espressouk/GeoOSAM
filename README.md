@@ -514,6 +514,18 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.3.4 - Settings Tab, Size & Shape Filters, GSD Support (2026-04-06)
+
+- **🗂️ NEW**: Tabbed UI — "Segmentation" and "Settings" tabs for a cleaner, less cluttered layout
+- **📐 NEW**: GSD / Resolution card — auto-detect from raster metadata or enter manually (cm/px)
+- **📏 NEW**: Real-world size filtering — filter objects by min/max diameter (cm) or area (m²); live pixel-equivalent hints update as you type
+- **🔷 NEW**: Shape filters — min circularity, min compactness, max aspect ratio; applied after segmentation across all modes
+- **📊 NEW**: `area_m2`, `diameter_cm`, `circularity` attributes exported per feature
+- **📊 NEW**: Per-mask progress bar during text/similar mode processing
+- **🔧 IMPROVED**: Font sizes increased across the UI for laptop-screen readability
+- **🔧 IMPROVED**: Tooltips use HTML with explicit white background (QGIS compatible)
+- **🔧 IMPROVED**: Active filter summary shown inline in the status label
+
 ### v1.3.3 - Multi-Point, Export Formats & Fixes (2026-02-07)
 
 - **🎯 NEW**: Multi-point segmentation — Shift+click to add positive points, Ctrl+click for negative, normal click to run prediction
@@ -654,6 +666,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-02-07
-**Plugin Version:** 1.3.3
+**Last updated:** 2026-04-06
+**Plugin Version:** 1.3.4
 **QGIS Compatibility:** 3.16+

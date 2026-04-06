@@ -957,7 +957,8 @@ class TiledSegmentationWorker(QThread):
     cancelled = pyqtSignal()  # Emitted when processing is cancelled
 
     def __init__(self, predictor, raster_path, request_type, text_prompt=None, bbox=None,
-                 current_class=None, class_color=None, tile_size=1024, overlap=128):
+                 current_class=None, class_color=None, tile_size=1024, overlap=128,
+                 min_object_size=20, max_object_size_px=None, shape_filters=None):
         print("🔧 TiledSegmentationWorker.__init__() START")
         import sys
         sys.stdout.flush()
@@ -978,6 +979,9 @@ class TiledSegmentationWorker(QThread):
         self.class_color = class_color
         self.tile_size = tile_size
         self.overlap = overlap
+        self.min_object_size = min_object_size
+        self.max_object_size_px = max_object_size_px
+        self.shape_filters = shape_filters
         self.total_objects_found = 0
         self.tile_results = []  # List of (features, debug_info, transform) tuples
         self.cancel_requested = False  # Flag for cancellation
@@ -1272,14 +1276,15 @@ class TiledSegmentationWorker(QThread):
             close_kernel = np.ones((7, 7), np.uint8)
             binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
 
-            # Remove small objects
+            # Remove objects outside size range
             nlabels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-            min_size = 20
 
             features = []
             for label in range(1, nlabels):  # Skip background (label 0)
                 area = stats[label, cv2.CC_STAT_AREA]
-                if area < min_size:
+                if area < self.min_object_size:
+                    continue
+                if self.max_object_size_px is not None and area > self.max_object_size_px:
                     continue
 
                 # Extract this component
@@ -1291,6 +1296,23 @@ class TiledSegmentationWorker(QThread):
                 for contour in contours:
                     if len(contour) < 3:
                         continue
+
+                    # Shape filter check (if enabled)
+                    if self.shape_filters and self.shape_filters.get('enabled'):
+                        contour_area = cv2.contourArea(contour)
+                        if contour_area < 1:
+                            continue
+                        perimeter = cv2.arcLength(contour, True)
+                        compactness = 4 * np.pi * contour_area / (perimeter * perimeter) if perimeter > 0 else 0
+                        x, y, w, h = cv2.boundingRect(contour)
+                        aspect_ratio = max(w, h) / max(min(w, h), 1)
+
+                        min_circ = self.shape_filters.get('min_circularity', 0.0)
+                        min_comp = self.shape_filters.get('min_compactness', 0.0)
+                        max_ar = self.shape_filters.get('max_aspect_ratio', 20.0)
+
+                        if compactness < min_comp or compactness < min_circ or aspect_ratio > max_ar:
+                            continue
 
                     # Convert pixel coordinates to geo coordinates
                     geo_coords = []
@@ -1322,7 +1344,8 @@ class OptimizedSAM2Worker(QThread):
 
     def __init__(self, predictor, arr, mode, model_choice="SAM2", point_coords=None,
                  point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu",
-                 min_object_size=50, max_objects=20, arr_multispectral=None, text_prompt=None):
+                 min_object_size=50, max_objects=20, arr_multispectral=None, text_prompt=None,
+                 max_object_size_px=None, shape_filters=None):
         super().__init__()
         self.predictor = predictor
         self.arr = arr
@@ -1338,6 +1361,8 @@ class OptimizedSAM2Worker(QThread):
         self.device = device
         self.min_object_size = min_object_size
         self.max_objects = max_objects
+        self.max_object_size_px = max_object_size_px
+        self.shape_filters = shape_filters
 
     def run(self):
         try:
@@ -1728,9 +1753,12 @@ class OptimizedSAM2Worker(QThread):
                     pixel_count = np.sum(mask > 0)
                     print(f"  📊 Mask {i+1}: {pixel_count} pixels")
 
-                    # Calculate reasonable max size (10% of image area)
+                    # Max size: use real-world filter if set, else 10% of image
                     image_area = self.arr.shape[0] * self.arr.shape[1]
-                    max_object_size = int(image_area * 0.1)
+                    if self.max_object_size_px is not None:
+                        max_object_size = self.max_object_size_px
+                    else:
+                        max_object_size = int(image_area * 0.1)
 
                     if pixel_count >= self.min_object_size:
                         if pixel_count <= max_object_size:
@@ -1811,9 +1839,13 @@ class OptimizedSAM2Worker(QThread):
         return helper.apply_morphology(mask)
 
     def _validate_object_for_class(self, component_mask, component_area, class_name):
-        """Class-aware object validation"""
+        """Class-aware object validation with optional user shape filters"""
         # Basic size filter
         if component_area < self.min_object_size:
+            return False
+
+        # Max size filter (from real-world settings or class default)
+        if self.max_object_size_px is not None and component_area > self.max_object_size_px:
             return False
 
         # Get contour properties
@@ -1841,7 +1873,23 @@ class OptimizedSAM2Worker(QThread):
         perimeter = cv2.arcLength(main_contour, True)
         compactness = 4 * np.pi * contour_area / (perimeter * perimeter) if perimeter > 0 else 0
 
-        # CLASS-SPECIFIC VALIDATION
+        # USER SHAPE FILTERS (override class-specific when enabled)
+        if self.shape_filters and self.shape_filters.get('enabled'):
+            min_circ = self.shape_filters.get('min_circularity', 0.0)
+            min_comp = self.shape_filters.get('min_compactness', 0.0)
+            max_ar = self.shape_filters.get('max_aspect_ratio', 20.0)
+
+            if compactness < min_comp:
+                return False
+            if min_circ > 0 and compactness < min_circ:
+                # circularity ~ compactness for simple shapes
+                return False
+            if aspect_ratio > max_ar or (1.0 / aspect_ratio) > max_ar:
+                return False
+
+            return contour_area >= self.min_object_size * 0.5
+
+        # CLASS-SPECIFIC VALIDATION (default when no user shape filters)
         if class_name in ['Vessels', 'Vehicle']:
             # Boats/vehicles: Prefer compact, reasonably-sized objects
             return (
@@ -2235,64 +2283,64 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     DEFAULT_CLASSES = {
         'Agriculture' : {
-            'color': '255,215,0',   
+            'color': '255,215,0',
             'description': 'Farmland and crops',
-            'batch_defaults': {'min_size': 200, 'max_objects': 10}
+            'batch_defaults': {'min_size': 200, 'max_objects': 10, 'max_size': 0}
         },
         'Buildings'   : {
-            'color': '220,20,60',   
+            'color': '220,20,60',
             'description': 'Residential & commercial structures',
-            'batch_defaults': {'min_size': 150, 'max_objects': 20}
+            'batch_defaults': {'min_size': 150, 'max_objects': 20, 'max_size': 0}
         },
         'Commercial'  : {
-            'color': '135,206,250', 
+            'color': '135,206,250',
             'description': 'Shopping and business districts',
-            'batch_defaults': {'min_size': 200, 'max_objects': 15}
+            'batch_defaults': {'min_size': 200, 'max_objects': 15, 'max_size': 0}
         },
         'Industrial'  : {
-            'color': '128,0,128',   
+            'color': '128,0,128',
             'description': 'Factories and warehouses',
-            'batch_defaults': {'min_size': 400, 'max_objects': 8}
+            'batch_defaults': {'min_size': 400, 'max_objects': 8, 'max_size': 0}
         },
         'Other'       : {
-            'color': '148,0,211',   
+            'color': '148,0,211',
             'description': 'Unclassified objects',
-            'batch_defaults': {'min_size': 50, 'max_objects': 25}
+            'batch_defaults': {'min_size': 50, 'max_objects': 25, 'max_size': 0}
         },
         'Parking'     : {
-            'color': '255,140,0',   
+            'color': '255,140,0',
             'description': 'Parking lots and areas',
-            'batch_defaults': {'min_size': 150, 'max_objects': 15}
+            'batch_defaults': {'min_size': 150, 'max_objects': 15, 'max_size': 0}
         },
         'Residential' : {
-            'color': '255,105,180', 
+            'color': '255,105,180',
             'description': 'Housing areas',
-            'batch_defaults': {'min_size': 50, 'max_objects': 60}
+            'batch_defaults': {'min_size': 50, 'max_objects': 60, 'max_size': 0}
         },
         'Roads'       : {
-            'color': '105,105,105', 
+            'color': '105,105,105',
             'description': 'Streets, highways, and pathways',
-            'batch_defaults': {'min_size': 200, 'max_objects': 10}
+            'batch_defaults': {'min_size': 200, 'max_objects': 10, 'max_size': 0}
         },
         'Vessels'     : {
-            'color': '0,206,209',   
+            'color': '0,206,209',
             'description': 'Boats, ships',
-            'batch_defaults': {'min_size': 40, 'max_objects': 35}
+            'batch_defaults': {'min_size': 40, 'max_objects': 35, 'max_size': 2000}
         },
         'Vehicle'     : {
-            'color': '255,69,0',    
+            'color': '255,69,0',
             'description': 'Cars, trucks, and buses',
-            'batch_defaults': {'min_size': 20, 'max_objects': 50}
+            'batch_defaults': {'min_size': 20, 'max_objects': 50, 'max_size': 500}
         },
         'Vegetation'  : {
-            'color': '34,139,34',   
+            'color': '34,139,34',
             'description': 'Trees, grass, and parks',
-            'batch_defaults': {'min_size': 30, 'max_objects': 100}
+            'batch_defaults': {'min_size': 30, 'max_objects': 100, 'max_size': 0}
         },
         'Water'       : {
-            'color': '30,144,255',  
+            'color': '30,144,255',
             'description': 'Rivers, lakes, and ponds',
-            'batch_defaults': {'min_size': 500, 'max_objects': 8}   # Large areas
+            'batch_defaults': {'min_size': 500, 'max_objects': 8, 'max_size': 0}
         }
     }
 
@@ -2344,6 +2392,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Undo functionality
         self.undo_stack = []
 
+        # Status tracking for filter indicator
+        self._last_status_text = "Ready to segment"
+        self._last_status_type = "info"
+        self._active_filter_summary = ""
+
         # Multi-point request context (for Shift/Ctrl point accumulation)
         self.current_request = None
 
@@ -2365,7 +2418,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.batch_mode_enabled = False
         self.min_object_size = 50  # Minimum pixels for valid object
         self.max_objects = 20  # Prevent too many small objects
+        self.max_object_size = 0  # 0 = no class-specific max (use 10% of image heuristic)
         self.duplicate_threshold = 0.85  # Spatial overlap threshold for duplicates (very lenient for shape-based detection)
+
+        # GSD / Resolution settings
+        self.gsd_cm_per_px = 0.0  # 0 = not set; pixel-only filtering
+
+        # Real-world size filtering (requires GSD)
+        self.real_world_filter_enabled = False
+        self.min_diameter_cm = 0.0
+        self.max_diameter_cm = 0.0
+        self.min_area_m2 = 0.0
+        self.max_area_m2 = 0.0
+
+        # Shape filtering
+        self.shape_filter_enabled = False
+        self.min_circularity = 0.0
+        self.min_compactness = 0.0
+        self.max_aspect_ratio = 10.0
 
         self._setup_ui()
 
@@ -2962,20 +3032,78 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         return False
 
     def _update_license_status(self):
-        """Update license status label in UI"""
+        """Update license status label in Settings tab and banner in Segmentation tab"""
         from geo_osam_license import LicenseManager
-
-        if not hasattr(self, 'licenseStatusLabel'):
-            return
 
         license_info = LicenseManager.get_license_info()
 
-        if license_info['type'] == 'pro':
-            self.licenseStatusLabel.setText(f"✅ {license_info['status']}")
-            self.licenseStatusLabel.setStyleSheet("color: green; font-weight: bold; font-size: 11px; padding: 5px;")
+        if hasattr(self, 'licenseStatusLabel') and self.licenseStatusLabel:
+            if license_info['type'] == 'pro':
+                self.licenseStatusLabel.setText(f"✅ {license_info['status']}")
+                self.licenseStatusLabel.setStyleSheet("color: green; font-weight: bold; font-size: 14px; padding: 5px;")
+            else:
+                self.licenseStatusLabel.setText(f"ℹ️ {license_info['status']}")
+                self.licenseStatusLabel.setStyleSheet("color: gray; font-size: 14px; padding: 5px;")
+
+        self._update_license_banner()
+
+    def _set_class_combo_alert(self, alert: bool):
+        if alert:
+            self.classComboBox.setStyleSheet("""
+                QComboBox {
+                    padding: 8px 10px; font-size: 14px; border-radius: 7px;
+                    border: 2px solid #F59E0B; background: #FFFBEB;
+                }
+                QComboBox::drop-down { border: none; }
+            """)
         else:
-            self.licenseStatusLabel.setText(f"ℹ️ {license_info['status']}")
-            self.licenseStatusLabel.setStyleSheet("color: gray; font-size: 11px; padding: 5px;")
+            self.classComboBox.setStyleSheet("""
+                QComboBox {
+                    padding: 8px 10px; font-size: 14px; border-radius: 7px;
+                    border: 1px solid #D0D5DD; background: #FFF;
+                }
+                QComboBox::drop-down { border: none; }
+            """)
+
+    def _on_similar_mode_toggled(self, checked):
+        if checked:
+            self.textPromptInput.clear()
+            self.textPromptInput.setEnabled(False)
+            self.segmentTextBtn.setEnabled(False)
+        else:
+            self.textPromptInput.setEnabled(True)
+
+    def _on_license_banner_btn(self):
+        self.tabWidget.setCurrentIndex(1)  # Always go to Settings && Filters tab
+
+    def _update_license_banner(self):
+        """Update the compact license banner on the Segmentation tab"""
+        if not hasattr(self, 'licenseBanner') or not self.licenseBanner:
+            return
+        from geo_osam_license import LicenseManager
+        license_info = LicenseManager.get_license_info()
+
+        if license_info['type'] == 'pro':
+            self.licenseBanner.setStyleSheet(
+                "#licenseBanner { background: #ECFDF3; border-radius: 8px; border: 1px solid #A6F4C5; }")
+            self.licenseBannerLabel.setText("✅ SAM3 Pro License Active")
+            self.licenseBannerLabel.setStyleSheet("font-size: 13px; font-weight: 600; color: #027A48;")
+            self.licenseBannerBtn.setVisible(False)
+        else:
+            self.licenseBanner.setStyleSheet(
+                "#licenseBanner { background: #FFFBEB; border-radius: 8px; border: 1px solid #FDE68A; }")
+            self.licenseBannerLabel.setText("🔓 Free tier — Upgrade to SAM3 Pro")
+            self.licenseBannerLabel.setStyleSheet("font-size: 13px; font-weight: 600; color: #92400E;")
+            self.licenseBannerBtn.setVisible(True)
+            self.licenseBannerBtn.setText("Settings")
+            self.licenseBannerBtn.setStyleSheet("""
+                QPushButton {
+                    font-size: 12px; font-weight: 600; padding: 3px 10px;
+                    border-radius: 6px; border: none;
+                    background: #F59E0B; color: #FFF;
+                }
+                QPushButton:hover { background: #D97706; }
+            """)
 
     def _on_scope_changed(self, index):
         """Handle scope selection change"""
@@ -3052,11 +3180,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Update stats
         self._update_stats()
 
+    @staticmethod
+    def _tip(text):
+        """Wrap tooltip text in HTML with explicit white background for QGIS compatibility"""
+        html_text = text.replace('\n', '<br>')
+        return f'<div style="background-color:#fff; color:#1a202c; padding:4px 6px; font-size:13px;">{html_text}</div>'
+
     def _setup_ui(self):
-        # Force small font size regardless of DPI detection
-        base_font_size = 9  # Normal size
-        self.setFont(QtGui.QFont("Segoe UI", base_font_size))
-        print(f"UI setup using forced font size: {base_font_size}pt")
+        # Base font size for the entire UI
+        base_font_size = 13  # Readable on laptop screens
+        self.setFont(QtGui.QFont("Segoe UI", 9))  # Dock title bar stays small
+        print(f"UI setup using font size: {base_font_size}pt")
 
         # --- Dock features: standard QGIS close/float/move
         self.setFeatures(
@@ -3065,45 +3199,70 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QtWidgets.QDockWidget.DockWidgetMovable
         )
 
-        # --- Scrollable, responsive area
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Disable horizontal scroll
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)     # Only show vertical when needed
-        scroll_area.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
-        self.setWidget(scroll_area)
+        # --- Container with header + tabbed layout
+        container_widget = QtWidgets.QWidget()
+        container_widget.setFont(QtGui.QFont("Segoe UI", base_font_size))
+        container_widget.setStyleSheet("background: #f8f9fa; color: #344054;")
+        self.setWidget(container_widget)
 
-        main_widget = QtWidgets.QWidget()
-        main_widget.setFont(QtGui.QFont("Segoe UI", base_font_size))
-        scroll_area.setWidget(main_widget)
+        container_layout = QtWidgets.QVBoxLayout(container_widget)
+        container_layout.setSpacing(6)
+        container_layout.setContentsMargins(10, 10, 10, 0)
 
-        main_layout = QtWidgets.QVBoxLayout(main_widget)
-        main_layout.setSpacing(12)                    # Reduced spacing
-        main_layout.setContentsMargins(15, 15, 15, 15)  # Reduced margins
-        main_widget.setStyleSheet("""
-            background: transparent; 
-            color: #344054;
-        """)
-
-        # Improved tooltip styling for better readability
-        self.setStyleSheet("""
-            QToolTip {
-                background-color: #ffffff;
-                color: #1a202c;
-                border: 1px solid #cbd5e0;
-                border-radius: 6px;
-                padding: 8px 10px;
-                font-size: 11px;
-                font-weight: 500;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        # Tab widget
+        self.tabWidget = QtWidgets.QTabWidget()
+        self.tabWidget.setStyleSheet("""
+            QTabWidget::pane { border: none; background: transparent; }
+            QTabBar::tab {
+                font-size: 14px; font-weight: 600; padding: 7px 16px;
+                border: none; background: #F2F4F7; color: #667085;
+                border-top-left-radius: 8px; border-top-right-radius: 8px;
+                margin-right: 2px;
             }
+            QTabBar::tab:selected { background: #fff; color: #1570EF; border-bottom: 2px solid #1570EF; }
+            QTabBar::tab:hover:!selected { background: #E4E7EC; }
         """)
+
+        # Tab 1 — Segmentation (core workflow)
+        tab1_scroll = QtWidgets.QScrollArea()
+        tab1_scroll.setWidgetResizable(True)
+        tab1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tab1_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        tab1_scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+        tab1_widget = QtWidgets.QWidget()
+        tab1_widget.setStyleSheet("background: transparent;")
+        tab1_scroll.setWidget(tab1_widget)
+        tab1_layout = QtWidgets.QVBoxLayout(tab1_widget)
+        tab1_layout.setSpacing(12)
+        tab1_layout.setContentsMargins(8, 10, 8, 10)
+
+        # Tab 2 — Settings (configure once)
+        tab2_scroll = QtWidgets.QScrollArea()
+        tab2_scroll.setWidgetResizable(True)
+        tab2_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tab2_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        tab2_scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+        tab2_widget = QtWidgets.QWidget()
+        tab2_widget.setStyleSheet("background: transparent;")
+        tab2_scroll.setWidget(tab2_widget)
+        tab2_layout = QtWidgets.QVBoxLayout(tab2_widget)
+        tab2_layout.setSpacing(12)
+        tab2_layout.setContentsMargins(8, 10, 8, 10)
+
+        self.tabWidget.addTab(tab1_scroll, "Segmentation")
+        self.tabWidget.addTab(tab2_scroll, "Settings && Filters")
+
+        # Keep references for adding cards later
+        self._tab1_layout = tab1_layout
+        self._tab2_layout = tab2_layout
+
+        # No global tooltip styling — using HTML tooltips instead (see _tip helper)
 
         # Allow flexible resizing
-        self.setMinimumWidth(300)
-        self.setMaximumWidth(450)   # Add max width back
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(500)
         self.setMinimumHeight(500)
-        self.resize(350, 700)       # Set initial size
+        self.resize(360, 700)
 
         # --- Card helper
         def create_card(title, icon=""):
@@ -3127,43 +3286,40 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if title:
                 header_layout = QtWidgets.QHBoxLayout()
                 icon_label = QtWidgets.QLabel(icon)
-                icon_label.setStyleSheet("font-size: 12px; margin-top: 1px;")  # Reduced from 22px
+                icon_label.setStyleSheet("font-size: 14px; margin-top: 1px;")  # Reduced from 22px
                 header_label = QtWidgets.QLabel(f"<b>{title}</b>")
-                header_label.setStyleSheet("font-size: 13px; color: #101828;")  # Reduced from 20px
+                header_label.setStyleSheet("font-size: 14px; color: #101828;")  # Reduced from 20px
                 header_layout.addWidget(icon_label)
                 header_layout.addWidget(header_label)
                 header_layout.addStretch()
                 card_layout.addLayout(header_layout)
             return card, card_layout
 
-        # --- Title and Device Header ---
+        # --- Title and Device Header (above tabs) ---
         title_label = QtWidgets.QLabel("GeoOSAM Control Panel")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #1D2939;")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1D2939;")
         title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        container_layout.addWidget(title_label)
 
         device_icon = "🎮" if "cuda" in self.device else "🖥️"
         device_info = f"{device_icon} {self.device.upper()} | {self.model_choice}"
         if getattr(self, "num_cores", None):
             device_info += f" ({self.num_cores} cores)"
         self.deviceLabel = QtWidgets.QLabel(device_info)
-        self.deviceLabel.setStyleSheet("font-size: 12px; color: #475467;")  # Reduced from 18px
+        self.deviceLabel.setStyleSheet("font-size: 14px; color: #475467;")
         self.deviceLabel.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.deviceLabel)
+        container_layout.addWidget(self.deviceLabel)
 
-        separator = QtWidgets.QFrame()
-        separator.setFrameShape(QtWidgets.QFrame.HLine)
-        separator.setStyleSheet("border-top: 1px solid #EAECF0;")
-        main_layout.addWidget(separator)
+        container_layout.addWidget(self.tabWidget)
 
         # --- Model Selection Card (NEW) ---
         model_card, model_layout = create_card("Model Selection", "🤖")
 
         self.modelComboBox = QtWidgets.QComboBox()
-        self.modelComboBox.setToolTip("Choose SAM model size based on your hardware")
+        self.modelComboBox.setToolTip(self._tip("Choose SAM model size based on your hardware"))
         self.modelComboBox.setStyleSheet("""
             QComboBox {
-                padding: 8px 10px; font-size: 11px; border-radius: 7px;
+                padding: 8px 10px; font-size: 14px; border-radius: 7px;
                 border: 1px solid #D0D5DD; background: #FFF;
             }
             QComboBox::drop-down { border: none; }
@@ -3189,7 +3345,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             info_text = f"💡 {len(self.model_options)} CPU-optimized models available"
 
         info_label = QtWidgets.QLabel(info_text)
-        info_label.setStyleSheet("font-size: 10px; color: #475467; margin-top: 4px;")
+        info_label.setStyleSheet("font-size: 14px; color: #475467; margin-top: 4px;")
         model_layout.addWidget(info_label)
 
         # Help text for SAM3 if not available (GPU only)
@@ -3198,12 +3354,36 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.sam3HelpLabel = QtWidgets.QLabel(
                 "⚠️ SAM3 not available. <a href='#sam3help' style='color: #1570EF;'>Download instructions</a>"
             )
-            self.sam3HelpLabel.setStyleSheet("font-size: 10px; color: #DC6803;")
+            self.sam3HelpLabel.setStyleSheet("font-size: 14px; color: #DC6803;")
             self.sam3HelpLabel.setOpenExternalLinks(False)
             self.sam3HelpLabel.linkActivated.connect(self._show_sam3_download_dialog)
             model_layout.addWidget(self.sam3HelpLabel)
 
-        main_layout.addWidget(model_card)
+        # --- Compact license banner (above model card, SAM3 only) ---
+        self.licenseBanner = None
+        if self.model_choice == "SAM3" or self.available_models.get('SAM3', False):
+            self.licenseBanner = QtWidgets.QWidget()
+            self.licenseBanner.setObjectName("licenseBanner")
+            banner_layout = QtWidgets.QHBoxLayout(self.licenseBanner)
+            banner_layout.setContentsMargins(10, 6, 10, 6)
+            banner_layout.setSpacing(8)
+
+            self.licenseBannerLabel = QtWidgets.QLabel()
+            self.licenseBannerLabel.setStyleSheet("font-size: 13px; font-weight: 600;")
+
+            self.licenseBannerBtn = QtWidgets.QPushButton()
+            self.licenseBannerBtn.setCursor(Qt.PointingHandCursor)
+            self.licenseBannerBtn.setFocusPolicy(Qt.NoFocus)
+            self.licenseBannerBtn.setAutoDefault(False)
+            self.licenseBannerBtn.setDefault(False)
+            self.licenseBannerBtn.clicked.connect(self._on_license_banner_btn)
+
+            banner_layout.addWidget(self.licenseBannerLabel, stretch=1)
+            banner_layout.addWidget(self.licenseBannerBtn)
+            tab1_layout.addWidget(self.licenseBanner)
+            self._update_license_banner()
+
+        tab1_layout.addWidget(model_card)
 
         # --- SAM3 License Status (only show if SAM3 available or selected) ---
         self.licenseCard = None
@@ -3217,7 +3397,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # License status label
             self.licenseStatusLabel = QtWidgets.QLabel()
             self.licenseStatusLabel.setWordWrap(True)
-            self.licenseStatusLabel.setStyleSheet("font-size: 11px; padding: 5px;")
+            self.licenseStatusLabel.setStyleSheet("font-size: 14px; padding: 5px;")
             license_layout.addWidget(self.licenseStatusLabel)
 
             # Manage License button
@@ -3225,7 +3405,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.manageLicenseBtn.setCursor(Qt.PointingHandCursor)
             self.manageLicenseBtn.setStyleSheet("""
                 QPushButton {
-                    font-size: 11px; padding: 6px 16px; border-radius: 8px;
+                    font-size: 14px; padding: 6px 16px; border-radius: 8px;
                     background: #1570EF; color: #FFF; border: none;
                 }
                 QPushButton:hover { background: #1366D6; }
@@ -3239,18 +3419,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Update license status
             self._update_license_status()
 
-            main_layout.addWidget(license_card)
+            tab2_layout.addWidget(license_card)
 
         # --- Output Settings ---
         output_card, output_layout = create_card("Output Settings", "📂")
         folder_layout = QtWidgets.QHBoxLayout()
         self.outputFolderLabel = QtWidgets.QLabel("Default folder")
-        self.outputFolderLabel.setStyleSheet("font-size: 11px; color: #475467;")  # Reduced from 18px
+        self.outputFolderLabel.setStyleSheet("font-size: 14px; color: #475467;")  # Reduced from 18px
         self.selectFolderBtn = QtWidgets.QPushButton("Choose")
         self.selectFolderBtn.setCursor(Qt.PointingHandCursor)
         self.selectFolderBtn.setStyleSheet("""
             QPushButton {
-                font-size: 11px; padding: 6px 16px; border-radius: 8px;
+                font-size: 14px; padding: 6px 16px; border-radius: 8px;
                 background: #FFF; border: 1px solid #D0D5DD;
             }
             QPushButton:hover { background: #F9FAFB; }
@@ -3265,11 +3445,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         format_layout = QtWidgets.QHBoxLayout()
         format_label = QtWidgets.QLabel("Export format")
-        format_label.setStyleSheet("font-size: 11px; color: #475467;")
+        format_label.setStyleSheet("font-size: 14px; color: #475467;")
         self.formatComboBox = QtWidgets.QComboBox()
         self.formatComboBox.setStyleSheet("""
             QComboBox {
-                padding: 8px 10px; font-size: 11px; border-radius: 7px;
+                padding: 8px 10px; font-size: 14px; border-radius: 7px;
                 border: 1px solid #D0D5DD; background: #FFF; color: #344054;
             }
             QComboBox::drop-down { border: none; }
@@ -3285,13 +3465,233 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         debug_layout = QtWidgets.QHBoxLayout()
         debug_label = QtWidgets.QLabel("Save debug masks")
-        debug_label.setStyleSheet("font-size: 11px;")  # Reduced from 18px
+        debug_label.setStyleSheet("font-size: 14px;")  # Reduced from 18px
         self.saveDebugSwitch = Switch()
         debug_layout.addWidget(debug_label)
         debug_layout.addStretch()
         debug_layout.addWidget(self.saveDebugSwitch)
         output_layout.addLayout(debug_layout)
-        main_layout.addWidget(output_card)
+        tab2_layout.addWidget(output_card)
+
+        # --- GSD / Resolution Card (Tab 2) ---
+        gsd_card, gsd_layout = create_card("GSD / Resolution", "📐")
+
+        gsd_row = QtWidgets.QHBoxLayout()
+        gsd_label = QtWidgets.QLabel("GSD:")
+        gsd_label.setStyleSheet("font-size: 14px; color: #475467;")
+        self.gsdSpinBox = QtWidgets.QDoubleSpinBox()
+        self.gsdSpinBox.setRange(0.01, 10000.0)
+        self.gsdSpinBox.setDecimals(2)
+        self.gsdSpinBox.setValue(0.01)
+        self.gsdSpinBox.setSuffix(" cm/px")
+        self.gsdSpinBox.setSpecialValueText("Not set")
+        self.gsdSpinBox.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 6px 8px; font-size: 14px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
+            }
+            QDoubleSpinBox:hover { border: 1px solid #1570EF; }
+        """)
+        self.gsdSpinBox.setToolTip(self._tip("Ground Sample Distance — centimeters per pixel.\nAuto-detect reads from raster metadata."))
+        self.gsdSpinBox.setFixedWidth(110)
+        self.gsdSpinBox.setFocusPolicy(Qt.NoFocus)
+
+        self.autoGsdBtn = QtWidgets.QPushButton("Auto-Detect")
+        self.autoGsdBtn.setCursor(Qt.PointingHandCursor)
+        self.autoGsdBtn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px; padding: 5px 12px; border-radius: 7px;
+                background: #1570EF; color: #FFF; border: none;
+            }
+            QPushButton:hover { background: #1849A9; }
+        """)
+        self.autoGsdBtn.setAutoDefault(False)
+        self.autoGsdBtn.setDefault(False)
+        self.autoGsdBtn.setFocusPolicy(Qt.NoFocus)
+
+        gsd_row.addWidget(gsd_label)
+        gsd_row.addWidget(self.gsdSpinBox)
+        gsd_row.addStretch()
+        gsd_row.addWidget(self.autoGsdBtn)
+        gsd_layout.addLayout(gsd_row)
+
+        self.gsdSourceLabel = QtWidgets.QLabel("Not set — click Auto-Detect or enter manually")
+        self.gsdSourceLabel.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
+        gsd_layout.addWidget(self.gsdSourceLabel)
+
+        tab2_layout.addWidget(gsd_card)
+
+        # --- Size Filtering Card (Tab 2) ---
+        size_card, size_layout = create_card("Size Filtering", "📏")
+
+        sf_toggle_row = QtWidgets.QHBoxLayout()
+        sf_toggle_label = QtWidgets.QLabel("Real-world filtering")
+        sf_toggle_label.setStyleSheet("font-size: 14px;")
+        self.realWorldFilterSwitch = Switch()
+        self.realWorldFilterSwitch.setEnabled(False)  # Disabled until GSD is set
+        sf_toggle_row.addWidget(sf_toggle_label)
+        sf_toggle_row.addStretch()
+        sf_toggle_row.addWidget(self.realWorldFilterSwitch)
+        size_layout.addLayout(sf_toggle_row)
+
+        self.realWorldFilterFrame = QtWidgets.QFrame()
+        self.realWorldFilterFrame.setStyleSheet("""
+            QFrame { background: #F9FAFB; border: 1px solid #EAECF0; border-radius: 8px; }
+        """)
+        rwf_layout = QtWidgets.QGridLayout(self.realWorldFilterFrame)
+        rwf_layout.setContentsMargins(8, 8, 8, 8)
+        rwf_layout.setSpacing(6)
+
+        spinbox_style = """
+            QDoubleSpinBox {
+                padding: 4px 6px; font-size: 14px; border-radius: 5px;
+                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
+            }
+        """
+
+        # Min diameter
+        rwf_layout.addWidget(QtWidgets.QLabel("Min diameter:"), 0, 0)
+        self.minDiameterSpinBox = QtWidgets.QDoubleSpinBox()
+        self.minDiameterSpinBox.setRange(0, 100000)
+        self.minDiameterSpinBox.setDecimals(1)
+        self.minDiameterSpinBox.setSuffix(" cm")
+        self.minDiameterSpinBox.setStyleSheet(spinbox_style)
+        self.minDiameterSpinBox.setFixedWidth(95)
+        self.minDiameterSpinBox.setFocusPolicy(Qt.NoFocus)
+        rwf_layout.addWidget(self.minDiameterSpinBox, 0, 1)
+        self.minDiameterPixelLabel = QtWidgets.QLabel("(set GSD)")
+        self.minDiameterPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
+        rwf_layout.addWidget(self.minDiameterPixelLabel, 0, 2)
+
+        # Max diameter
+        rwf_layout.addWidget(QtWidgets.QLabel("Max diameter:"), 1, 0)
+        self.maxDiameterSpinBox = QtWidgets.QDoubleSpinBox()
+        self.maxDiameterSpinBox.setRange(0, 100000)
+        self.maxDiameterSpinBox.setDecimals(1)
+        self.maxDiameterSpinBox.setSuffix(" cm")
+        self.maxDiameterSpinBox.setStyleSheet(spinbox_style)
+        self.maxDiameterSpinBox.setFixedWidth(95)
+        self.maxDiameterSpinBox.setFocusPolicy(Qt.NoFocus)
+        rwf_layout.addWidget(self.maxDiameterSpinBox, 1, 1)
+        self.maxDiameterPixelLabel = QtWidgets.QLabel("(set GSD)")
+        self.maxDiameterPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
+        rwf_layout.addWidget(self.maxDiameterPixelLabel, 1, 2)
+
+        # Min area
+        rwf_layout.addWidget(QtWidgets.QLabel("Min area:"), 2, 0)
+        self.minAreaSpinBox = QtWidgets.QDoubleSpinBox()
+        self.minAreaSpinBox.setRange(0, 1e9)
+        self.minAreaSpinBox.setDecimals(2)
+        self.minAreaSpinBox.setSuffix(" m\u00B2")
+        self.minAreaSpinBox.setStyleSheet(spinbox_style)
+        self.minAreaSpinBox.setFixedWidth(95)
+        self.minAreaSpinBox.setFocusPolicy(Qt.NoFocus)
+        rwf_layout.addWidget(self.minAreaSpinBox, 2, 1)
+        self.minAreaPixelLabel = QtWidgets.QLabel("(set GSD)")
+        self.minAreaPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
+        rwf_layout.addWidget(self.minAreaPixelLabel, 2, 2)
+
+        # Max area
+        rwf_layout.addWidget(QtWidgets.QLabel("Max area:"), 3, 0)
+        self.maxAreaSpinBox = QtWidgets.QDoubleSpinBox()
+        self.maxAreaSpinBox.setRange(0, 1e9)
+        self.maxAreaSpinBox.setDecimals(2)
+        self.maxAreaSpinBox.setSuffix(" m\u00B2")
+        self.maxAreaSpinBox.setStyleSheet(spinbox_style)
+        self.maxAreaSpinBox.setFixedWidth(95)
+        self.maxAreaSpinBox.setFocusPolicy(Qt.NoFocus)
+        rwf_layout.addWidget(self.maxAreaSpinBox, 3, 1)
+        self.maxAreaPixelLabel = QtWidgets.QLabel("(set GSD)")
+        self.maxAreaPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
+        rwf_layout.addWidget(self.maxAreaPixelLabel, 3, 2)
+
+        # Style grid labels
+        for i in range(4):
+            label = rwf_layout.itemAtPosition(i, 0).widget()
+            label.setStyleSheet("font-size: 14px; color: #475467;")
+
+        self.realWorldFilterFrame.setVisible(False)
+        size_layout.addWidget(self.realWorldFilterFrame)
+
+        self.gsdRequiredLabel = QtWidgets.QLabel("Requires GSD to be set above")
+        self.gsdRequiredLabel.setStyleSheet("font-size: 14px; color: #DC6803; font-style: italic;")
+        size_layout.addWidget(self.gsdRequiredLabel)
+
+        tab2_layout.addWidget(size_card)
+
+        # --- Shape Filters Card (Tab 2) ---
+        shape_card, shape_layout = create_card("Shape Filtering", "🔷")
+
+        shape_toggle_row = QtWidgets.QHBoxLayout()
+        shape_toggle_label = QtWidgets.QLabel("Enable shape filtering")
+        shape_toggle_label.setStyleSheet("font-size: 14px;")
+        self.shapeFilterSwitch = Switch()
+        shape_toggle_row.addWidget(shape_toggle_label)
+        shape_toggle_row.addStretch()
+        shape_toggle_row.addWidget(self.shapeFilterSwitch)
+        shape_layout.addLayout(shape_toggle_row)
+
+        self.shapeFilterFrame = QtWidgets.QFrame()
+        self.shapeFilterFrame.setStyleSheet("""
+            QFrame { background: #F9FAFB; border: 1px solid #EAECF0; border-radius: 8px; }
+        """)
+        shf_layout = QtWidgets.QGridLayout(self.shapeFilterFrame)
+        shf_layout.setContentsMargins(8, 8, 8, 8)
+        shf_layout.setSpacing(6)
+
+        # Min circularity
+        circ_label = QtWidgets.QLabel("Min circularity:")
+        circ_label.setStyleSheet("font-size: 14px; color: #475467;")
+        shf_layout.addWidget(circ_label, 0, 0)
+        self.circularitySpinBox = QtWidgets.QDoubleSpinBox()
+        self.circularitySpinBox.setRange(0.0, 1.0)
+        self.circularitySpinBox.setSingleStep(0.05)
+        self.circularitySpinBox.setDecimals(2)
+        self.circularitySpinBox.setValue(0.0)
+        self.circularitySpinBox.setStyleSheet(spinbox_style)
+        self.circularitySpinBox.setFixedWidth(70)
+        self.circularitySpinBox.setFocusPolicy(Qt.NoFocus)
+        self.circularitySpinBox.setToolTip(self._tip("4*pi*area/perimeter\u00B2\n1.0 = perfect circle, 0.0 = any shape"))
+        shf_layout.addWidget(self.circularitySpinBox, 0, 1)
+
+        # Min compactness
+        comp_label = QtWidgets.QLabel("Min compactness:")
+        comp_label.setStyleSheet("font-size: 14px; color: #475467;")
+        shf_layout.addWidget(comp_label, 1, 0)
+        self.compactnessSpinBox = QtWidgets.QDoubleSpinBox()
+        self.compactnessSpinBox.setRange(0.0, 1.0)
+        self.compactnessSpinBox.setSingleStep(0.05)
+        self.compactnessSpinBox.setDecimals(2)
+        self.compactnessSpinBox.setValue(0.0)
+        self.compactnessSpinBox.setStyleSheet(spinbox_style)
+        self.compactnessSpinBox.setFixedWidth(70)
+        self.compactnessSpinBox.setFocusPolicy(Qt.NoFocus)
+        self.compactnessSpinBox.setToolTip(self._tip("area / bounding_box_area\n1.0 = fills bbox perfectly, 0.0 = any shape"))
+        shf_layout.addWidget(self.compactnessSpinBox, 1, 1)
+
+        # Max aspect ratio
+        ar_label = QtWidgets.QLabel("Max aspect ratio:")
+        ar_label.setStyleSheet("font-size: 14px; color: #475467;")
+        shf_layout.addWidget(ar_label, 2, 0)
+        self.aspectRatioSpinBox = QtWidgets.QDoubleSpinBox()
+        self.aspectRatioSpinBox.setRange(1.0, 20.0)
+        self.aspectRatioSpinBox.setSingleStep(0.5)
+        self.aspectRatioSpinBox.setDecimals(1)
+        self.aspectRatioSpinBox.setValue(10.0)
+        self.aspectRatioSpinBox.setStyleSheet(spinbox_style)
+        self.aspectRatioSpinBox.setFixedWidth(70)
+        self.aspectRatioSpinBox.setFocusPolicy(Qt.NoFocus)
+        self.aspectRatioSpinBox.setToolTip(self._tip("max(w,h)/min(w,h)\n1.0 = square, high = elongated"))
+        shf_layout.addWidget(self.aspectRatioSpinBox, 2, 1)
+
+        shape_hint = QtWidgets.QLabel("Filters objects by geometric shape after segmentation")
+        shape_hint.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
+        shf_layout.addWidget(shape_hint, 3, 0, 1, 2)
+
+        self.shapeFilterFrame.setVisible(False)
+        shape_layout.addWidget(self.shapeFilterFrame)
+
+        tab2_layout.addWidget(shape_card)
 
         # --- Class Selection ---
         class_card, class_layout = create_card("Class Selection", "🏷️")
@@ -3303,8 +3703,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.classComboBox.addItem(class_name, class_name)
         self.classComboBox.setStyleSheet("""
             QComboBox {
-                padding: 8px 10px; font-size: 11px; border-radius: 7px;
-                border: 1px solid #D0D5DD; background: #FFF;
+                padding: 8px 10px; font-size: 14px; border-radius: 7px;
+                border: 2px solid #F59E0B; background: #FFFBEB;
             }
             QComboBox::drop-down { border: none; }
         """)  # Reduced padding and font-size
@@ -3319,7 +3719,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             border: 2px solid #D0D5DD; 
             background-color: #F9FAFB; 
             color: #667085;
-            border-radius: 8px; font-size: 11px;
+            border-radius: 8px; font-size: 14px;
         """)  # Reduced padding and font-size
         class_layout.addWidget(self.currentClassLabel)
 
@@ -3334,81 +3734,92 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setStyleSheet("""
                 QPushButton {
-                    font-size: 11px; padding: 8px; border-radius: 8px;
+                    font-size: 14px; padding: 8px; border-radius: 8px;
                     background: #FFF; border: 1px solid #D0D5DD;
                 }
                 QPushButton:hover { background: #F9FAFB; }
             """)  # Reduced font-size and padding
             class_btn_layout.addWidget(btn)
         class_layout.addLayout(class_btn_layout)
-        main_layout.addWidget(class_card)
+        tab1_layout.addWidget(class_card)
 
-        # --- Auto-Segment Card (SAM3 only) ---
-        self.textPromptCard, text_prompt_layout = create_card("Auto-Segment (SAM3)", "🤖")
+        # --- SAM3 Modes Card (SAM3 only: text prompt + find similar) ---
+        self.textPromptCard, text_prompt_layout = create_card("SAM3 Modes", "🤖")
         self.textPromptCard.setVisible(self.model_choice == "SAM3")
 
-        # Info label
-        info_label = QtWidgets.QLabel(
-            "ℹ️ SAM3 uses automatic instance segmentation (finds all objects)"
-        )
-        info_label.setStyleSheet("font-size: 10px; color: #667085; padding: 4px;")
-        info_label.setWordWrap(True)
-        text_prompt_layout.addWidget(info_label)
-
-        # Text input field (kept for user notes/class context, but not used as actual prompt)
+        # Row 1: [input - full width]
         self.textPromptInput = QtWidgets.QLineEdit()
-        self.textPromptInput.setPlaceholderText("Class context (optional - for reference only)")
+        self.textPromptInput.setPlaceholderText("Text prompt — e.g. building, car, tree")
         self.textPromptInput.setStyleSheet("""
             QLineEdit {
-                padding: 10px; font-size: 11px; border-radius: 7px;
+                padding: 8px 10px; font-size: 14px; border-radius: 7px;
                 border: 1px solid #D0D5DD; background: #FFF;
             }
-            QLineEdit:focus {
-                border: 2px solid #1570EF;
+            QLineEdit:focus { border: 2px solid #1570EF; }
+            QLineEdit:disabled {
+                background: #F3F4F6; color: #9CA3AF;
+                border: 1px solid #E5E7EB;
             }
         """)
         self.textPromptInput.setFocusPolicy(Qt.StrongFocus)
         text_prompt_layout.addWidget(self.textPromptInput)
 
-        # Scope selector (AOI vs Full Raster)
-        scope_layout = QtWidgets.QHBoxLayout()
-        scope_label = QtWidgets.QLabel("Scope:")
-        scope_label.setStyleSheet("font-size: 11px; color: #475467; font-weight: 600;")
+        # Row 2: [🤖 Auto-Segment]  or  [👁 Find Similar]
+        self.segmentTextBtn = QtWidgets.QPushButton("🤖 Auto-Segment")
+        self.segmentTextBtn.setCursor(Qt.PointingHandCursor)
+        self.segmentTextBtn.setEnabled(False)  # Enabled only when text is entered
+        self.segmentTextBtn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 8px 12px;
+                border-radius: 8px; color: #FFF;
+                background: #1570EF; border: 1px solid #1570EF;
+            }
+            QPushButton:hover { background: #1849A9; }
+            QPushButton:disabled { background: #D0D5DD; border: 1px solid #D0D5DD; color: #9CA3AF; }
+        """)
+        self.segmentTextBtn.setAutoDefault(False)
+        self.segmentTextBtn.setFocusPolicy(Qt.NoFocus)
+
+        self.similarModeBtn = QtWidgets.QPushButton("👁 Find Similar")
+        self.similarModeBtn.setCheckable(True)
+        self.similarModeBtn.setVisible(self.model_choice == "SAM3")
+        self.similarModeBtn.setToolTip("")
+        self.similarModeBtn.setFocusPolicy(Qt.NoFocus)
+
+        or_lbl = QtWidgets.QLabel("or")
+        or_lbl.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        or_lbl.setFixedWidth(20)
+        or_lbl.setAlignment(Qt.AlignCenter)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(4)
+        btn_row.addWidget(self.segmentTextBtn, stretch=1)
+        btn_row.addWidget(or_lbl)
+        btn_row.addWidget(self.similarModeBtn, stretch=1)
+        text_prompt_layout.addLayout(btn_row)
+
+        # Row 3: Scope
         self.scopeComboBox = QtWidgets.QComboBox()
         self.scopeComboBox.addItem("Visible Extent (AOI)", "aoi")
         self.scopeComboBox.addItem("Entire Raster (Auto-slice)", "full")
-        self.scopeComboBox.setMinimumWidth(200)  # Make dropdown wider
         self.scopeComboBox.setStyleSheet("""
             QComboBox {
-                font-size: 11px; padding: 6px; border-radius: 6px;
+                font-size: 14px; padding: 6px; border-radius: 6px;
                 border: 1px solid #D0D5DD; background: #FFF;
             }
             QComboBox:hover { border-color: #1570EF; }
         """)
         self.scopeComboBox.setFocusPolicy(Qt.NoFocus)
         self.scopeComboBox.currentIndexChanged.connect(self._on_scope_changed)
-        scope_layout.addWidget(scope_label)
-        scope_layout.addWidget(self.scopeComboBox)
-        scope_layout.setSpacing(8)
-        text_prompt_layout.addLayout(scope_layout)
 
-        # Segment button
-        self.segmentTextBtn = QtWidgets.QPushButton("🤖 Auto-Segment All Objects")
-        self.segmentTextBtn.setCursor(Qt.PointingHandCursor)
-        self.segmentTextBtn.setStyleSheet("""
-            QPushButton {
-                font-size: 11px; font-weight: 600; padding: 10px;
-                border-radius: 8px; color: #FFF;
-                background: #1570EF; border: 1px solid #1570EF;
-            }
-            QPushButton:hover { background: #1849A9; }
-            QPushButton:disabled { background: #D0D5DD; border: #D0D5DD; color: #667085; }
-        """)
-        self.segmentTextBtn.setAutoDefault(False)
-        self.segmentTextBtn.setFocusPolicy(Qt.NoFocus)
-        text_prompt_layout.addWidget(self.segmentTextBtn)
+        scope_row = QtWidgets.QHBoxLayout()
+        scope_row.setSpacing(8)
+        scope_row.addWidget(QtWidgets.QLabel("Scope:"))
+        scope_row.itemAt(0).widget().setStyleSheet("font-size: 14px; color: #475467;")
+        scope_row.addWidget(self.scopeComboBox, stretch=1)
+        text_prompt_layout.addLayout(scope_row)
 
-        main_layout.addWidget(self.textPromptCard)
+        tab1_layout.addWidget(self.textPromptCard)
 
         # --- Enhanced Segmentation Mode ---
         mode_card, mode_layout = create_card("Segmentation Mode", "🎯")
@@ -3417,20 +3828,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.pointModeBtn = QtWidgets.QPushButton("Point Mode")
         self.pointModeBtn.setCheckable(True)
         self.pointModeBtn.setChecked(True)
-        self.pointModeBtn.setProperty("active", True)
 
         # Enhanced BBox mode button
         self.bboxModeBtn = QtWidgets.QPushButton("BBox Mode")
         self.bboxModeBtn.setCheckable(True)
         self.bboxModeBtn.setVisible(True)
 
-        # Find Similar mode button (SAM3 only)
-        self.similarModeBtn = QtWidgets.QPushButton("Find Similar")
-        self.similarModeBtn.setCheckable(True)
-        self.similarModeBtn.setVisible(self.model_choice == "SAM3")
-        self.similarModeBtn.setToolTip("Find similar objects: Click on a reference object to find all similar objects in the area (SAM3 exemplar mode)")
-
-        # Button group for mutual exclusion
+        # Button group for click-based modes only — Auto-Segment is an action, not a mode
         self.mode_button_group = QtWidgets.QButtonGroup()
         self.mode_button_group.addButton(self.pointModeBtn)
         self.mode_button_group.addButton(self.bboxModeBtn)
@@ -3439,12 +3843,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         mode_btn_style = """
             QPushButton {
-                font-size: 12px; font-weight: 600; padding: 10px;
+                font-size: 14px; font-weight: 600; padding: 10px;
                 border-radius: 8px; border: 1px solid #D0D5DD;
-                background: #FFF;
+                background: #FFF; color: #344054;
             }
             QPushButton:hover { background: #F9FAFB; }
-            QPushButton[active="true"] {
+            QPushButton:checked {
                 color: #FFF; background: #1570EF; border: 1px solid #1570EF;
             }
         """
@@ -3455,10 +3859,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # NEW: Batch mode toggle
         batch_layout = QtWidgets.QHBoxLayout()
         batch_label = QtWidgets.QLabel("Batch Segmentation")
-        batch_label.setStyleSheet("font-size: 11px;")
-        batch_label.setToolTip("Find multiple objects in bbox area")
+        batch_label.setStyleSheet("font-size: 14px;")
+        batch_label.setToolTip(self._tip("Find multiple objects in bbox area"))
         self.batchModeSwitch = Switch()
-        self.batchModeSwitch.setToolTip("Enable to find multiple objects in bbox")
+        self.batchModeSwitch.setToolTip(self._tip("Enable to find multiple objects in bbox"))
         batch_layout.addWidget(batch_label)
         batch_layout.addStretch()
         batch_layout.addWidget(self.batchModeSwitch)
@@ -3486,21 +3890,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         size_layout = QtWidgets.QHBoxLayout()
         size_layout.setSpacing(4)
         size_label = QtWidgets.QLabel("Min size:")
-        size_label.setStyleSheet("font-size: 10px; color: #667085;")
-        size_label.setFixedWidth(50)  # Fixed width to prevent layout shift
+        size_label.setStyleSheet("font-size: 14px; color: #667085;")
+        size_label.setFixedWidth(70)
         self.minSizeSpinBox = QtWidgets.QSpinBox()
         self.minSizeSpinBox.setRange(10, 500)
         self.minSizeSpinBox.setValue(50)
         self.minSizeSpinBox.setSuffix("px")
-        self.minSizeSpinBox.setFixedWidth(70)  # Fixed width
+        self.minSizeSpinBox.setFixedWidth(100)
         self.minSizeSpinBox.setStyleSheet("""
             QSpinBox { 
-                font-size: 10px; padding: 2px; 
+                font-size: 14px; padding: 2px; 
                 border: 1px solid #D0D5DD; border-radius: 3px; 
             }
         """)
         # ENHANCED: Add helpful tooltip with class recommendations
-        self.minSizeSpinBox.setToolTip("Minimum object size in pixels\n• Buildings: ~100px\n• Vehicles: ~15px\n• Vessels: ~30px\n• Trees: ~25px")
+        self.minSizeSpinBox.setToolTip("")
         size_layout.addWidget(size_label)
         size_layout.addWidget(self.minSizeSpinBox)
         size_layout.addStretch()
@@ -3509,20 +3913,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         max_layout = QtWidgets.QHBoxLayout()
         max_layout.setSpacing(4)
         max_label = QtWidgets.QLabel("Max obj:")
-        max_label.setStyleSheet("font-size: 10px; color: #667085;")
-        max_label.setFixedWidth(50)  # Fixed width
+        max_label.setStyleSheet("font-size: 14px; color: #667085;")
+        max_label.setFixedWidth(70)
         self.maxObjectsSpinBox = QtWidgets.QSpinBox()
         self.maxObjectsSpinBox.setRange(1, 50)
         self.maxObjectsSpinBox.setValue(20)
-        self.maxObjectsSpinBox.setFixedWidth(50)  # Fixed width
+        self.maxObjectsSpinBox.setFixedWidth(100)
         self.maxObjectsSpinBox.setStyleSheet("""
             QSpinBox { 
-                font-size: 10px; padding: 2px; 
+                font-size: 14px; padding: 2px; 
                 border: 1px solid #D0D5DD; border-radius: 3px; 
             }
         """)
         # ENHANCED: Add helpful tooltip with class recommendations
-        self.maxObjectsSpinBox.setToolTip("Maximum objects to detect\n• Vehicles: ~40\n• Vessels: ~30\n• Trees: ~35\n• Buildings: ~15")
+        self.maxObjectsSpinBox.setToolTip("")
         max_layout.addWidget(max_label)
         max_layout.addWidget(self.maxObjectsSpinBox)
         max_layout.addStretch()
@@ -3532,7 +3936,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # ENHANCED: Add helpful hints label
         self.classHintsLabel = QtWidgets.QLabel("Auto-adjusts based on selected class")
-        self.classHintsLabel.setStyleSheet("font-size: 9px; color: #9CA3AF; font-style: italic;")
+        self.classHintsLabel.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
         self.classHintsLabel.setAlignment(Qt.AlignCenter)
         batch_settings_layout.addWidget(self.classHintsLabel)
 
@@ -3543,25 +3947,26 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Add all to mode layout
         mode_layout.addWidget(self.pointModeBtn)
         mode_layout.addWidget(self.bboxModeBtn)
-        mode_layout.addWidget(self.similarModeBtn)
         mode_layout.addLayout(batch_layout)
         mode_layout.addWidget(self.batchSettingsFrame)
-        main_layout.addWidget(mode_card)
+        tab1_layout.addWidget(mode_card)
 
         # --- Status & Controls Card ---
         status_card, status_layout = create_card("Status & Controls", "⚙️")
         self.statusLabel = QtWidgets.QLabel("Ready to segment")
         self.statusLabel.setWordWrap(True)
         self.statusLabel.setStyleSheet("""
-            padding: 10px; border-radius: 8px; font-size: 14px; font-weight: 500;
+            padding: 10px; border-radius: 8px; font-size: 16px; font-weight: 500;
             background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;
         """)  # Reduced padding and font-size
         status_layout.addWidget(self.statusLabel)
 
         self.statsLabel = QtWidgets.QLabel("Total Segments: 0 | Classes: 0")
         self.statsLabel.setStyleSheet(
-            "font-size: 10px; color: #475467; margin-top: 3px; margin-bottom: 3px;")  # Reduced from 18px
+            "font-size: 14px; color: #475467; margin-top: 3px; margin-bottom: 3px;")  # Reduced from 18px
         status_layout.addWidget(self.statsLabel)
+
+        # Filter info is shown inside the status label (no separate indicator)
 
         self.progressBar = QtWidgets.QProgressBar()
         self.progressBar.setRange(0, 0)
@@ -3583,7 +3988,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.undoBtn.setCursor(Qt.PointingHandCursor)
         self.undoBtn.setStyleSheet("""
             QPushButton {
-                font-size: 11px; font-weight: 600; padding: 10px;
+                font-size: 14px; font-weight: 600; padding: 10px;
                 border-radius: 8px; background: #DC2626; color: #FFF;
                 border: 1px solid #DC2626;
             }
@@ -3597,31 +4002,46 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.undoBtn.setDefault(False)
         self.undoBtn.setFocusPolicy(Qt.NoFocus)
 
-        self.exportBtn = QtWidgets.QPushButton("💾 Export All")
-        self.exportBtn.setCursor(Qt.PointingHandCursor)
-        self.exportBtn.setStyleSheet("""
+        export_btn_style = """
             QPushButton {
-                font-size: 11px; font-weight: 600; padding: 10px;
+                font-size: 14px; font-weight: 600; padding: 10px;
                 border-radius: 8px; color: #FFF;
                 background: #027A48; border: 1px solid #027A48;
             }
             QPushButton:hover { background: #039855; }
-        """)  # Reduced font-size and padding
+        """
 
+        self.exportBtn = QtWidgets.QPushButton("💾 Export All")
+        self.exportBtn.setCursor(Qt.PointingHandCursor)
+        self.exportBtn.setStyleSheet(export_btn_style)
         self.exportBtn.setAutoDefault(False)
         self.exportBtn.setDefault(False)
         self.exportBtn.setFocusPolicy(Qt.NoFocus)
 
-        status_layout.addWidget(self.undoBtn)
-        status_layout.addWidget(self.exportBtn)
-        main_layout.addWidget(status_card)
+        self.exportSelectedBtn = QtWidgets.QPushButton("💾 Export Selected")
+        self.exportSelectedBtn.setCursor(Qt.PointingHandCursor)
+        self.exportSelectedBtn.setStyleSheet(export_btn_style)
+        self.exportSelectedBtn.setAutoDefault(False)
+        self.exportSelectedBtn.setDefault(False)
+        self.exportSelectedBtn.setFocusPolicy(Qt.NoFocus)
+        self.exportSelectedBtn.setToolTip(self._tip("Export layers selected in the QGIS Layers panel"))
 
-        main_layout.addStretch()
+        export_row = QtWidgets.QHBoxLayout()
+        export_row.setSpacing(6)
+        export_row.addWidget(self.exportBtn, stretch=1)
+        export_row.addWidget(self.exportSelectedBtn, stretch=1)
+
+        status_layout.addWidget(self.undoBtn)
+        status_layout.addLayout(export_row)
+        tab1_layout.addWidget(status_card)
+
+        tab1_layout.addStretch()
+        tab2_layout.addStretch()
         self.setFocusPolicy(Qt.ClickFocus)
 
         # Enable proper resizing
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
-        main_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
+        container_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
 
         # Force initial layout
         self.adjustSize()
@@ -3636,6 +4056,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.bboxModeBtn.clicked.connect(self._activate_bbox_tool)
         self.undoBtn.clicked.connect(self._undo_last_polygon)
         self.exportBtn.clicked.connect(self._export_all_classes)
+        self.exportSelectedBtn.clicked.connect(self._export_selected_layers)
         self.batchModeSwitch.toggled.connect(self._on_batch_mode_toggle)
         self.minSizeSpinBox.valueChanged.connect(self._on_batch_settings_changed)
         self.maxObjectsSpinBox.valueChanged.connect(self._on_batch_settings_changed)
@@ -3644,7 +4065,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.modelComboBox.currentIndexChanged.connect(self._on_model_changed)
         self.segmentTextBtn.clicked.connect(self._run_text_segmentation)
         self.textPromptInput.returnPressed.connect(self._run_text_segmentation)
+        self.textPromptInput.textChanged.connect(
+            lambda text: self.segmentTextBtn.setEnabled(bool(text.strip()))
+        )
         self.similarModeBtn.clicked.connect(self._activate_similar_tool)
+        self.similarModeBtn.toggled.connect(self._on_similar_mode_toggled)
+
+        # GSD / Size / Shape filter connections
+        self.autoGsdBtn.clicked.connect(self._auto_detect_gsd)
+        self.gsdSpinBox.valueChanged.connect(self._on_gsd_changed)
+        self.realWorldFilterSwitch.toggled.connect(self._on_real_world_filter_toggle)
+        self.shapeFilterSwitch.toggled.connect(self._on_shape_filter_toggle)
+        self.minDiameterSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
+        self.maxDiameterSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
+        self.minAreaSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
+        self.maxAreaSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
+        self.circularitySpinBox.valueChanged.connect(lambda: self._update_filter_indicator())
+        self.compactnessSpinBox.valueChanged.connect(lambda: self._update_filter_indicator())
+        self.aspectRatioSpinBox.valueChanged.connect(lambda: self._update_filter_indicator())
 
         # Refresh model options in case SAM3 was downloaded during init
         self._refresh_model_options()
@@ -3695,6 +4133,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         selected_data = self.classComboBox.currentData()
         if selected_data:
             self.current_class = selected_data
+            self._set_class_combo_alert(False)
             class_info = self.classes[selected_data]
             self.currentClassLabel.setText(f"Current: {selected_data}")
 
@@ -3706,11 +4145,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     f"border: 3px solid rgb({r},{g},{b}); "
                     f"background-color: rgba({r},{g},{b}, 30); "
                     f"color: rgb({max(0, r-50)},{max(0, g-50)},{max(0, b-50)}); "
-                    f"border-radius: 8px; font-size: 14px;")
+                    f"border-radius: 8px; font-size: 16px;")
             except:
                 self.currentClassLabel.setStyleSheet(
                     f"font-weight: 600; padding: 12px; border: 2px solid rgb({color}); "
-                    f"background-color: rgba({color}, 50); font-size: 14px;")
+                    f"background-color: rgba({color}, 50); font-size: 16px;")
 
             # NEW: Apply class-specific batch defaults
             self._apply_class_batch_defaults(class_info)
@@ -3724,7 +4163,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 border: 2px solid #D0D5DD; 
                 background-color: #F9FAFB; 
                 color: #667085;
-                border-radius: 8px; font-size: 14px;
+                border-radius: 8px; font-size: 16px;
             """)
 
             # Reset to default values when no class selected
@@ -3744,6 +4183,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Update internal settings
             self.min_object_size = defaults.get('min_size', 50)
             self.max_objects = defaults.get('max_objects', 20)
+            self.max_object_size = defaults.get('max_size', 0)
 
             # Show helpful message about applied defaults
             class_name = self.current_class
@@ -3774,7 +4214,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.classes[class_name] = {
                 'color': color, 
                 'description': description,
-                'batch_defaults': {'min_size': 50, 'max_objects': 20}  # Generic defaults
+                'batch_defaults': {'min_size': 50, 'max_objects': 20, 'max_size': 0}  # Generic defaults
             }
 
             self.classComboBox.addItem(class_name, class_name)
@@ -3853,6 +4293,178 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.max_objects = self.maxObjectsSpinBox.value()
         self._clear_widget_focus()
 
+    # --- GSD / Size / Shape filter methods ---
+
+    def _auto_detect_gsd(self):
+        """Read GSD from the active raster layer metadata"""
+        import math
+        current_layer = self.iface.activeLayer()
+        if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
+            self._update_status("Select a raster layer first", "warning")
+            return
+
+        try:
+            import rasterio
+            with rasterio.open(current_layer.source()) as src:
+                x_res, y_res = src.res
+                avg_res = (abs(x_res) + abs(y_res)) / 2.0
+
+                crs = src.crs
+                if crs and crs.is_geographic:
+                    center_lat = (src.bounds.top + src.bounds.bottom) / 2.0
+                    meters_per_deg_lon = 111320 * math.cos(math.radians(center_lat))
+                    meters_per_deg_lat = 111320
+                    x_m = abs(x_res) * meters_per_deg_lon
+                    y_m = abs(y_res) * meters_per_deg_lat
+                    gsd_meters = (x_m + y_m) / 2.0
+                else:
+                    gsd_meters = avg_res
+
+                gsd_cm = gsd_meters * 100.0
+                self.gsd_cm_per_px = gsd_cm
+                self.gsdSpinBox.setValue(gsd_cm)
+                self.gsdSourceLabel.setText(
+                    f"Auto: {gsd_cm:.2f} cm/px from {current_layer.name()[:25]}")
+                self._update_status(f"GSD: {gsd_cm:.2f} cm/px detected", "info")
+                self._update_real_world_filter_hints()
+
+        except Exception as e:
+            self._update_status(f"GSD auto-detect failed: {e}", "error")
+
+    def _on_gsd_changed(self, value):
+        """Handle manual GSD spinbox change"""
+        self.gsd_cm_per_px = value if value > 0.01 else 0.0
+        if self.gsd_cm_per_px > 0:
+            self.gsdSourceLabel.setText(f"Manual: {value:.2f} cm/px")
+            self.realWorldFilterSwitch.setEnabled(True)
+            self._update_status(f"GSD: {value:.2f} cm/px", "info")
+        else:
+            self.gsdSourceLabel.setText("Not set")
+            # Disable and turn off size filter when GSD is cleared
+            if self.real_world_filter_enabled:
+                self.realWorldFilterSwitch.setChecked(False)
+            self.realWorldFilterSwitch.setEnabled(False)
+            self._update_status("Ready to segment", "info")
+        self._update_real_world_filter_hints()
+        self._update_filter_indicator()
+
+    def _on_real_world_filter_toggle(self, checked):
+        """Show/hide real-world size filter settings"""
+        self.real_world_filter_enabled = checked
+        self.realWorldFilterFrame.setVisible(checked)
+        self._update_filter_indicator()
+
+    def _on_shape_filter_toggle(self, checked):
+        """Show/hide shape filter settings"""
+        self.shape_filter_enabled = checked
+        self.shapeFilterFrame.setVisible(checked)
+        self._update_filter_indicator()
+
+    def _update_filter_indicator(self):
+        """Update filter summary and refresh status label to show it"""
+        parts = []
+
+        if self.real_world_filter_enabled and self.gsd_cm_per_px > 0:
+            size_parts = []
+            if self.minDiameterSpinBox.value() > 0:
+                size_parts.append(f"min {self.minDiameterSpinBox.value():.0f}cm")
+            if self.maxDiameterSpinBox.value() > 0:
+                size_parts.append(f"max {self.maxDiameterSpinBox.value():.0f}cm")
+            if self.minAreaSpinBox.value() > 0:
+                size_parts.append(f"min {self.minAreaSpinBox.value():.1f}m²")
+            if self.maxAreaSpinBox.value() > 0:
+                size_parts.append(f"max {self.maxAreaSpinBox.value():.1f}m²")
+            if size_parts:
+                parts.append("Size: " + ", ".join(size_parts))
+
+        if self.shape_filter_enabled:
+            shape_parts = []
+            if self.circularitySpinBox.value() > 0:
+                shape_parts.append(f"circ≥{self.circularitySpinBox.value():.1f}")
+            if self.compactnessSpinBox.value() > 0:
+                shape_parts.append(f"comp≥{self.compactnessSpinBox.value():.1f}")
+            if self.aspectRatioSpinBox.value() < 10:
+                shape_parts.append(f"AR≤{self.aspectRatioSpinBox.value():.1f}")
+            if shape_parts:
+                parts.append("Shape: " + ", ".join(shape_parts))
+
+        self._active_filter_summary = " | ".join(parts) if parts else ""
+        # Refresh status label to include/remove filter line
+        self._update_status(self._last_status_text, self._last_status_type)
+
+    def _update_real_world_filter_hints(self, _value=None):
+        """Update pixel-equivalent hint labels next to each spinbox"""
+        import math
+        gsd = self.gsd_cm_per_px
+
+        self.min_diameter_cm = self.minDiameterSpinBox.value()
+        self.max_diameter_cm = self.maxDiameterSpinBox.value()
+        self.min_area_m2 = self.minAreaSpinBox.value()
+        self.max_area_m2 = self.maxAreaSpinBox.value()
+
+        if gsd > 0:
+            self.gsdRequiredLabel.setVisible(False)
+        else:
+            self.gsdRequiredLabel.setVisible(True)
+
+        if gsd <= 0:
+            for label in [self.minDiameterPixelLabel, self.maxDiameterPixelLabel,
+                          self.minAreaPixelLabel, self.maxAreaPixelLabel]:
+                label.setText("(set GSD)")
+            return
+
+        for spinbox, label in [(self.minDiameterSpinBox, self.minDiameterPixelLabel),
+                               (self.maxDiameterSpinBox, self.maxDiameterPixelLabel)]:
+            val = spinbox.value()
+            if val > 0:
+                label.setText(f"(~{val / gsd:.0f} px)")
+            else:
+                label.setText("(off)")
+
+        gsd_m = gsd / 100.0
+        px_area_m2 = gsd_m * gsd_m
+        for spinbox, label in [(self.minAreaSpinBox, self.minAreaPixelLabel),
+                               (self.maxAreaSpinBox, self.maxAreaPixelLabel)]:
+            val = spinbox.value()
+            if val > 0:
+                label.setText(f"(~{val / px_area_m2:.0f} px\u00B2)")
+            else:
+                label.setText("(off)")
+
+        self._update_filter_indicator()
+
+    def _get_effective_pixel_filters(self):
+        """Convert real-world size filters to pixel thresholds.
+        Returns dict with min_area_px/max_area_px, or None if not active."""
+        import math
+        if not self.real_world_filter_enabled or self.gsd_cm_per_px <= 0:
+            return None
+
+        gsd = self.gsd_cm_per_px
+        result = {}
+
+        if self.min_diameter_cm > 0:
+            d_px = self.min_diameter_cm / gsd
+            result['min_area_px'] = math.pi * (d_px / 2) ** 2
+        if self.max_diameter_cm > 0:
+            d_px = self.max_diameter_cm / gsd
+            result['max_area_px'] = math.pi * (d_px / 2) ** 2
+
+        gsd_m = gsd / 100.0
+        px_area_m2 = gsd_m * gsd_m
+
+        if self.min_area_m2 > 0:
+            min_from_area = self.min_area_m2 / px_area_m2
+            result['min_area_px'] = max(result.get('min_area_px', 0), min_from_area)
+        if self.max_area_m2 > 0:
+            max_from_area = self.max_area_m2 / px_area_m2
+            if 'max_area_px' in result:
+                result['max_area_px'] = min(result['max_area_px'], max_from_area)
+            else:
+                result['max_area_px'] = max_from_area
+
+        return result if result else None
+
     def _run_text_segmentation(self):
         """Run segmentation using text prompt (SAM3 only)"""
         print("✅ GeoOSAM v1.3.0 - Text segmentation method (FIXED)")
@@ -3906,7 +4518,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         }
 
         self._add_to_queue(request)
-        self.textPromptInput.clear()
+        # Auto-Segment is not a map mode — deactivate any active click tool
+        self.mode_button_group.setExclusive(False)
+        for btn in (self.pointModeBtn, self.bboxModeBtn, self.similarModeBtn):
+            btn.setChecked(False)
+        self.mode_button_group.setExclusive(True)
+        self.iface.actionPan().trigger()
+        self._clear_widget_focus()
 
     def _on_model_changed(self, index):
         """Handle model selection change"""
@@ -4138,6 +4756,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         """Enhanced validation that properly handles layer switching"""
         if not self.current_class:
             self._update_status("Please select a class first!", "warning")
+            self._set_class_combo_alert(True)
             return False
 
         current_layer = self.iface.activeLayer()
@@ -4178,17 +4797,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Disable batch mode switch in point mode
         self.batchModeSwitch.setEnabled(False)
 
-        # Update button states
-        self.pointModeBtn.setProperty("active", True)
-        self.bboxModeBtn.setProperty("active", False)
-        self.similarModeBtn.setProperty("active", False)
-        self.pointModeBtn.style().polish(self.pointModeBtn)
-        self.bboxModeBtn.style().polish(self.bboxModeBtn)
-        self.similarModeBtn.style().polish(self.similarModeBtn)
-
+        self.pointModeBtn.setChecked(True)
         self._update_status(
             f"Point mode active for [{self.current_class}]. Click on map to segment.", "processing")
         self.canvas.setMapTool(self.pointTool)
+        self._clear_widget_focus()
 
     def _activate_bbox_tool(self):
         if not self._validate_class_selection():
@@ -4200,17 +4813,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Re-enable batch mode switch for bbox mode
         self.batchModeSwitch.setEnabled(True)
 
-        # Update button states
-        self.pointModeBtn.setProperty("active", False)
-        self.bboxModeBtn.setProperty("active", True)
-        self.similarModeBtn.setProperty("active", False)
-        self.pointModeBtn.style().polish(self.pointModeBtn)
-        self.bboxModeBtn.style().polish(self.bboxModeBtn)
-        self.similarModeBtn.style().polish(self.similarModeBtn)
-
+        self.bboxModeBtn.setChecked(True)
         self._update_status(
             f"BBox mode active for [{self.current_class}]. Click and drag to segment.", "processing")
         self.canvas.setMapTool(self.bboxTool)
+        self._clear_widget_focus()
 
     def _activate_similar_tool(self):
         """Activate similar object detection mode (SAM3 exemplar)"""
@@ -4234,20 +4841,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Disable batch mode for similar mode
         self.batchModeSwitch.setEnabled(False)
 
-        # Update button states
-        self.pointModeBtn.setProperty("active", False)
-        self.bboxModeBtn.setProperty("active", False)
-        self.similarModeBtn.setProperty("active", True)
-        self.pointModeBtn.style().polish(self.pointModeBtn)
-        self.bboxModeBtn.style().polish(self.bboxModeBtn)
-        self.similarModeBtn.style().polish(self.similarModeBtn)
-
+        self.similarModeBtn.setChecked(True)
         self._update_status(
             f"Similar Objects mode: Click on reference object for [{self.current_class}]",
             "processing"
         )
         # Use point tool to select reference object
         self.canvas.setMapTool(self.pointTool)
+        self._clear_widget_focus()
 
     def _on_map_tool_changed(self, new_tool, old_tool):
         """Detect when user switches away from plugin tools to external QGIS tools"""
@@ -4255,15 +4856,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if new_tool != self.pointTool and new_tool != self.bboxTool:
             # User switched to a different tool (e.g., hand/pan tool)
             # Uncheck all mode buttons to reflect that our tools are inactive
-            self.pointModeBtn.setProperty("active", False)
-            self.bboxModeBtn.setProperty("active", False)
-            self.similarModeBtn.setProperty("active", False)
-            self.pointModeBtn.style().polish(self.pointModeBtn)
-            self.bboxModeBtn.style().polish(self.bboxModeBtn)
-            self.similarModeBtn.style().polish(self.similarModeBtn)
-
-            # Uncheck all buttons in the button group
+            # Uncheck all buttons when user switches to an external QGIS tool
             self.mode_button_group.setExclusive(False)
+            self.segmentTextBtn.setChecked(False)
             self.pointModeBtn.setChecked(False)
             self.bboxModeBtn.setChecked(False)
             self.similarModeBtn.setChecked(False)
@@ -4514,6 +5109,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 mode = "bbox_batch"
 
         # Continue with worker thread...
+        # Compute effective size filters (real-world overrides pixel-based)
+        real_world_filters = self._get_effective_pixel_filters()
+        effective_min_size = self.min_object_size
+        effective_max_size = None
+        if real_world_filters:
+            if 'min_area_px' in real_world_filters:
+                effective_min_size = max(effective_min_size, int(real_world_filters['min_area_px']))
+            if 'max_area_px' in real_world_filters:
+                effective_max_size = int(real_world_filters['max_area_px'])
+        # Apply class-level max_size if no real-world override
+        if effective_max_size is None and self.max_object_size > 0:
+            effective_max_size = self.max_object_size
+
         self.worker = OptimizedSAM2Worker(
             predictor=self.predictor,
             arr=arr,
@@ -4526,10 +5134,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             debug_info={**debug_info, 'prep_time': prep_time},
             device=self.device,
             # Pass batch settings
-            min_object_size=self.min_object_size,
+            min_object_size=effective_min_size,
             arr_multispectral=arr_multispectral,
             max_objects=self.max_objects,
-            text_prompt=getattr(self, 'text_prompt', None)
+            text_prompt=getattr(self, 'text_prompt', None),
+            max_object_size_px=effective_max_size,
+            shape_filters={
+                'enabled': self.shape_filter_enabled,
+                'min_circularity': self.circularitySpinBox.value(),
+                'min_compactness': self.compactnessSpinBox.value(),
+                'max_aspect_ratio': self.aspectRatioSpinBox.value(),
+            } if self.shape_filter_enabled else None
         )
 
         self.worker.finished.connect(self._on_segmentation_finished)
@@ -4677,16 +5292,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if masks and len(masks) > 0:
                     # Process results - collect all features first
                     all_features = []
-                    print(f"🔄 Processing {len(masks)} masks...")
+                    total_masks = len(masks)
+                    print(f"🔄 Processing {total_masks} masks...")
+                    self.progressBar.setRange(0, total_masks)
+                    self.progressBar.setVisible(True)
 
+                    from qgis.PyQt.QtWidgets import QApplication
                     for i, mask in enumerate(masks):
-                        score = scores[i] if scores and i < len(scores) else 1.0
+                        self._update_status(f"🔄 Processing mask {i+1}/{total_masks}...", "processing")
+                        self.progressBar.setValue(i + 1)
+                        QApplication.processEvents()
 
                         # Convert mask to features
                         features = self._convert_mask_to_features(mask, mask_transform)
 
                         if features:
                             all_features.extend(features)
+
+                    self.progressBar.setVisible(False)
 
                     # Add all features to layer with undo tracking
                     if all_features:
@@ -4880,16 +5503,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     if masks and len(masks) > 0:
                         # Process results - collect all features first
                         all_features = []
-                        print(f"🔄 Processing {len(masks)} masks...")
+                        total_masks = len(masks)
+                        print(f"🔄 Processing {total_masks} masks...")
+                        self.progressBar.setRange(0, total_masks)
+                        self.progressBar.setVisible(True)
 
+                        from qgis.PyQt.QtWidgets import QApplication
                         for i, mask in enumerate(masks):
-                            score = scores[i] if scores and i < len(scores) else 1.0
+                            self._update_status(f"🔄 Processing mask {i+1}/{total_masks}...", "processing")
+                            self.progressBar.setValue(i + 1)
+                            QApplication.processEvents()
 
                             # Convert mask to features
                             features = self._convert_mask_to_features(mask, mask_transform)
 
                             if features:
                                 all_features.extend(features)
+
+                        self.progressBar.setVisible(False)
 
                         # Add all features to layer with undo tracking
                         if all_features:
@@ -4939,6 +5570,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Get class color
             class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
 
+            # Compute effective size filters for tiled worker
+            real_world_filters = self._get_effective_pixel_filters()
+            tiled_min = self.min_object_size
+            tiled_max = None
+            if real_world_filters:
+                if 'min_area_px' in real_world_filters:
+                    tiled_min = max(tiled_min, int(real_world_filters['min_area_px']))
+                if 'max_area_px' in real_world_filters:
+                    tiled_max = int(real_world_filters['max_area_px'])
+            if tiled_max is None and self.max_object_size > 0:
+                tiled_max = self.max_object_size
+
             self.tiled_worker = TiledSegmentationWorker(
                 predictor=self.predictor,
                 raster_path=raster_layer.source(),
@@ -4948,7 +5591,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 current_class=self.current_class,
                 class_color=class_color,
                 tile_size=1024,
-                overlap=128
+                overlap=128,
+                min_object_size=tiled_min,
+                max_object_size_px=tiled_max,
+                shape_filters={
+                    'enabled': self.shape_filter_enabled,
+                    'min_circularity': self.circularitySpinBox.value(),
+                    'min_compactness': self.compactnessSpinBox.value(),
+                    'max_aspect_ratio': self.aspectRatioSpinBox.value(),
+                } if self.shape_filter_enabled else None
             )
 
             # Connect signals
@@ -4994,6 +5645,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Get class color
             class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
 
+            # Compute effective size filters for tiled worker
+            real_world_filters = self._get_effective_pixel_filters()
+            tiled_min = self.min_object_size
+            tiled_max = None
+            if real_world_filters:
+                if 'min_area_px' in real_world_filters:
+                    tiled_min = max(tiled_min, int(real_world_filters['min_area_px']))
+                if 'max_area_px' in real_world_filters:
+                    tiled_max = int(real_world_filters['max_area_px'])
+            if tiled_max is None and self.max_object_size > 0:
+                tiled_max = self.max_object_size
+
             self.tiled_worker = TiledSegmentationWorker(
                 predictor=self.predictor,
                 raster_path=raster_layer.source(),
@@ -5003,7 +5666,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 current_class=self.current_class,
                 class_color=class_color,
                 tile_size=1024,
-                overlap=128
+                overlap=128,
+                min_object_size=tiled_min,
+                max_object_size_px=tiled_max,
+                shape_filters={
+                    'enabled': self.shape_filter_enabled,
+                    'min_circularity': self.circularitySpinBox.value(),
+                    'min_compactness': self.compactnessSpinBox.value(),
+                    'max_aspect_ratio': self.aspectRatioSpinBox.value(),
+                } if self.shape_filter_enabled else None
             )
 
             # Connect signals
@@ -5069,6 +5740,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Get class color
             class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
 
+            # Compute effective size filters for tiled worker
+            real_world_filters = self._get_effective_pixel_filters()
+            tiled_min = self.min_object_size
+            tiled_max = None
+            if real_world_filters:
+                if 'min_area_px' in real_world_filters:
+                    tiled_min = max(tiled_min, int(real_world_filters['min_area_px']))
+                if 'max_area_px' in real_world_filters:
+                    tiled_max = int(real_world_filters['max_area_px'])
+            if tiled_max is None and self.max_object_size > 0:
+                tiled_max = self.max_object_size
+
             self.tiled_worker = TiledSegmentationWorker(
                 predictor=self.predictor,
                 raster_path=raster_layer.source(),
@@ -5078,7 +5761,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 current_class=self.current_class,
                 class_color=class_color,
                 tile_size=1024,
-                overlap=128
+                overlap=128,
+                min_object_size=tiled_min,
+                max_object_size_px=tiled_max,
+                shape_filters={
+                    'enabled': self.shape_filter_enabled,
+                    'min_circularity': self.circularitySpinBox.value(),
+                    'min_compactness': self.compactnessSpinBox.value(),
+                    'max_aspect_ratio': self.aspectRatioSpinBox.value(),
+                } if self.shape_filter_enabled else None
             )
             print("✅ Worker created successfully")
         except Exception as e:
@@ -5250,7 +5941,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.cancelTiledBtn.setCursor(Qt.PointingHandCursor)
             self.cancelTiledBtn.setStyleSheet("""
                 QPushButton {
-                    font-size: 11px; font-weight: 600; padding: 10px;
+                    font-size: 14px; font-weight: 600; padding: 10px;
                     border-radius: 8px; background: #DC2626; color: #FFF;
                     border: 1px solid #DC2626;
                 }
@@ -5304,7 +5995,29 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self.cancelTiledBtn.setText("Cancelling...")
 
     def _convert_mask_to_features(self, mask, mask_transform):
-        """Convert a single mask to QgsFeature objects"""
+        """Convert a single mask to QgsFeature objects with size/shape filtering"""
+        # Compute effective size filters
+        real_world_filters = self._get_effective_pixel_filters()
+        effective_min = self.min_object_size
+        effective_max = None
+        if real_world_filters:
+            if 'min_area_px' in real_world_filters:
+                effective_min = max(effective_min, int(real_world_filters['min_area_px']))
+            if 'max_area_px' in real_world_filters:
+                effective_max = int(real_world_filters['max_area_px'])
+        if effective_max is None and self.max_object_size > 0:
+            effective_max = self.max_object_size
+
+        # Build shape filters dict
+        sf = None
+        if self.shape_filter_enabled:
+            sf = {
+                'enabled': True,
+                'min_circularity': self.circularitySpinBox.value(),
+                'min_compactness': self.compactnessSpinBox.value(),
+                'max_aspect_ratio': self.aspectRatioSpinBox.value(),
+            }
+
         try:
             # Threshold mask to binary and clean it up
             _, binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
@@ -5316,13 +6029,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             close_kernel = np.ones((7, 7), np.uint8)
             binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, close_kernel)
 
-            # Remove small objects
+            # Remove objects outside size range
             nlabels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-            min_size = 20
             cleaned = np.zeros(binary.shape, dtype=np.uint8)
             for i in range(1, nlabels):
-                if stats[i, cv2.CC_STAT_AREA] >= min_size:
-                    cleaned[labels == i] = 255
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area < effective_min:
+                    continue
+                if effective_max is not None and area > effective_max:
+                    continue
+                cleaned[labels == i] = 255
             binary = cleaned
 
         except Exception as e:
@@ -5338,6 +6054,25 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     shp_geom = shp_geom.buffer(0)
                 if shp_geom.is_empty:
                     continue
+
+                # Shape filter check using shapely geometry
+                if sf and sf.get('enabled'):
+                    shp_area = shp_geom.area
+                    shp_perimeter = shp_geom.length
+                    if shp_perimeter > 0:
+                        compactness = 4 * 3.14159265 * shp_area / (shp_perimeter * shp_perimeter)
+                    else:
+                        compactness = 0
+                    bx, by, bxx, byy = shp_geom.bounds
+                    bw, bh = bxx - bx, byy - by
+                    aspect_ratio = max(bw, bh) / max(min(bw, bh), 1e-9)
+
+                    if compactness < sf.get('min_compactness', 0.0):
+                        continue
+                    if compactness < sf.get('min_circularity', 0.0):
+                        continue
+                    if aspect_ratio > sf.get('max_aspect_ratio', 20.0):
+                        continue
 
                 # Convert shapely geometry to QGIS geometry
                 if hasattr(shp_geom, 'exterior'):
@@ -5502,18 +6237,27 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             batch_info = f"batch_{object_count}_objects" if debug_info.get('individual_processing') else "single"
 
             # Set enhanced attributes for features
+            import math as _math
             for i, feat in enumerate(features):
+                geom = feat.geometry()
+                area_m2 = geom.area() if geom and not geom.isEmpty() else 0.0
+                diameter_cm = 2.0 * _math.sqrt(area_m2 / _math.pi) * 100.0 if area_m2 > 0 else 0.0
+                perimeter = geom.length() if geom and not geom.isEmpty() else 0.0
+                circularity = (4.0 * _math.pi * area_m2) / (perimeter * perimeter) if perimeter > 0 else 0.0
                 feat.setAttributes([
                     next_segment_id + i,
                     self.current_class,
                     class_color,
-                    batch_info,  # Use batch_info instead of just mode
+                    batch_info,
                     timestamp_str,
                     filename or "debug_disabled",
                     crop_info,
                     canvas_scale,
                     source_layer_name,
-                    layer_crs
+                    layer_crs,
+                    round(area_m2, 4),
+                    round(diameter_cm, 2),
+                    round(circularity, 4)
                 ])
 
             # Add features and track for undo
@@ -6140,15 +6884,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             prep_time = debug_info.get('prep_time', 0)
             total_time = prep_time + process_time
 
-            model_info = f"({debug_info.get('model', 'SAM')} on {self.device.upper()})"
-            batch_info = ""
-            if debug_info.get('batch_count'):
-                if 'individual_masks' in result:
-                    batch_info = f" - {debug_info['batch_count']} individual objects found"
-                else:
-                    batch_info = f" - {debug_info['batch_count']} objects found"
-            self._update_status(
-                f"✅ Completed in {total_time:.1f}s {model_info}{batch_info}! Click again to add more.", "info")
+            count = debug_info.get('batch_count')
+            if isinstance(count, tuple):
+                count = count[0]
+            count_str = f"{count} objects found" if count else "Done"
+            self._update_status(f"✅ {count_str} · {total_time:.1f}s", "info")
+            self._clear_widget_focus()
 
         except Exception as e:
             import traceback
@@ -6375,18 +7116,27 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             batch_info = f"batch_obj_{object_number}"
 
             # Set enhanced attributes for features
+            import math as _math
             for i, feat in enumerate(features):
+                geom = feat.geometry()
+                area_m2 = geom.area() if geom and not geom.isEmpty() else 0.0
+                diameter_cm = 2.0 * _math.sqrt(area_m2 / _math.pi) * 100.0 if area_m2 > 0 else 0.0
+                perimeter = geom.length() if geom and not geom.isEmpty() else 0.0
+                circularity = (4.0 * _math.pi * area_m2) / (perimeter * perimeter) if perimeter > 0 else 0.0
                 feat.setAttributes([
                     next_segment_id + i,
                     self.current_class,
                     class_color,
-                    batch_info,  # Individual object identifier
+                    batch_info,
                     timestamp_str,
                     f"batch_obj_{object_number}.png" if self.save_debug_masks else "debug_disabled",
                     crop_info,
                     canvas_scale,
                     source_layer_name,
-                    layer_crs
+                    layer_crs,
+                    round(area_m2, 4),
+                    round(diameter_cm, 2),
+                    round(circularity, 4)
                 ])
 
             # Add features and track for undo
@@ -6428,6 +7178,29 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _process_multiple_masks_result(self, masks, mask_transform, debug_info):
         """Process multiple masks together for text/similar mode (single undo)"""
+        # Optional max-size filter for text/similar mode (only when real-world filtering is enabled)
+        max_area_px = None
+        if self.real_world_filter_enabled and self.gsd_cm_per_px > 0:
+            real_world_filters = self._get_effective_pixel_filters()
+            if real_world_filters and 'max_area_px' in real_world_filters:
+                max_area_px = int(real_world_filters['max_area_px'])
+
+        if max_area_px is not None:
+            filtered_masks = []
+            filtered_out = 0
+            for mask in masks:
+                try:
+                    area_px = int(np.sum(mask > 0))
+                except Exception:
+                    area_px = 0
+                if area_px <= max_area_px:
+                    filtered_masks.append(mask)
+                else:
+                    filtered_out += 1
+            if filtered_out > 0:
+                print(f"📏 Real-world max-area filter: removed {filtered_out} masks > {max_area_px}px²")
+            masks = filtered_masks
+
         # Convert all masks to features
         all_features = []
         for i, mask in enumerate(masks):
@@ -6539,7 +7312,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             QgsField("crop_size", QVariant.String),
             QgsField("canvas_scale", QVariant.Double),
             QgsField("source_layer", QVariant.String),  # Track source raster
-            QgsField("layer_crs", QVariant.String)      # Track CRS used
+            QgsField("layer_crs", QVariant.String),     # Track CRS used
+            QgsField("area_m2", QVariant.Double),
+            QgsField("diameter_cm", QVariant.Double),
+            QgsField("circularity", QVariant.Double)
         ])
         layer.updateFields()
 
@@ -6624,21 +7400,61 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 layer.rollBack()
 
     def _export_all_classes(self):
-        if not self.result_layers:
+        # Collect all SAM_ vector layers from the project (not just current-session ones)
+        layers_to_export = []
+        for layer in QgsProject.instance().mapLayers().values():
+            try:
+                if (isinstance(layer, QgsVectorLayer) and
+                        layer.isValid() and
+                        layer.name().startswith("SAM_") and
+                        layer.featureCount() > 0):
+                    layers_to_export.append(layer)
+            except RuntimeError:
+                continue
+
+        if not layers_to_export:
             self._update_status("No segments to export!", "warning")
             return
 
         exported_count = 0
-        for class_name, layer in self.result_layers.items():
-            if layer and layer.featureCount() > 0:
-                if self._export_layer(layer, class_name):
-                    exported_count += 1
+        for layer in layers_to_export:
+            class_name = layer.name()  # Use full layer name as file name
+            if self._export_layer(layer, class_name):
+                exported_count += 1
 
         if exported_count > 0:
             self._update_status(
-                f"💾 Exported {exported_count} class(es) to {self.export_save_dir}", "info")
+                f"💾 Exported {exported_count} layer(s) to {self.export_save_dir}", "info")
         else:
-            self._update_status("No segments found to export!", "warning")
+            self._update_status("Export failed — check output folder", "warning")
+
+    def _export_selected_layers(self):
+        selected = self.iface.layerTreeView().selectedLayers()
+        layers_to_export = []
+        for layer in selected:
+            try:
+                if (isinstance(layer, QgsVectorLayer) and
+                        layer.isValid() and
+                        layer.name().startswith("SAM_") and
+                        layer.featureCount() > 0):
+                    layers_to_export.append(layer)
+            except RuntimeError:
+                continue
+
+        if not layers_to_export:
+            self._update_status("No SAM layers selected in Layers panel", "warning")
+            return
+
+        exported_count = 0
+        for layer in layers_to_export:
+            if self._export_layer(layer, layer.name()):
+                exported_count += 1
+
+        if exported_count > 0:
+            self._update_status(
+                f"💾 Exported {exported_count} layer(s) to {self.export_save_dir}", "info")
+        else:
+            self._update_status("Export failed — check output folder", "warning")
 
     def _export_layer(self, layer, class_name):
         try:
@@ -6749,6 +7565,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.setCursor(Qt.ArrowCursor)
 
     def _update_status(self, message, status_type="info"):
+        # Store for filter indicator refresh
+        self._last_status_text = message
+        self._last_status_type = status_type
+
         color_styles = {
             "info": "background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;",
             "warning": "background: #FFFBEB; color: #DC6803; border: 1px solid #FED7AA;",
@@ -6756,9 +7576,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             "processing": "background: #EFF8FF; color: #1570EF; border: 1px solid #B2DDFF;"
         }
         color_style = color_styles.get(status_type, color_styles["info"])
-        self.statusLabel.setText(message)
+
+        # Append active filter summary if any
+        filter_summary = getattr(self, '_active_filter_summary', '')
+        display = message
+        if filter_summary:
+            display = f"{message}\n🔹 Filters: {filter_summary}"
+
+        self.statusLabel.setText(display)
         self.statusLabel.setStyleSheet(f"""
-            padding: 14px; border-radius: 8px; font-size: 14px; font-weight: 500;
+            padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 500;
             {color_style}
         """) 
 
