@@ -40,9 +40,9 @@ from qgis.PyQt import QtWidgets, QtCore, QtGui
 # fmt: off
 plugin_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(plugin_dir)
-from helpers import create_detection_helper
-from sam2.build_sam import build_sam2
-from sam2.sam2_image_predictor import SAM2ImagePredictor
+from helpers import create_detection_helper  # noqa: E402
+from sam2.build_sam import build_sam2  # noqa: E402
+from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: E402
 
 # Ultralytics SAM2.1 setup
 SAM21_AVAILABLE = False
