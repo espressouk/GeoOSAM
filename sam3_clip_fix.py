@@ -10,8 +10,6 @@ Date: 2025-12-26
 Issue: https://github.com/ultralytics/ultralytics/issues/22647
 """
 
-import sys
-
 
 def apply_sam3_clip_fix():
     """
@@ -43,9 +41,6 @@ def apply_sam3_clip_fix():
 
         # Apply the fix
         print("🔧 Applying SAM3 CLIP tokenizer fix...")
-
-        # Save reference to original forward method
-        _original_forward = VETextEncoder.forward
 
         def _fixed_forward(self, text, input_boxes=None):
             """
@@ -120,8 +115,8 @@ def check_sam3_text_available():
         bool: True if SAM3 text features can work, False otherwise
     """
     try:
-        import clip
-        from ultralytics.models.sam.sam3.text_encoder_ve import VETextEncoder
+        import clip  # noqa: F401
+        from ultralytics.models.sam.sam3.text_encoder_ve import VETextEncoder  # noqa: F401
         return True
     except ImportError:
         return False

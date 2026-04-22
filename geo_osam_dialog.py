@@ -9,7 +9,7 @@ if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
 
 from hydra.core.global_hydra import GlobalHydra
-from hydra import initialize_config_module, compose
+from hydra import initialize_config_module
 from shapely.geometry import shape
 from rasterio.features import shapes
 import rasterio
@@ -20,8 +20,6 @@ import datetime
 import pathlib
 import urllib.request
 import tempfile
-import math
-from PIL import Image
 from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal
 from qgis.core import (
     QgsProject,
@@ -35,15 +33,6 @@ from qgis.core import (
     QgsFillSymbol,
     QgsField,
     QgsVectorFileWriter,
-    QgsMapLayerType,
-    QgsDataSourceUri,
-    QgsNetworkAccessManager,
-    QgsRasterFileWriter,
-    QgsRasterPipe,
-    QgsCoordinateTransform,
-    QgsMapRendererParallelJob,
-    QgsMapSettings,
-    Qgis
 )
 from qgis.gui import QgsRubberBand, QgsMapTool, QgsVertexMarker
 from qgis.PyQt import QtWidgets, QtCore, QtGui
@@ -140,7 +129,7 @@ except Exception as e:
 
 try:
     from ultralytics import SAM
-    test_model = SAM('sam2.1_b.pt') # Test with base model
+    test_model = SAM('sam2.1_b.pt')  # Test with base model
     SAM21_AVAILABLE = True
     print("✅ Ultralytics SAM2.1 available")
 
@@ -157,7 +146,7 @@ try:
                 if point_coords is not None:
                     if len(point_coords) > 0:
                         points = [[int(p[0]), int(p[1])] for p in point_coords]
-                        labels = [int(l) for l in point_labels] if point_labels is not None else [1] * len(points)
+                        labels = [int(lbl) for lbl in point_labels] if point_labels is not None else [1] * len(points)
                         # Multi-point: wrap in extra list so Ultralytics treats all points as one object
                         # Single-point: keep flat format for compatibility with all modes
                         if len(points) > 1:
@@ -334,7 +323,7 @@ class SAM3PredictorWrapper:
         # SAM3 will segment ALL objects, user can filter by selected example
         if exemplar_mode and box is not None:
             try:
-                print(f"🤖 SAM3 automatic instance segmentation (similar objects mode)")
+                print("🤖 SAM3 automatic instance segmentation (similar objects mode)")
                 print(f"📦 Box hint: {box}")
                 print(f"📸 Image source: {self.cached_image_path}")
 
@@ -377,7 +366,7 @@ class SAM3PredictorWrapper:
         if point_coords is not None:
             try:
                 points = [[int(p[0]), int(p[1])] for p in point_coords]
-                labels = [int(l) for l in point_labels] if point_labels is not None else [1] * len(points)
+                labels = [int(lbl) for lbl in point_labels] if point_labels is not None else [1] * len(points)
                 self._reset_predictor_if_semantic()
                 # Multi-point: wrap in extra list so Ultralytics treats all points as one object
                 # Single-point: keep flat format for compatibility with all modes
@@ -418,7 +407,7 @@ class SAM3PredictorWrapper:
     def _extract_masks(self, results):
         """Extract masks from SAM3 results"""
         try:
-            print(f"🔬 Extracting masks from results...")
+            print("🔬 Extracting masks from results...")
             print(f"   Results type: {type(results)}")
             print(f"   Results length: {len(results) if results else 0}")
 
@@ -456,7 +445,7 @@ class SAM3PredictorWrapper:
                             if hasattr(result, 'boxes') and hasattr(result.boxes, 'conf'):
                                 try:
                                     score = float(result.boxes.conf[i]) if i < len(result.boxes.conf) else 1.0
-                                except:
+                                except Exception:
                                     score = 1.0
                             else:
                                 score = 1.0
@@ -539,6 +528,7 @@ class SAM3PredictorWrapper:
             print(f"⚠️ SAM3 semantic predictor init failed: {e}")
             return False
 
+
 """
 GeoOSAM Control Panel - Enhanced SAM segmentation for QGIS
 Copyright (C) 2025 by Ofer Butbega
@@ -546,6 +536,7 @@ Copyright (C) 2025 by Ofer Butbega
 
 # Global threading configuration
 _THREADS_CONFIGURED = False
+
 
 def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
     """Class-aware merging with different strategies per class"""
@@ -570,7 +561,7 @@ def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
     merged    = []
 
     for i in range(len(bins)):
-        if used[i]: 
+        if used[i]:
             continue
         group_mask = bins[i].copy()
         # merge in any dilated-overlap neighbors
@@ -584,6 +575,7 @@ def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
                 group_mask = cv2.bitwise_or(group_mask, bins[j])
         merged.append(group_mask)
     return merged
+
 
 def dedupe_or_merge_masks_smart(masks, class_name, iou_thresh=0.3, merge=True):
     """Smart deduplication based on class type"""
@@ -633,6 +625,7 @@ def dedupe_or_merge_masks_smart(masks, class_name, iou_thresh=0.3, merge=True):
         result.append(union_mask)
     return result
 
+
 def filter_contained_masks(masks):
     keep = []
     masks_bin = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
@@ -658,6 +651,7 @@ def filter_contained_masks(masks):
             used[i] = True
     return keep
 
+
 def setup_pytorch_performance():
     global _THREADS_CONFIGURED
 
@@ -670,7 +664,7 @@ def setup_pytorch_performance():
     if _THREADS_CONFIGURED:
         try:
             return torch.get_num_threads()
-        except:
+        except Exception:
             return optimal_threads
 
     # Try to configure threads, but don't fail if already initialized
@@ -678,12 +672,12 @@ def setup_pytorch_performance():
         torch.set_num_interop_threads(min(4, optimal_threads // 2))
         torch.set_num_threads(optimal_threads)
         actual_threads = torch.get_num_threads()
-    except RuntimeError as e:
+    except RuntimeError:
         # Threading already configured by another plugin/process
-        print(f"Note: PyTorch threading pre-configured, using existing settings")
+        print("Note: PyTorch threading pre-configured, using existing settings")
         try:
             actual_threads = torch.get_num_threads()
-        except:
+        except Exception:
             actual_threads = optimal_threads
 
     # Always set environment variables as backup
@@ -694,6 +688,7 @@ def setup_pytorch_performance():
     _THREADS_CONFIGURED = True
     return actual_threads
 
+
 def auto_download_checkpoint():
     """Download SAM2 checkpoint if missing"""
     plugin_dir = os.path.dirname(os.path.abspath(__file__))
@@ -701,10 +696,10 @@ def auto_download_checkpoint():
     checkpoint_path = os.path.join(checkpoint_dir, "sam2.1_hiera_tiny.pt")
 
     if os.path.exists(checkpoint_path):
-        print(f"✅ SAM2 checkpoint found")
+        print("✅ SAM2 checkpoint found")
         return True
 
-    print(f"🔍 SAM2 checkpoint not found, downloading...")
+    print("🔍 SAM2 checkpoint not found, downloading...")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     try:
@@ -719,6 +714,7 @@ def auto_download_checkpoint():
     except Exception as e:
         print(f"❌ Download failed: {e}")
         return False
+
 
 def show_checkpoint_dialog(parent=None):
     """Show download dialog for SAM2 checkpoint"""
@@ -755,6 +751,7 @@ def show_checkpoint_dialog(parent=None):
             QMessageBox.critical(parent, "Error", f"Download error: {e}")
             return False
     return False
+
 
 def detect_best_device():
     """Detect best available device and return available model options"""
@@ -990,7 +987,6 @@ class TiledSegmentationWorker(QThread):
             import rasterio
             from rasterio.windows import Window
             import time
-            import cv2
             import numpy as np
             print("✅ Imports successful")
         except Exception as e:
@@ -1131,7 +1127,7 @@ class TiledSegmentationWorker(QThread):
                                     temp_tile[0:ex_h, 0:ex_w] = exemplar_crop
                                     exemplar_bbox_in_tile = [0, 0, ex_w, ex_h]
 
-                                    print(f"🎯 Using exemplar to find similar objects")
+                                    print("🎯 Using exemplar to find similar objects")
                                     print(f"   Exemplar bbox in tile: {exemplar_bbox_in_tile}")
 
                                     # Set the composite image with exemplar
@@ -1193,10 +1189,10 @@ class TiledSegmentationWorker(QThread):
                                         if masks:
                                             print(f"✅ After filtering exemplar: {len(masks)} similar objects remain")
                                 else:
-                                    print(f"⚠️  Exemplar too large for tile")
+                                    print("⚠️  Exemplar too large for tile")
                                     masks = None
                             else:
-                                print(f"⚠️  No exemplar crop available for similar mode")
+                                print("⚠️  No exemplar crop available for similar mode")
                                 masks = None
                         else:
                             print(f"⚠️  Unknown request type: {self.request_type}")
@@ -1435,8 +1431,8 @@ class OptimizedSAM2Worker(QThread):
         helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
 
         # Use multi-spectral image if available and supported by the helper
-        if (multispectral_image is not None and 
-            hasattr(helper, 'supports_multispectral') and 
+        if (multispectral_image is not None and
+            hasattr(helper, 'supports_multispectral') and
             helper.supports_multispectral()):
             detection_image = multispectral_image
             print(f"🔍 Detecting {class_name} candidates in {detection_image.shape} region (multi-spectral)")
@@ -1589,7 +1585,6 @@ class OptimizedSAM2Worker(QThread):
         except Exception as e:
             print(f"Validation error: {e}")
             return False
-
 
     def _validate_object_shape(self, mask, area):
         """Validate if the detected object has a reasonable shape"""
@@ -1968,7 +1963,7 @@ class OptimizedSAM2Worker(QThread):
             if binary_mask.size == 0:
                 return []
 
-            print(f"\n🔍 CLASS-AWARE MASK ANALYSIS:")
+            print("\n🔍 CLASS-AWARE MASK ANALYSIS:")
             print(f"   Mask shape: {binary_mask.shape}")
             print(f"   Non-zero pixels: {np.sum(binary_mask > 0)}")
 
@@ -1992,7 +1987,7 @@ class OptimizedSAM2Worker(QThread):
                 return []
 
             # CROP MASK TO BBOX AREA ONLY
-            print(f"   🔲 Cropping mask to bbox area only...")
+            print("   🔲 Cropping mask to bbox area only...")
             binary_mask = self._crop_mask_to_bbox(binary_mask, [bbox_x1, bbox_y1, bbox_x2, bbox_y2])
             print(f"   After bbox crop: {np.sum(binary_mask > 0)} non-zero pixels")
 
@@ -2058,7 +2053,7 @@ class OptimizedSAM2Worker(QThread):
                     continue
 
             print(f"   🎯 RESULT: {len(individual_masks)} {current_class} objects, {rejected_count} rejected")
-            print(f"   ✅ Class-aware filtering applied\n")
+            print("   ✅ Class-aware filtering applied\n")
 
             return individual_masks
 
@@ -2102,13 +2097,14 @@ class OptimizedSAM2Worker(QThread):
             'logits': logits,
             'mask_transform': self.mask_transform,
             'debug_info': {
-                **self.debug_info, 
+                **self.debug_info,
                 'model': self.model_choice,
                 'batch_count': batch_count
             }
         }
 
         self.finished.emit(result)
+
 
 class EnhancedPointClickTool(QgsMapTool):
     def __init__(self, canvas, cb):
@@ -2190,6 +2186,7 @@ class EnhancedPointClickTool(QgsMapTool):
         self.accumulated_points = []
         self.canvas.refresh()
 
+
 class EnhancedBBoxClickTool(QgsMapTool):
     def __init__(self, canvas, cb):
         super().__init__(canvas)
@@ -2242,11 +2239,13 @@ class EnhancedBBoxClickTool(QgsMapTool):
         self.bbox_rubber.reset(QgsWkbTypes.PolygonGeometry)
         self.canvas.refresh()
 
+
 class Switch(QtWidgets.QAbstractButton):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self.setCheckable(True)
         self.setFixedSize(50, 28)
+
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -2259,8 +2258,10 @@ class Switch(QtWidgets.QAbstractButton):
         thumb_rect = QtCore.QRect(thumb_x, 4, 20, 20)
         painter.setBrush(thumb_color)
         painter.drawEllipse(thumb_rect)
+
     def sizeHint(self):
         return self.minimumSizeHint()
+
 
 class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     """Enhanced SAM segmentation control panel for QGIS"""
@@ -2428,7 +2429,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _debug_current_settings(self):
         """Debug current batch settings"""
-        print(f"\n🔧 CURRENT SETTINGS:")
+        print("\n🔧 CURRENT SETTINGS:")
         print(f"   Batch mode enabled: {self.batch_mode_enabled}")
         print(f"   Min object size: {self.min_object_size}px")
         print(f"   Max objects: {self.max_objects}")
@@ -2522,7 +2523,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if self.device == "cpu":
                     try:
                         sam_model = torch.jit.optimize_for_inference(sam_model)
-                    except:
+                    except Exception:
                         pass
 
                 self.predictor = SAM2ImagePredictor(sam_model)
@@ -2555,8 +2556,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     self,
                     "Model Download",
                     f"Downloading {model_config['name']} for first-time use.\n\n"
-                    f"This may take a minute. The model will be cached for future use.\n\n"
-                    f"Check the Python console for progress."
+                    "This may take a minute. The model will be cached for future use.\n\n"
+                    "Check the Python console for progress."
                 )
 
             sam21_model = SAM(weights_filename)
@@ -2568,7 +2569,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 self,
                 "Model Load Failed",
                 f"Failed to load {model_config['name']}:\n{e}\n\n"
-                f"Falling back to SAM2 Tiny."
+                "Falling back to SAM2 Tiny."
             )
             self.model_choice = "SAM2_tiny"
             self._init_sam2_model(os.path.dirname(os.path.abspath(__file__)), "tiny")
@@ -2649,7 +2650,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             "You can download directly from within GeoOSAM.\n\n"
             "File locations:\n"
             f"   • {os.path.dirname(os.path.abspath(__file__))}/sam3.pt\n"
-            f"   • ~/.ultralytics/weights/sam3.pt\n"
+            "   • ~/.ultralytics/weights/sam3.pt\n"
             "   • Current directory/sam3.pt\n\n"
             "Requirements:\n"
             "• Ultralytics >=8.3.237\n"
@@ -2786,7 +2787,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if is_licensed:
             # Show current license info with option to change
             info_label = QtWidgets.QLabel(
-                f"<h3>✅ License Active</h3>"
+                "<h3>✅ License Active</h3>"
                 f"<p><b>Email:</b> {license_info['email']}</p>"
                 f"<p><b>Status:</b> {license_info['status']}</p>"
             )
@@ -2909,12 +2910,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 QtWidgets.QMessageBox.information(
                     dialog,
                     "License Activated",
-                    f"✅ License activated successfully!\n\n"
+                    "✅ License activated successfully!\n\n"
                     f"Email: {email}\n"
-                    f"You now have access to SAM3 Pro features:\n"
-                    f"• Entire raster processing\n"
-                    f"• Unlimited text prompts\n"
-                    f"• Unlimited similar object detection"
+                    "You now have access to SAM3 Pro features:\n"
+                    "• Entire raster processing\n"
+                    "• Unlimited text prompts\n"
+                    "• Unlimited similar object detection"
                 )
 
                 # Update UI
@@ -3139,7 +3140,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _on_layers_added(self, layers):
         """Handle when layers are added (simplified)"""
         # No need to connect selection signals anymore
-        pass
 
     def _on_layers_removed(self, layer_ids):
         """Handle when layers are removed from the project"""
@@ -3699,9 +3699,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.currentClassLabel = QtWidgets.QLabel("No class selected")
         self.currentClassLabel.setWordWrap(True)
         self.currentClassLabel.setStyleSheet("""
-            font-weight: 600; padding: 12px; margin: 4px; 
-            border: 2px solid #D0D5DD; 
-            background-color: #F9FAFB; 
+            font-weight: 600; padding: 12px; margin: 4px;
+            border: 2px solid #D0D5DD;
+            background-color: #F9FAFB;
             color: #667085;
             border-radius: 8px; font-size: 14px;
         """)  # Reduced padding and font-size
@@ -3855,14 +3855,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.batchSettingsFrame = QtWidgets.QFrame()
         self.batchSettingsFrame.setStyleSheet("""
             QFrame {
-                background: #F9FAFB; 
-                border: 1px solid #E5E7EB; 
-                border-radius: 6px; 
+                background: #F9FAFB;
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
                 margin: 2px;
             }
         """)
         self.batchSettingsFrame.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, 
+            QtWidgets.QSizePolicy.Preferred,
             QtWidgets.QSizePolicy.Maximum
         )
 
@@ -3882,9 +3882,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.minSizeSpinBox.setSuffix("px")
         self.minSizeSpinBox.setFixedWidth(100)
         self.minSizeSpinBox.setStyleSheet("""
-            QSpinBox { 
-                font-size: 14px; padding: 2px; 
-                border: 1px solid #D0D5DD; border-radius: 3px; 
+            QSpinBox {
+                font-size: 14px; padding: 2px;
+                border: 1px solid #D0D5DD; border-radius: 3px;
             }
         """)
         # ENHANCED: Add helpful tooltip with class recommendations
@@ -3904,9 +3904,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.maxObjectsSpinBox.setValue(20)
         self.maxObjectsSpinBox.setFixedWidth(100)
         self.maxObjectsSpinBox.setStyleSheet("""
-            QSpinBox { 
-                font-size: 14px; padding: 2px; 
-                border: 1px solid #D0D5DD; border-radius: 3px; 
+            QSpinBox {
+                font-size: 14px; padding: 2px;
+                border: 1px solid #D0D5DD; border-radius: 3px;
             }
         """)
         # ENHANCED: Add helpful tooltip with class recommendations
@@ -4125,12 +4125,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             try:
                 r, g, b = [int(c.strip()) for c in color.split(',')]
                 self.currentClassLabel.setStyleSheet(
-                    f"font-weight: 600; padding: 12px; margin: 4px; "
+                    "font-weight: 600; padding: 12px; margin: 4px; "
                     f"border: 3px solid rgb({r},{g},{b}); "
                     f"background-color: rgba({r},{g},{b}, 30); "
                     f"color: rgb({max(0, r-50)},{max(0, g-50)},{max(0, b-50)}); "
-                    f"border-radius: 8px; font-size: 16px;")
-            except:
+                    "border-radius: 8px; font-size: 16px;")
+            except Exception:
                 self.currentClassLabel.setStyleSheet(
                     f"font-weight: 600; padding: 12px; border: 2px solid rgb({color}); "
                     f"background-color: rgba({color}, 50); font-size: 16px;")
@@ -4143,9 +4143,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.current_class = None
             self.currentClassLabel.setText("No class selected")
             self.currentClassLabel.setStyleSheet("""
-                font-weight: 600; padding: 12px; margin: 4px; 
-                border: 2px solid #D0D5DD; 
-                background-color: #F9FAFB; 
+                font-weight: 600; padding: 12px; margin: 4px;
+                border: 2px solid #D0D5DD;
+                background-color: #F9FAFB;
                 color: #667085;
                 border-radius: 8px; font-size: 16px;
             """)
@@ -4196,7 +4196,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             # NEW: Add default batch settings for new classes
             self.classes[class_name] = {
-                'color': color, 
+                'color': color,
                 'description': description,
                 'batch_defaults': {'min_size': 50, 'max_objects': 20, 'max_size': 0}  # Generic defaults
             }
@@ -4260,7 +4260,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             self._update_status("🔄 Batch mode: Will find multiple objects in bbox", "info")
         else:
-            self.bboxModeBtn.setText("BBox Mode") 
+            self.bboxModeBtn.setText("BBox Mode")
             self._update_status("📦 Single mode: Will segment entire bbox", "info")
 
         # Better layout handling
@@ -4378,7 +4378,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _update_real_world_filter_hints(self, _value=None):
         """Update pixel-equivalent hint labels next to each spinbox"""
-        import math
         gsd = self.gsd_cm_per_px
 
         self.min_diameter_cm = self.minDiameterSpinBox.value()
@@ -4611,7 +4610,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if "type=xyz" in data_source_lower:
                     return "XYZ"
                 elif "service=WMS" in data_source_upper:
-                    return "WMS" 
+                    return "WMS"
                 elif "service=WMTS" in data_source_upper or "wmts" in data_source_lower:
                     return "WMTS"
                 elif "tilematrixset" in data_source_lower:
@@ -4633,7 +4632,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             canvas = self.iface.mapCanvas()
 
             # Create a temporary raster by rendering just this layer
-            from qgis.core import QgsProject
 
             # Use map renderer instead of canvas manipulation to avoid flickering
             from qgis.core import QgsMapRendererParallelJob, QgsMapSettings
@@ -4722,7 +4720,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Clean up PNG
             try:
                 os.unlink(temp_img_path)
-            except:
+            except Exception:
                 pass
 
             print(f"✅ Successfully cached tiles to: {temp_tif_path}")
@@ -5173,7 +5171,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     extent = src.bounds
                     xmin, ymin, xmax, ymax = extent.left, extent.bottom, extent.right, extent.top
                     window = None  # Process entire raster
-                    print(f"📏 Processing full raster")
+                    print("📏 Processing full raster")
                 else:
                     # Use map extent for AOI
                     extent = self.canvas.extent()
@@ -5197,10 +5195,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # SAM3 semantic predictor uses a lot of GPU memory
                 max_size_semantic = 2048  # Conservative limit for semantic predictor
                 if max(width, height) > max_size_semantic:
-                    print(f"⚠️  Image too large for single-pass semantic processing")
-                    print(f"   Switching to tiled processing...")
+                    print("⚠️  Image too large for single-pass semantic processing")
+                    print("   Switching to tiled processing...")
                     # Close rasterio connection before switching to tiled mode
-                    pass
 
             # Use tiled processing for large rasters
             if max(width, height) > max_size_semantic:
@@ -5304,10 +5301,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         print(f"✅ COMPLETED: {len(all_features)} objects found matching '{self.text_prompt}'")
                         print(f"{'='*80}\n")
                     else:
-                        self._update_status(f"⚠️  No features created from masks", "warning")
+                        self._update_status("⚠️  No features created from masks", "warning")
                 else:
                     self._update_status(f"⚠️  No objects found matching '{self.text_prompt}'", "warning")
-                    print(f"⚠️  No objects detected matching text prompt")
+                    print("⚠️  No objects detected matching text prompt")
 
         except Exception as e:
             error_msg = f"❌ Semantic text error: {e}"
@@ -5356,7 +5353,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     extent = src.bounds
                     xmin, ymin, xmax, ymax = extent.left, extent.bottom, extent.right, extent.top
                     window = None  # Process entire raster
-                    print(f"📏 Processing full raster")
+                    print("📏 Processing full raster")
                 else:
                     # Use map extent for AOI
                     extent = self.canvas.extent()
@@ -5380,10 +5377,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # SAM3 semantic predictor uses a lot of GPU memory
                 max_size_semantic = 2048  # Conservative limit for semantic predictor
                 if max(width, height) > max_size_semantic:
-                    print(f"⚠️  Image too large for single-pass semantic processing")
-                    print(f"   Switching to tiled processing...")
+                    print("⚠️  Image too large for single-pass semantic processing")
+                    print("   Switching to tiled processing...")
                     # Close rasterio connection before switching to tiled mode
-                    pass
 
             # Use tiled processing for large rasters
             if max(width, height) > max_size_semantic:
@@ -5845,7 +5841,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     self.undoBtn.setEnabled(True)
                     print(f"✅ Added {len(new_feature_ids)} features to undo stack (single operation)")
                 else:
-                    print(f"⚠️  No new features were added")
+                    print("⚠️  No new features were added")
 
             # Clean up initial tracking
             delattr(self, '_tiled_initial_feature_ids')
@@ -5899,7 +5895,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     self.undo_stack.append((self.current_class, new_feature_ids))
                     print(f"✅ Added {len(new_feature_ids)} partially completed features to undo stack")
                 else:
-                    print(f"⚠️  No features were added before cancellation")
+                    print("⚠️  No features were added before cancellation")
 
             # Clean up initial tracking
             delattr(self, '_tiled_initial_feature_ids')
@@ -6088,14 +6084,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         return features
 
-
     def _get_adaptive_bbox_padding(self, bbox_area):
         """Calculate adaptive padding based on bbox size to reduce background inclusion"""
         # For geographic coordinates (small areas), use different thresholds
         if bbox_area < 1:  # Geographic coordinates in degrees
             if bbox_area > 0.1:         # Very large geographic area
                 return 0.02             # 2% padding
-            elif bbox_area > 0.01:      # Large geographic area  
+            elif bbox_area > 0.01:      # Large geographic area
                 return 0.05             # 5% padding
             elif bbox_area > 0.001:     # Medium geographic area
                 return 0.1              # 10% padding
@@ -6106,7 +6101,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         else:  # Projected coordinates (large areas)
             if bbox_area > 500000:      # Very large area
                 return 0.02             # 2% padding
-            elif bbox_area > 100000:    # Large area  
+            elif bbox_area > 100000:    # Large area
                 return 0.05             # 5% padding
             elif bbox_area > 50000:     # Medium area
                 return 0.1              # 10% padding
@@ -6586,7 +6581,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     # FIXED: Define max_crop_size based on area and device
                     if bbox_area > 1000000:  # Very large area (1M map units²)
                         max_crop_size = 2048
-                    elif bbox_area > 100000:   # Large area 
+                    elif bbox_area > 100000:   # Large area
                         max_crop_size = 1536
                     elif bbox_area > 10000:    # Medium area
                         max_crop_size = 1024
@@ -6646,15 +6641,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             # Use float32 for multi-spectral to preserve reflectance values
                             if band_count >= 5:
                                 arr = src.read(
-                                    bands_to_read, 
-                                    window=padded_window, 
+                                    bands_to_read,
+                                    window=padded_window,
                                     out_shape=(len(bands_to_read), out_height, out_width),
                                     out_dtype=np.float32
                                 )
                             else:
                                 arr = src.read(
-                                    bands_to_read, 
-                                    window=padded_window, 
+                                    bands_to_read,
+                                    window=padded_window,
                                     out_shape=(len(bands_to_read), out_height, out_width),
                                     out_dtype=np.uint8
                                 )
@@ -6725,7 +6720,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Convert bbox corners to pixel coordinates correctly
                         corners = [
                             (self.bbox.xMinimum(), self.bbox.yMinimum()),  # bottom-left
-                            (self.bbox.xMaximum(), self.bbox.yMinimum()),  # bottom-right  
+                            (self.bbox.xMaximum(), self.bbox.yMinimum()),  # bottom-right
                             (self.bbox.xMaximum(), self.bbox.yMaximum()),  # top-right
                             (self.bbox.xMinimum(), self.bbox.yMaximum())   # top-left
                         ]
@@ -6742,7 +6737,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                         # Convert to integers and clamp to image bounds
                         x1 = max(0, min(arr.shape[1]-1, int(x1)))
-                        y1 = max(0, min(arr.shape[0]-1, int(y1))) 
+                        y1 = max(0, min(arr.shape[0]-1, int(y1)))
                         x2 = max(0, min(arr.shape[1]-1, int(x2)))
                         y2 = max(0, min(arr.shape[0]-1, int(y2)))
 
@@ -6904,7 +6899,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 segment_id = feature.attribute("segment_id")
                 if segment_id is not None and isinstance(segment_id, int):
                     max_id = max(max_id, segment_id)
-            except:
+            except Exception:
                 pass
 
         return max_id + 1
@@ -6921,7 +6916,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     segment_id = feature.attribute("segment_id")
                     if segment_id is not None and isinstance(segment_id, int):
                         max_id = max(max_id, segment_id)
-                except:
+                except Exception:
                     pass
 
             self.segment_counts[class_name] = max_id
@@ -6982,7 +6977,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _process_individual_batch_results(self, result_data, mask_transform, debug_info):
         """Process multiple individual masks from batch segmentation - INDIVIDUAL OBJECTS ONLY"""
-        print(f"🔍 _process_individual_batch_results called")
+        print("🔍 _process_individual_batch_results called")
         print(f"  📊 Result data keys: {list(result_data.keys())}")
         print(f"  📊 Current class: {self.current_class}")
 
@@ -6990,7 +6985,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         print(f"  📊 Individual masks found: {len(individual_masks)}")
 
         if not individual_masks:
-            print(f"❌ No individual masks found in result_data")
+            print("❌ No individual masks found in result_data")
             self._update_status("No individual objects found", "warning")
             return
 
@@ -7028,7 +7023,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                 if features:
                     # 🚫 Check for spatial duplicates before adding
-                    print(f"  🚫 Checking for spatial duplicates...")
+                    print("  🚫 Checking for spatial duplicates...")
                     result_layer = self._get_or_create_class_layer(self.current_class)
                     print(f"  📋 Result layer: {result_layer.name() if result_layer else 'None'}")
 
@@ -7042,14 +7037,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         successful_objects += 1
                         print(f"  ✅ Successfully added object {obj_idx+1}")
                     else:
-                        print(f"  ❌ No features to add after duplicate filtering")
+                        print("  ❌ No features to add after duplicate filtering")
                 else:
                     print(f"  ❌ No features generated from mask {obj_idx+1}")
 
             except Exception as e:
                 print(f"Error processing individual object {obj_idx+1}: {e}")
                 continue
-
 
         if successful_objects == 0:
             self._update_status("No valid features generated from objects", "warning")
@@ -7269,16 +7263,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Update our stored reference
         self.original_raster_layer = current_raster
 
-        class_info = self.classes.get(class_name, {'color': '128,128,128'})
-        color = class_info['color']
-
         # Use current raster's CRS and add layer info to name
         raster_name = current_raster.name()[:15]  # Truncate long names
         layer_name = f"SAM_{class_name}_{raster_name}_{datetime.datetime.now():%H%M%S}"
 
         layer = QgsVectorLayer(
-            f"Polygon?crs={current_raster.crs().authid()}", 
-            layer_name, 
+            f"Polygon?crs={current_raster.crs().authid()}",
+            layer_name,
             "memory"
         )
 
@@ -7322,7 +7313,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             try:
                 r, g, b = [int(c.strip()) for c in color.split(',')]
-            except:
+            except Exception:
                 r, g, b = 128, 128, 128
 
             symbol = QgsFillSymbol.createSimple({
@@ -7472,9 +7463,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             all_layers = QgsProject.instance().mapLayers().values()
             for layer in all_layers:
                 try:
-                    if (isinstance(layer, QgsVectorLayer) and 
-                        layer.isValid() and 
-                        layer.name().startswith("SAM_") and 
+                    if (isinstance(layer, QgsVectorLayer) and
+                        layer.isValid() and
+                        layer.name().startswith("SAM_") and
                         layer.featureCount() > 0):
                         total_segments += layer.featureCount()
                         total_classes += 1
@@ -7484,7 +7475,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             self.statsLabel.setText(
                 f"Total Segments: {total_segments} | Classes: {total_classes}")
-        except Exception as e:
+        except Exception:
             # Fallback to simple display
             self.statsLabel.setText("Total Segments: ? | Classes: ?")
 
@@ -7571,7 +7562,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.statusLabel.setStyleSheet(f"""
             padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 500;
             {color_style}
-        """) 
+        """)
 
     def closeEvent(self, event):
         """Handle close event to clean up tools"""
@@ -7603,6 +7594,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             return "1.0.0"  # Fallback version
         except Exception:
             return "1.0.0"  # Fallback version
+
 
 class SegSamDialog(QtWidgets.QDialog):
     def __init__(self, iface, parent=None):

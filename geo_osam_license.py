@@ -167,7 +167,7 @@ class LicenseManager:
             try:
                 error_data = json.loads(error_body)
                 return error_data
-            except:
+            except Exception:
                 return {'valid': False, 'error': f'HTTP {e.code}: {error_body}'}
         except urllib.error.URLError as e:
             return {'valid': False, 'error': f'Network error: {e.reason}'}
@@ -187,7 +187,7 @@ class LicenseManager:
             settings = QSettings()
             settings.setValue(
                 LicenseManager._KEY_LICENSE_CACHE_DATE, datetime.now().isoformat())
-            print(f"✅ License cached for offline use (30 days)")
+            print("✅ License cached for offline use (30 days)")
         except Exception as e:
             print(f"⚠️  Failed to cache license: {e}")
 

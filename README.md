@@ -514,6 +514,11 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.3.6 - Code Quality & Security Fixes (2026-04-22)
+
+- **🔒 FIXED**: Flake8 code quality issues cleared (unused imports, bare excepts, ambiguous names)
+- **🐛 FIXED**: Status label color styles now correctly applied (broken f-string in stylesheet)
+
 ### v1.3.5 - Security Fix (2026-04-22)
 
 - **🔒 FIXED**: Removed `eval` from checkpoint download script (flagged by QGIS plugin repository security scanner)
@@ -675,5 +680,5 @@ To be determined based on user feedback and usage patterns.
 ---
 
 **Last updated:** 2026-04-22
-**Plugin Version:** 1.3.5
+**Plugin Version:** 1.3.6
 **QGIS Compatibility:** 3.16+
