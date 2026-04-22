@@ -517,6 +517,8 @@ If you use GeoOSAM in your research, please cite:
 ### v1.3.5 - Security Fix (2026-04-22)
 
 - **🔒 FIXED**: Removed `eval` from checkpoint download script (flagged by QGIS plugin repository security scanner)
+- **🔒 FIXED**: `torch.load` now uses `weights_only=True` for safer checkpoint loading
+- **🔒 FIXED**: Suppressed Bandit B310 false positives on `urllib` calls using hardcoded `https://` URLs
 
 ### v1.3.4 - Settings Tab, Size & Shape Filters, GSD Support (2026-04-06)
 

@@ -158,7 +158,7 @@ class LicenseManager:
                 method='POST'
             )
 
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310 - URL is hardcoded https:// license server
                 result = json.loads(response.read().decode('utf-8'))
                 return result
 

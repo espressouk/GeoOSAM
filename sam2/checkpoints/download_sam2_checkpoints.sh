@@ -26,19 +26,17 @@ if [[ -f "${CKPT_FILE}" ]]; then
   exit 0
 fi
 
-# Detect an available downloader
+echo "📥 Downloading SAM 2.1 tiny checkpoint (~160 MB)…"
+echo "🌐 ${CKPT_URL}"
+
 if command -v wget &> /dev/null; then
-  DL_CMD="wget --progress=bar:force -O ${CKPT_FILE}"
+  wget --progress=bar:force -O "${CKPT_FILE}" "${CKPT_URL}"
 elif command -v curl &> /dev/null; then
-  DL_CMD="curl -L -o ${CKPT_FILE} --progress-bar"
+  curl -L -o "${CKPT_FILE}" --progress-bar "${CKPT_URL}"
 else
   echo "❌ Neither wget nor curl found. Please install one of them."
   exit 1
 fi
-
-echo "📥 Downloading SAM 2.1 tiny checkpoint (~160 MB)…"
-echo "🌐 ${CKPT_URL}"
-eval "${DL_CMD} \"${CKPT_URL}\""
 
 # Simple size check (>1 MB) to catch truncated downloads
 FILE_SIZE=$(stat -c%s "${CKPT_FILE}" 2>/dev/null || stat -f%z "${CKPT_FILE}")

@@ -725,7 +725,7 @@ def auto_download_checkpoint():
     # Python fallback
     try:
         url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
-        urllib.request.urlretrieve(url, checkpoint_path)
+        urllib.request.urlretrieve(url, checkpoint_path)  # nosec B310 - hardcoded https URL
         if os.path.exists(checkpoint_path) and os.path.getsize(checkpoint_path) > 1000000:
             print("✅ Checkpoint downloaded via Python")
             return True
@@ -2508,7 +2508,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         progress.setValue(int(percent))
                         QtCore.QCoreApplication.processEvents()
 
-                urllib.request.urlretrieve(model_config['url'], checkpoint_path, reporthook=reporthook)
+                urllib.request.urlretrieve(model_config['url'], checkpoint_path, reporthook=reporthook)  # nosec B310 - URL sourced from internal plugin config
                 progress.close()
                 print(f"✅ {model_config['name']} checkpoint downloaded")
 
@@ -2740,7 +2740,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 headers={"Authorization": f"Bearer {token.strip()}"}
             )
             canceled = False
-            with urllib.request.urlopen(req) as response, open(weights_path, "wb") as out:
+            with urllib.request.urlopen(req) as response, open(weights_path, "wb") as out:  # nosec B310 - SAM3_WEIGHTS_URL is hardcoded https://
                 total = response.getheader("Content-Length")
                 total = int(total) if total else None
                 downloaded = 0

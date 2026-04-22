@@ -145,7 +145,7 @@ def _hf_download(model_id):
     from huggingface_hub import hf_hub_download
 
     config_name, checkpoint_name = HF_MODEL_ID_TO_FILENAMES[model_id]
-    ckpt_path = hf_hub_download(repo_id=model_id, filename=checkpoint_name)
+    ckpt_path = hf_hub_download(repo_id=model_id, filename=checkpoint_name)  # nosec B113 - revision pinning omitted intentionally; model_id is validated against HF_MODEL_ID_TO_FILENAMES
     return config_name, ckpt_path
 
 
