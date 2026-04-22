@@ -18,8 +18,6 @@ import numpy as np
 import torch
 import datetime
 import pathlib
-import platform
-import subprocess
 import urllib.request
 import tempfile
 import math
@@ -701,8 +699,6 @@ def auto_download_checkpoint():
     plugin_dir = os.path.dirname(os.path.abspath(__file__))
     checkpoint_dir = os.path.join(plugin_dir, "sam2", "checkpoints")
     checkpoint_path = os.path.join(checkpoint_dir, "sam2.1_hiera_tiny.pt")
-    download_script = os.path.join(
-        checkpoint_dir, "download_sam2_checkpoints.sh")
 
     if os.path.exists(checkpoint_path):
         print(f"✅ SAM2 checkpoint found")
@@ -711,23 +707,11 @@ def auto_download_checkpoint():
     print(f"🔍 SAM2 checkpoint not found, downloading...")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # Try bash script first (Linux/Mac)
-    if platform.system() in ['Linux', 'Darwin'] and os.path.exists(download_script):
-        try:
-            result = subprocess.run(['bash', download_script], cwd=checkpoint_dir,
-                                    capture_output=True, text=True, timeout=300)
-            if result.returncode == 0 and os.path.exists(checkpoint_path):
-                print("✅ Checkpoint downloaded via script")
-                return True
-        except Exception as e:
-            print(f"⚠️ Script failed: {e}")
-
-    # Python fallback
     try:
         url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
         urllib.request.urlretrieve(url, checkpoint_path)  # nosec B310 - hardcoded https URL
         if os.path.exists(checkpoint_path) and os.path.getsize(checkpoint_path) > 1000000:
-            print("✅ Checkpoint downloaded via Python")
+            print("✅ Checkpoint downloaded")
             return True
         else:
             print("❌ Download verification failed")
