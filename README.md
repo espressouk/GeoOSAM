@@ -514,6 +514,10 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.3.5 - Security Fix (2026-04-22)
+
+- **🔒 FIXED**: Removed `eval` from checkpoint download script (flagged by QGIS plugin repository security scanner)
+
 ### v1.3.4 - Settings Tab, Size & Shape Filters, GSD Support (2026-04-06)
 
 - **🗂️ NEW**: Tabbed UI — "Segmentation" and "Settings" tabs for a cleaner, less cluttered layout
@@ -666,6 +670,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-04-06
-**Plugin Version:** 1.3.4
+**Last updated:** 2026-04-22
+**Plugin Version:** 1.3.5
 **QGIS Compatibility:** 3.16+
