@@ -32,9 +32,9 @@ class ResidentialHelper(BaseDetectionHelper):
         max_threshold = 20000
 
         is_valid = (
-            metrics['aspect_ratio'] <= 12.0 and     # Allow longer buildings
-            metrics['solidity'] >= 0.4 and          # More lenient solidity
-            metrics['area'] >= min_threshold and     # Use relaxed size threshold
+            metrics['aspect_ratio'] <= 12.0 and     # Allow longer buildings  # noqa: W504
+            metrics['solidity'] >= 0.4 and          # More lenient solidity  # noqa: W504
+            metrics['area'] >= min_threshold and     # Use relaxed size threshold  # noqa: W504
             metrics['area'] <= max_threshold         # Prevent oversized masks
         )
 
@@ -141,11 +141,11 @@ class ResidentialHelper(BaseDetectionHelper):
                 solidity = area / hull_area if hull_area > 0 else 0
 
                 # Buildings have reasonable shape properties vs irregular land patches
-                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated
-                    compactness > 0.15 and          # Buildings are more compact than land patches
-                    solidity > 0.6 and              # Buildings are more solid/regular than land
-                    w >= 5 and h >= 5 and           # Minimum building size
-                    area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
+                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated  # noqa: W504
+                    compactness > 0.15 and          # Buildings are more compact than land patches  # noqa: W504
+                    solidity > 0.6 and              # Buildings are more solid/regular than land  # noqa: W504
+                    w >= 5 and h >= 5 and           # Minimum building size  # noqa: W504
+                        area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
 
                     M = cv2.moments(contour)
                     if M["m00"] != 0:

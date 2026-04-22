@@ -554,18 +554,18 @@ def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
         buffer_px = 5
 
     # Original merging logic with class-aware buffer
-    kernel = np.ones((buffer_px*2+1, buffer_px*2+1), np.uint8)
-    bins      = [cv2.threshold(m,127,255,cv2.THRESH_BINARY)[1] for m in masks]
-    dilated   = [cv2.dilate(b, kernel, iterations=1) for b in bins]
-    used      = [False]*len(bins)
-    merged    = []
+    kernel = np.ones((buffer_px * 2 + 1, buffer_px * 2 + 1), np.uint8)
+    bins = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
+    dilated = [cv2.dilate(b, kernel, iterations=1) for b in bins]
+    used = [False] * len(bins)
+    merged = []
 
     for i in range(len(bins)):
         if used[i]:
             continue
         group_mask = bins[i].copy()
         # merge in any dilated-overlap neighbors
-        for j in range(i+1, len(bins)):
+        for j in range(i + 1, len(bins)):
             if used[j]:
                 continue
             # if dilated masks touch at all…
@@ -596,30 +596,32 @@ def dedupe_or_merge_masks_smart(masks, class_name, iou_thresh=0.3, merge=True):
         merge = True
 
     # Original logic with class-aware parameters
-    bins   = [cv2.threshold(m,127,255,cv2.THRESH_BINARY)[1] for m in masks]
-    used   = [False]*len(masks)
+    bins = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
+    used = [False] * len(masks)
     result = []
 
     for i in range(len(bins)):
-        if used[i]: continue
+        if used[i]:
+            continue
         mi = bins[i]
         union_mask = mi.copy()
 
-        for j in range(i+1, len(bins)):
-            if used[j]: continue
+        for j in range(i + 1, len(bins)):
+            if used[j]:
+                continue
             mj = bins[j]
             inter = cv2.bitwise_and(mi, mj)
-            uni   = cv2.bitwise_or(mi, mj)
+            uni = cv2.bitwise_or(mi, mj)
             # IoU = area(inter) / area(union)
-            if np.sum(uni==255) > 0:
-                iou = np.sum(inter==255)/np.sum(uni==255)
+            if np.sum(uni == 255) > 0:
+                iou = np.sum(inter == 255) / np.sum(uni == 255)
                 if iou >= iou_thresh:
                     used[j] = True
                     if merge:
                         union_mask = cv2.bitwise_or(union_mask, mj)
                     else:
                         # keep only the bigger mask by area
-                        if np.sum(mj==255) > np.sum(mi==255):
+                        if np.sum(mj == 255) > np.sum(mi == 255):
                             union_mask = mj.copy()
 
         result.append(union_mask)
@@ -997,14 +999,14 @@ class TiledSegmentationWorker(QThread):
             return
 
         try:
-            print("\n" + "="*80)
+            print("\n" + "="*80)  # noqa: E226
             print("🗺️  TILED SEGMENTATION WORKER STARTED")
-            print("="*80)
+            print("="*80)  # noqa: E226
             print(f"Request type: {self.request_type}")
             print(f"Text prompt: {self.text_prompt if self.text_prompt else 'N/A'}")
             print(f"Predictor type: {type(self.predictor)}")
             print(f"Raster path: {self.raster_path}")
-            print("="*80 + "\n")
+            print("="*80 + "\n")  # noqa: E226
 
             with rasterio.open(self.raster_path) as src:
                 width, height = src.width, src.height
@@ -1054,9 +1056,9 @@ class TiledSegmentationWorker(QThread):
                         y1, y2 = min(ys), max(ys)
 
                         # Check if bbox is in this tile
-                        if (x1 >= -10 and x2 <= window.width + 10 and
-                            y1 >= -10 and y2 <= window.height + 10 and
-                            x2 > x1 and y2 > y1):
+                        if (x1 >= -10 and x2 <= window.width + 10 and  # noqa: W504
+                            y1 >= -10 and y2 <= window.height + 10 and  # noqa: W504
+                            x2 > x1 and y2 > y1):  # noqa: E129
 
                             # Read this tile
                             tile_arr = src.read([1, 2, 3], window=window, out_dtype=np.uint8)
@@ -1417,7 +1419,7 @@ class OptimizedSAM2Worker(QThread):
                     masks = [masks[best_idx]]
                     scores = [scores[best_idx]]
                     if logits is not None:
-                        logits = [logits[best_idx]] if isinstance(logits, list) else logits[best_idx:best_idx+1]
+                        logits = [logits[best_idx]] if isinstance(logits, list) else logits[best_idx:best_idx+1]  # noqa: E226
             else:
                 raise ValueError(f"Unknown mode: {self.mode}")
 
@@ -1431,9 +1433,9 @@ class OptimizedSAM2Worker(QThread):
         helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
 
         # Use multi-spectral image if available and supported by the helper
-        if (multispectral_image is not None and
-            hasattr(helper, 'supports_multispectral') and
-            helper.supports_multispectral()):
+        if (multispectral_image is not None and  # noqa: W504
+            hasattr(helper, 'supports_multispectral') and  # noqa: W504
+            helper.supports_multispectral()):  # noqa: E129
             detection_image = multispectral_image
             print(f"🔍 Detecting {class_name} candidates in {detection_image.shape} region (multi-spectral)")
         else:
@@ -1610,8 +1612,8 @@ class OptimizedSAM2Worker(QThread):
 
             # Apply validation criteria
             return (
-                aspect_ratio <= 10.0 and  # Not too elongated
-                solidity >= 0.15 and     # Not too irregular
+                aspect_ratio <= 10.0 and  # Not too elongated  # noqa: W504
+                solidity >= 0.15 and     # Not too irregular  # noqa: W504
                 area >= self.min_object_size  # Large enough
             )
 
@@ -1640,10 +1642,10 @@ class OptimizedSAM2Worker(QThread):
 
             # Ensure bbox is within image bounds
             h, w = self.arr.shape[:2]
-            x1 = max(0, min(w-1, x1))
-            y1 = max(0, min(h-1, y1))
-            x2 = max(x1+1, min(w, x2))
-            y2 = max(y1+1, min(h, y2))
+            x1 = max(0, min(w-1, x1))  # noqa: E226
+            y1 = max(0, min(h-1, y1))  # noqa: E226
+            x2 = max(x1+1, min(w, x2))  # noqa: E226
+            y2 = max(y1+1, min(h, y2))  # noqa: E226
 
             print(f"🎯 Point-guided batch processing bbox: ({x1},{y1}) to ({x2},{y2}) in {w}x{h} image")
 
@@ -1872,42 +1874,42 @@ class OptimizedSAM2Worker(QThread):
         if class_name in ['Vessels', 'Vehicle']:
             # Boats/vehicles: Prefer compact, reasonably-sized objects
             return (
-                0.2 <= aspect_ratio <= 8.0 and      # Boat/car-like aspect ratio
-                solidity >= 0.3 and                 # Reasonably solid
-                compactness >= 0.05 and             # Not too elongated
-                contour_area < 8000 and             # Not too large (reject water)
+                0.2 <= aspect_ratio <= 8.0 and      # Boat/car-like aspect ratio  # noqa: W504
+                solidity >= 0.3 and                 # Reasonably solid  # noqa: W504
+                compactness >= 0.05 and             # Not too elongated  # noqa: W504
+                contour_area < 8000 and             # Not too large (reject water)  # noqa: W504
                 contour_area >= self.min_object_size * 0.6  # Size validation
             )
 
         elif class_name in ['Buildings', 'Industrial']:
             # Buildings: Allow larger, more rectangular objects
             return (
-                0.1 <= aspect_ratio <= 15.0 and     # Building-like ratios
-                solidity >= 0.5 and                 # More solid than vehicles
+                0.1 <= aspect_ratio <= 15.0 and     # Building-like ratios  # noqa: W504
+                solidity >= 0.5 and                 # More solid than vehicles  # noqa: W504
                 contour_area >= self.min_object_size * 0.8
             )
 
         elif class_name in ['Water', 'Agriculture']:
             # Large areas: Allow big, irregular shapes
             return (
-                solidity >= 0.2 and                 # Can be irregular
+                solidity >= 0.2 and                 # Can be irregular  # noqa: W504
                 contour_area >= self.min_object_size
             )
 
         elif class_name == 'Vegetation':
             # Trees: Can be irregular, various sizes
             return (
-                0.1 <= aspect_ratio <= 10.0 and
-                solidity >= 0.15 and                # Can be very irregular
+                0.1 <= aspect_ratio <= 10.0 and  # noqa: W504
+                solidity >= 0.15 and                # Can be very irregular  # noqa: W504
                 contour_area >= self.min_object_size * 0.5
             )
 
         else:
             # Default validation
             return (
-                0.1 <= aspect_ratio <= 20.0 and
-                solidity >= 0.15 and
-                compactness >= 0.02 and
+                0.1 <= aspect_ratio <= 20.0 and  # noqa: W504
+                solidity >= 0.15 and  # noqa: W504
+                compactness >= 0.02 and  # noqa: W504
                 contour_area >= self.min_object_size * 0.6
             )
 
@@ -2068,7 +2070,7 @@ class OptimizedSAM2Worker(QThread):
 
             # Create a bbox mask - only area within selection
             bbox_mask = np.zeros_like(mask)
-            bbox_mask[y1:y2+1, x1:x2+1] = 255
+            bbox_mask[y1:y2+1, x1:x2+1] = 255  # noqa: E226
 
             # Keep only the parts of the segmentation that are within bbox
             cropped_mask = cv2.bitwise_and(mask, bbox_mask)
@@ -2267,62 +2269,62 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     """Enhanced SAM segmentation control panel for QGIS"""
 
     DEFAULT_CLASSES = {
-        'Agriculture' : {
+        'Agriculture' : {  # noqa: E203
             'color': '255,215,0',
             'description': 'Farmland and crops',
             'batch_defaults': {'min_size': 200, 'max_objects': 10, 'max_size': 0}
         },
-        'Buildings'   : {
+        'Buildings'   : {  # noqa: E203
             'color': '220,20,60',
             'description': 'Residential & commercial structures',
             'batch_defaults': {'min_size': 150, 'max_objects': 20, 'max_size': 0}
         },
-        'Commercial'  : {
+        'Commercial'  : {  # noqa: E203
             'color': '135,206,250',
             'description': 'Shopping and business districts',
             'batch_defaults': {'min_size': 200, 'max_objects': 15, 'max_size': 0}
         },
-        'Industrial'  : {
+        'Industrial'  : {  # noqa: E203
             'color': '128,0,128',
             'description': 'Factories and warehouses',
             'batch_defaults': {'min_size': 400, 'max_objects': 8, 'max_size': 0}
         },
-        'Other'       : {
+        'Other'       : {  # noqa: E203
             'color': '148,0,211',
             'description': 'Unclassified objects',
             'batch_defaults': {'min_size': 50, 'max_objects': 25, 'max_size': 0}
         },
-        'Parking'     : {
+        'Parking'     : {  # noqa: E203
             'color': '255,140,0',
             'description': 'Parking lots and areas',
             'batch_defaults': {'min_size': 150, 'max_objects': 15, 'max_size': 0}
         },
-        'Residential' : {
+        'Residential' : {  # noqa: E203
             'color': '255,105,180',
             'description': 'Housing areas',
             'batch_defaults': {'min_size': 50, 'max_objects': 60, 'max_size': 0}
         },
-        'Roads'       : {
+        'Roads'       : {  # noqa: E203
             'color': '105,105,105',
             'description': 'Streets, highways, and pathways',
             'batch_defaults': {'min_size': 200, 'max_objects': 10, 'max_size': 0}
         },
-        'Vessels'     : {
+        'Vessels'     : {  # noqa: E203
             'color': '0,206,209',
             'description': 'Boats, ships',
             'batch_defaults': {'min_size': 40, 'max_objects': 35, 'max_size': 2000}
         },
-        'Vehicle'     : {
+        'Vehicle'     : {  # noqa: E203
             'color': '255,69,0',
             'description': 'Cars, trucks, and buses',
             'batch_defaults': {'min_size': 20, 'max_objects': 50, 'max_size': 500}
         },
-        'Vegetation'  : {
+        'Vegetation'  : {  # noqa: E203
             'color': '34,139,34',
             'description': 'Trees, grass, and parks',
             'batch_defaults': {'min_size': 30, 'max_objects': 100, 'max_size': 0}
         },
-        'Water'       : {
+        'Water'       : {  # noqa: E203
             'color': '30,144,255',
             'description': 'Rivers, lakes, and ponds',
             'batch_defaults': {'min_size': 500, 'max_objects': 8, 'max_size': 0}
@@ -2354,7 +2356,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         version = self._get_plugin_version()
         self.setWindowTitle(f"Version: {version}")
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable |
+        self.setFeatures(QtWidgets.QDockWidget.DockWidgetMovable |  # noqa: W504
                          QtWidgets.QDockWidget.DockWidgetFloatable)
 
         # State variables
@@ -3178,8 +3180,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # --- Dock features: standard QGIS close/float/move
         self.setFeatures(
-            QtWidgets.QDockWidget.DockWidgetClosable |
-            QtWidgets.QDockWidget.DockWidgetFloatable |
+            QtWidgets.QDockWidget.DockWidgetClosable |  # noqa: W504
+            QtWidgets.QDockWidget.DockWidgetFloatable |  # noqa: W504
             QtWidgets.QDockWidget.DockWidgetMovable
         )
 
@@ -5020,8 +5022,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.original_raster_layer = current_layer
 
         # Validation: need point, bbox, or text prompt
-        has_prompt = (self.point is not None or self.bbox is not None or
-                     (hasattr(self, 'text_prompt') and self.text_prompt))
+        has_prompt = (self.point is not None or self.bbox is not None or  # noqa: W504
+                     (hasattr(self, 'text_prompt') and self.text_prompt))  # noqa: E128
         if not has_prompt:
             self._update_status("No selection or text prompt found", "error")
             self.is_processing = False
@@ -5150,18 +5152,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._set_ui_enabled(False)
         if scope == 'full':
             self._update_status(f"🔍 Finding '{self.text_prompt}' across entire raster: {raster_layer.name()[:30]}...", "processing")
-            print("\n" + "="*80)
+            print("\n" + "="*80)  # noqa: E226
             print("🔍 SEMANTIC TEXT MODE - FULL RASTER")
         else:
             self._update_status(f"🔍 Finding '{self.text_prompt}' in current extent: {raster_layer.name()[:30]}...", "processing")
-            print("\n" + "="*80)
+            print("\n" + "="*80)  # noqa: E226
             print("🔍 SEMANTIC TEXT MODE - CURRENT EXTENT (AOI)")
 
-        print("="*80)
+        print("="*80)  # noqa: E226
         print(f"Raster: {raster_layer.source()}")
         print(f"Scope: {scope}")
         print(f"Text prompt: '{self.text_prompt}'")
-        print("="*80)
+        print("="*80)  # noqa: E226
 
         try:
             with rasterio.open(raster_layer.source()) as src:
@@ -5233,8 +5235,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if window:
                     if scale < 1.0:
                         arr = src.read(bands, window=window,
-                                     out_shape=(len(bands), out_height, out_width),
-                                     out_dtype=np.uint8)
+                                     out_shape=(len(bands), out_height, out_width),  # noqa: E128
+                                     out_dtype=np.uint8)  # noqa: E128
                     else:
                         arr = src.read(bands, window=window, out_dtype=np.uint8)
                     # Get transform for this window
@@ -5242,7 +5244,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 else:
                     if scale < 1.0:
                         arr = src.read(bands, out_shape=(len(bands), out_height, out_width),
-                                     out_dtype=np.uint8)
+                                     out_dtype=np.uint8)  # noqa: E128
                     else:
                         arr = src.read(bands, out_dtype=np.uint8)
                     mask_transform = src.transform
@@ -5253,7 +5255,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # Adjust transform for downsampling if needed
                 if scale < 1.0:
                     from rasterio import Affine
-                    mask_transform = mask_transform * Affine.scale(1/scale)
+                    mask_transform = mask_transform * Affine.scale(1/scale)  # noqa: E226
 
                 # Set image in predictor
                 print("🧠 Setting image in SAM3 predictor...")
@@ -5332,18 +5334,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._set_ui_enabled(False)
         if scope == 'full':
             self._update_status(f"🎯 Finding similar objects across entire raster: {raster_layer.name()[:30]}...", "processing")
-            print("\n" + "="*80)
+            print("\n" + "="*80)  # noqa: E226
             print("🎯 SEMANTIC SIMILAR MODE - FULL RASTER")
         else:
             self._update_status(f"🎯 Finding similar objects in current extent: {raster_layer.name()[:30]}...", "processing")
-            print("\n" + "="*80)
+            print("\n" + "="*80)  # noqa: E226
             print("🎯 SEMANTIC SIMILAR MODE - CURRENT EXTENT (AOI)")
 
-        print("="*80)
+        print("="*80)  # noqa: E226
         print(f"Raster: {raster_layer.source()}")
         print(f"Scope: {scope}")
         print(f"Exemplar bbox: {self.bbox}")
-        print("="*80)
+        print("="*80)  # noqa: E226
 
         try:
             with rasterio.open(raster_layer.source()) as src:
@@ -5415,8 +5417,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if window:
                     if scale < 1.0:
                         arr = src.read(bands, window=window,
-                                     out_shape=(len(bands), out_height, out_width),
-                                     out_dtype=np.uint8)
+                                     out_shape=(len(bands), out_height, out_width),  # noqa: E128
+                                     out_dtype=np.uint8)  # noqa: E128
                     else:
                         arr = src.read(bands, window=window, out_dtype=np.uint8)
                     # Get transform for this window
@@ -5424,7 +5426,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 else:
                     if scale < 1.0:
                         arr = src.read(bands, out_shape=(len(bands), out_height, out_width),
-                                     out_dtype=np.uint8)
+                                     out_dtype=np.uint8)  # noqa: E128
                     else:
                         arr = src.read(bands, out_dtype=np.uint8)
                     mask_transform = src.transform
@@ -5435,7 +5437,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 # Adjust transform for downsampling if needed
                 if scale < 1.0:
                     from rasterio import Affine
-                    mask_transform = mask_transform * Affine.scale(1/scale)
+                    mask_transform = mask_transform * Affine.scale(1/scale)  # noqa: E226
 
                 # Convert exemplar bbox from geo to pixel coordinates
                 if self.bbox is not None:
@@ -5531,9 +5533,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _run_tiled_text_segmentation(self, raster_layer):
         """Run tiled segmentation for text prompt mode (large rasters)"""
-        print("\n" + "="*80)
+        print("\n" + "="*80)  # noqa: E226
         print("🔧 TILED TEXT MODE - Processing large raster in tiles")
-        print("="*80)
+        print("="*80)  # noqa: E226
 
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
@@ -5606,9 +5608,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _run_tiled_similar_segmentation(self, raster_layer):
         """Run tiled segmentation for similar objects mode (large rasters)"""
-        print("\n" + "="*80)
+        print("\n" + "="*80)  # noqa: E226
         print("🔧 TILED SIMILAR MODE - Processing large raster in tiles")
-        print("="*80)
+        print("="*80)  # noqa: E226
 
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
@@ -5702,14 +5704,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._update_status(f"🗺️  Starting tiled segmentation on: {raster_layer.name()[:30]}...", "processing")
 
         import sys
-        print("\n" + "="*80)
+        print("\n" + "="*80)  # noqa: E226
         print("🔧 CREATING TILED WORKER")
-        print("="*80)
+        print("="*80)  # noqa: E226
         print(f"Raster path: {raster_layer.source()}")
         print(f"Request type: {self.request_type}")
         print(f"Text prompt: {self.text_prompt if hasattr(self, 'text_prompt') else None}")
         print(f"Predictor: {type(self.predictor)}")
-        print("="*80)
+        print("="*80)  # noqa: E226
         sys.stdout.flush()
 
         # Create worker for background processing
@@ -6358,8 +6360,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             out_width = int(window.width * scale)
                             out_height = int(window.height * scale)
                             arr = src.read(bands_to_read, window=window,
-                                         out_shape=(len(bands_to_read), out_height, out_width),
-                                         out_dtype=np.uint8)
+                                         out_shape=(len(bands_to_read), out_height, out_width),  # noqa: E128
+                                         out_dtype=np.uint8)  # noqa: E128
                         else:
                             arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
 
@@ -6372,7 +6374,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # CRITICAL: Adjust transform if we downsampled
                         if scale < 1.0:
                             from rasterio import Affine
-                            mask_transform = mask_transform * Affine.scale(1/scale)
+                            mask_transform = mask_transform * Affine.scale(1/scale)  # noqa: E226
                             print(f"⚠️  Downsampled to {arr.shape[1]}x{arr.shape[0]} (scale={scale:.3f}), adjusted transform")
 
                         # For SIMILAR mode, convert exemplar bbox to pixel coords in this crop
@@ -6509,8 +6511,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Standard normalization for RGB
                         if arr.max() > arr.min():
                             arr_min, arr_max = arr.min(), arr.max()
-                            arr = ((arr.astype(np.float32) - arr_min) /
-                                (arr_max - arr_min) * 255).astype(np.uint8)
+                            arr = ((arr.astype(np.float32) - arr_min) /  # noqa: W504
+                                (arr_max - arr_min) * 255).astype(np.uint8)  # noqa: E128
                         else:
                             arr = np.zeros_like(arr, dtype=np.uint8)
 
@@ -6701,8 +6703,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Standard normalization for RGB
                         if arr.max() > arr.min():
                             arr_min, arr_max = arr.min(), arr.max()
-                            arr = ((arr.astype(np.float32) - arr_min) /
-                                (arr_max - arr_min) * 255).astype(np.uint8)
+                            arr = ((arr.astype(np.float32) - arr_min) /  # noqa: W504
+                                (arr_max - arr_min) * 255).astype(np.uint8)  # noqa: E128
                         else:
                             arr = np.zeros_like(arr, dtype=np.uint8)
 
@@ -6714,7 +6716,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         from affine import Affine
                         # Adjust transform for downsampling
                         a, b, c, d, e, f = padded_transform[:6]
-                        padded_transform = Affine(a/scale_factor, b, c, d, e/scale_factor, f)
+                        padded_transform = Affine(a/scale_factor, b, c, d, e/scale_factor, f)  # noqa: E226
 
                     try:
                         # Convert bbox corners to pixel coordinates correctly
@@ -6736,18 +6738,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         y1, y2 = min(ys), max(ys)
 
                         # Convert to integers and clamp to image bounds
-                        x1 = max(0, min(arr.shape[1]-1, int(x1)))
-                        y1 = max(0, min(arr.shape[0]-1, int(y1)))
-                        x2 = max(0, min(arr.shape[1]-1, int(x2)))
-                        y2 = max(0, min(arr.shape[0]-1, int(y2)))
+                        x1 = max(0, min(arr.shape[1]-1, int(x1)))  # noqa: E226
+                        y1 = max(0, min(arr.shape[0]-1, int(y1)))  # noqa: E226
+                        x2 = max(0, min(arr.shape[1]-1, int(x2)))  # noqa: E226
+                        y2 = max(0, min(arr.shape[0]-1, int(y2)))  # noqa: E226
 
                         # Ensure minimum bbox size
                         if (x2 - x1) < 5 or (y2 - y1) < 5:
                             center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                             x1 = max(0, center_x - 10)
                             y1 = max(0, center_y - 10)
-                            x2 = min(arr.shape[1]-1, center_x + 10)
-                            y2 = min(arr.shape[0]-1, center_y + 10)
+                            x2 = min(arr.shape[1]-1, center_x + 10)  # noqa: E226
+                            y2 = min(arr.shape[0]-1, center_y + 10)  # noqa: E226
 
                     except Exception as e:
                         self._update_status(f"Error converting bbox coordinates: {e}", "error")
@@ -7379,9 +7381,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         layers_to_export = []
         for layer in QgsProject.instance().mapLayers().values():
             try:
-                if (isinstance(layer, QgsVectorLayer) and
-                        layer.isValid() and
-                        layer.name().startswith("SAM_") and
+                if (isinstance(layer, QgsVectorLayer) and  # noqa: W504
+                        layer.isValid() and  # noqa: W504
+                        layer.name().startswith("SAM_") and  # noqa: W504
                         layer.featureCount() > 0):
                     layers_to_export.append(layer)
             except RuntimeError:
@@ -7408,9 +7410,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         layers_to_export = []
         for layer in selected:
             try:
-                if (isinstance(layer, QgsVectorLayer) and
-                        layer.isValid() and
-                        layer.name().startswith("SAM_") and
+                if (isinstance(layer, QgsVectorLayer) and  # noqa: W504
+                        layer.isValid() and  # noqa: W504
+                        layer.name().startswith("SAM_") and  # noqa: W504
                         layer.featureCount() > 0):
                     layers_to_export.append(layer)
             except RuntimeError:
@@ -7463,10 +7465,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             all_layers = QgsProject.instance().mapLayers().values()
             for layer in all_layers:
                 try:
-                    if (isinstance(layer, QgsVectorLayer) and
-                        layer.isValid() and
-                        layer.name().startswith("SAM_") and
-                        layer.featureCount() > 0):
+                    if (isinstance(layer, QgsVectorLayer) and  # noqa: W504
+                        layer.isValid() and  # noqa: W504
+                        layer.name().startswith("SAM_") and  # noqa: W504
+                        layer.featureCount() > 0):  # noqa: E129
                         total_segments += layer.featureCount()
                         total_classes += 1
                 except RuntimeError:

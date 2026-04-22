@@ -53,7 +53,7 @@ class LicenseManager:
                 # Combine hostname + MAC address + platform
                 hostname = platform.node()
                 mac = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff)
-                                for elements in range(0, 2*6, 2)][::-1])
+                                for elements in range(0, 2 * 6, 2)][::-1])
                 system = platform.system()
 
                 # Hash to create stable device ID
@@ -230,7 +230,7 @@ class LicenseManager:
                 return False
 
             # Compare with cached credentials
-            if (email.lower().strip() == cached_email.lower().strip() and
+            if (email.lower().strip() == cached_email.lower().strip() and  # noqa: W504
                     license_key.upper().strip().replace(" ", "") == cached_key.upper().strip().replace(" ", "")):
                 days_remaining = (expiry_date - datetime.now()).days
                 print(

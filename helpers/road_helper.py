@@ -37,9 +37,9 @@ class RoadHelper(BaseDetectionHelper):
 
         # Roads can be individual segments or networks - be permissive
         is_valid = (
-            metrics['aspect_ratio'] >= 1.3 and      # Allow slightly less elongated shapes for networks
-            metrics['aspect_ratio'] <= 50.0 and     # Very permissive for complex road networks
-            metrics['solidity'] >= 0.15 and         # Very permissive for irregular networks
+            metrics['aspect_ratio'] >= 1.3 and      # Allow slightly less elongated shapes for networks  # noqa: W504
+            metrics['aspect_ratio'] <= 50.0 and     # Very permissive for complex road networks  # noqa: W504
+            metrics['solidity'] >= 0.15 and         # Very permissive for irregular networks  # noqa: W504
             metrics['area'] >= min_object_size * 0.5  # Lower threshold for road segments
         )
 
@@ -99,7 +99,7 @@ class RoadHelper(BaseDetectionHelper):
         final_mask = np.zeros(gray.shape, dtype=np.uint8)
 
         # Part A: Hough lines for straight road segments
-        lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=30, minLineLength=50, maxLineGap=10)
+        lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180, threshold=30, minLineLength=50, maxLineGap=10)
 
         straight_pixels = 0
 

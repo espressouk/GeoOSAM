@@ -118,7 +118,7 @@ class BaseDetectionHelper(ABC):
             return masks
 
         # Original merging logic with class-aware buffer
-        kernel = np.ones((buffer_px*2+1, buffer_px*2+1), np.uint8)
+        kernel = np.ones((buffer_px * 2 + 1, buffer_px * 2 + 1), np.uint8)
         bins = [cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)[1] for m in masks]
         dilated = [cv2.dilate(b, kernel, iterations=1) for b in bins]
         used = [False] * len(bins)
@@ -129,7 +129,7 @@ class BaseDetectionHelper(ABC):
                 continue
             group_mask = bins[i].copy()
             # merge in any dilated-overlap neighbors
-            for j in range(i+1, len(bins)):
+            for j in range(i + 1, len(bins)):
                 if used[j]:
                     continue
                 # if dilated masks touch at all…
@@ -156,7 +156,7 @@ class BaseDetectionHelper(ABC):
             mi = bins[i]
             union_mask = mi.copy()
 
-            for j in range(i+1, len(bins)):
+            for j in range(i + 1, len(bins)):
                 if used[j]:
                     continue
                 mj = bins[j]

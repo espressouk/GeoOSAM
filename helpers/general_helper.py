@@ -29,8 +29,8 @@ class GeneralHelper(BaseDetectionHelper):
 
         # General validation - moderate requirements
         is_valid = (
-            metrics['aspect_ratio'] <= 10.0 and     # Not extremely elongated
-            metrics['solidity'] >= 0.3 and          # Reasonably solid
+            metrics['aspect_ratio'] <= 10.0 and     # Not extremely elongated  # noqa: W504
+            metrics['solidity'] >= 0.3 and          # Reasonably solid  # noqa: W504
             metrics['area'] >= min_object_size * 0.7  # Close to minimum size
         )
 

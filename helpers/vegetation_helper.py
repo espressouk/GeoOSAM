@@ -30,8 +30,8 @@ class VegetationHelper(BaseDetectionHelper):
 
         # Vegetation can be irregular, so more lenient validation
         is_valid = (
-            metrics['aspect_ratio'] <= 5.0 and      # Not too elongated
-            metrics['solidity'] >= 0.15 and         # Can be very irregular
+            metrics['aspect_ratio'] <= 5.0 and      # Not too elongated  # noqa: W504
+            metrics['solidity'] >= 0.15 and         # Can be very irregular  # noqa: W504
             metrics['area'] >= min_object_size * 0.5  # Smaller threshold for detection
         )
 
@@ -130,7 +130,7 @@ class VegetationHelper(BaseDetectionHelper):
                 min_width = 10  # Minimum width in pixels
                 min_height = 10  # Minimum height in pixels
                 # Reject if either dimension is too small OR if it's too elongated
-                is_too_thin = (w < min_width) or (h < min_height) or (max(w,h)/min(w,h) > max_aspect_ratio)
+                is_too_thin = (w < min_width) or (h < min_height) or (max(w, h) / min(w, h) > max_aspect_ratio)
 
                 # Additional linearity check - calculate how much the contour deviates from a straight line
                 if len(contour) >= 5:  # Need at least 5 points for fitLine
@@ -142,7 +142,7 @@ class VegetationHelper(BaseDetectionHelper):
                     for point in contour:
                         px, py = point[0]
                         # Distance from point to fitted line
-                        line_dist = abs((vy * (px - x) - vx * (py - y))) / np.sqrt(vx*vx + vy*vy)
+                        line_dist = abs((vy * (px - x) - vx * (py - y))) / np.sqrt(vx * vx + vy * vy)
                         line_distances.append(line_dist)
 
                     # If most points are close to the line, it's likely a road/track
@@ -151,8 +151,8 @@ class VegetationHelper(BaseDetectionHelper):
                 else:
                     is_linear = False
 
-                if (aspect_ratio <= max_aspect_ratio and solidity >= min_solidity and
-                    not is_too_thin and not is_linear):
+                if (aspect_ratio <= max_aspect_ratio and solidity >= min_solidity and  # noqa: W504
+                        not is_too_thin and not is_linear):
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])

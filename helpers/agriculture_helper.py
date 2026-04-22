@@ -30,8 +30,8 @@ class AgricultureHelper(BaseDetectionHelper):
 
         # Agriculture can be more regular than wild vegetation (fields, crops)
         is_valid = (
-            metrics['aspect_ratio'] <= 8.0 and      # Allow elongated fields
-            metrics['solidity'] >= 0.2 and          # More regular than wild vegetation
+            metrics['aspect_ratio'] <= 8.0 and      # Allow elongated fields  # noqa: W504
+            metrics['solidity'] >= 0.2 and          # More regular than wild vegetation  # noqa: W504
             metrics['area'] >= min_object_size * 0.7  # Slightly higher threshold than vegetation
         )
 

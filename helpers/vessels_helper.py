@@ -30,9 +30,9 @@ class VesselsHelper(BaseDetectionHelper):
 
         # Vessel validation - balanced filtering (original working logic)
         is_valid = (
-            metrics['aspect_ratio'] <= 5.0 and      # Vessels shouldn't be too elongated
-            metrics['solidity'] >= 0.4 and          # Should be reasonably solid
-            metrics['area'] <= 2000 and             # Reasonable max size
+            metrics['aspect_ratio'] <= 5.0 and      # Vessels shouldn't be too elongated  # noqa: W504
+            metrics['solidity'] >= 0.4 and          # Should be reasonably solid  # noqa: W504
+            metrics['area'] <= 2000 and             # Reasonable max size  # noqa: W504
             metrics['area'] >= min_object_size * 0.7  # Reasonable minimum
         )
 

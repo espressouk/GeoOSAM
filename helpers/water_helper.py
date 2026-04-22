@@ -29,8 +29,8 @@ class WaterHelper(BaseDetectionHelper):
 
         # Water validation - water bodies are often large and relatively smooth
         is_valid = (
-            metrics['area'] >= min_object_size and
-            metrics['solidity'] >= 0.4 and          # Water bodies should be reasonably solid
+            metrics['area'] >= min_object_size and  # noqa: W504
+            metrics['solidity'] >= 0.4 and          # Water bodies should be reasonably solid  # noqa: W504
             metrics['aspect_ratio'] <= 15.0         # Allow elongated water bodies (rivers, lakes)
         )
 

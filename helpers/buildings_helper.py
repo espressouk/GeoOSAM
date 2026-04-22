@@ -30,8 +30,8 @@ class BuildingsHelper(BaseDetectionHelper):
 
         # Buildings validation (from original)
         is_valid = (
-            metrics['aspect_ratio'] <= 8.0 and
-            metrics['solidity'] >= 0.5 and          # Buildings should be more solid
+            metrics['aspect_ratio'] <= 8.0 and  # noqa: W504
+            metrics['solidity'] >= 0.5 and          # Buildings should be more solid  # noqa: W504
             metrics['area'] >= min_object_size
         )
 
@@ -136,11 +136,11 @@ class BuildingsHelper(BaseDetectionHelper):
                 solidity = area / hull_area if hull_area > 0 else 0
 
                 # Buildings have reasonable shape properties vs irregular land patches
-                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated
-                    compactness > 0.15 and          # Buildings are more compact than land patches
-                    solidity > 0.6 and              # Buildings are more solid/regular than land
-                    w >= 5 and h >= 5 and           # Minimum building size
-                    area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
+                if (aspect_ratio < 4.0 and           # Buildings aren't too elongated  # noqa: W504
+                    compactness > 0.15 and          # Buildings are more compact than land patches  # noqa: W504
+                    solidity > 0.6 and              # Buildings are more solid/regular than land  # noqa: W504
+                    w >= 5 and h >= 5 and           # Minimum building size  # noqa: W504
+                        area / (w * h) > 0.4):          # Good fill ratio - buildings fill their bounding box better
 
                     M = cv2.moments(contour)
                     if M["m00"] != 0:

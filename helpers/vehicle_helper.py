@@ -30,10 +30,10 @@ class VehicleHelper(BaseDetectionHelper):
 
         # Vehicle-specific validation - vehicles are very small, rectangular, solid
         is_valid = (
-            metrics['aspect_ratio'] >= 1.2 and      # Vehicles have some elongation
-            metrics['aspect_ratio'] <= 3.0 and      # But not too elongated
-            metrics['solidity'] >= 0.7 and          # Vehicles are very solid rectangles
-            metrics['area'] <= 250 and              # Vehicles are very small
+            metrics['aspect_ratio'] >= 1.2 and      # Vehicles have some elongation  # noqa: W504
+            metrics['aspect_ratio'] <= 3.0 and      # But not too elongated  # noqa: W504
+            metrics['solidity'] >= 0.7 and          # Vehicles are very solid rectangles  # noqa: W504
+            metrics['area'] <= 250 and              # Vehicles are very small  # noqa: W504
             metrics['area'] >= min_object_size * 0.9  # Close to minimum size
         )
 
@@ -147,13 +147,13 @@ class VehicleHelper(BaseDetectionHelper):
                 extent = area / (w * h) if w * h > 0 else 0
 
                 # Vehicle characteristics - very small, compact, rectangular
-                if (aspect_ratio >= 1.2 and           # Vehicles have some elongation
-                    aspect_ratio <= 3.0 and          # But not too elongated
-                    compactness > 0.3 and            # Vehicles are compact objects
-                    solidity > 0.7 and               # Vehicles are very solid shapes
-                    extent > 0.6 and                 # Vehicles fill their bounding box well
-                    w >= 3 and h >= 3 and            # Minimum vehicle dimensions
-                    w <= 20 and h <= 20):            # Maximum vehicle dimensions (very small)
+                if (aspect_ratio >= 1.2 and           # Vehicles have some elongation  # noqa: W504
+                    aspect_ratio <= 3.0 and          # But not too elongated  # noqa: W504
+                    compactness > 0.3 and            # Vehicles are compact objects  # noqa: W504
+                    solidity > 0.7 and               # Vehicles are very solid shapes  # noqa: W504
+                    extent > 0.6 and                 # Vehicles fill their bounding box well  # noqa: W504
+                    w >= 3 and h >= 3 and            # Minimum vehicle dimensions  # noqa: W504
+                        w <= 20 and h <= 20):            # Maximum vehicle dimensions (very small)
 
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
