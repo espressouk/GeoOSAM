@@ -78,7 +78,7 @@ class LicenseManager:
         Validate license key for given email (online + offline fallback)
 
         Args:
-            license_key (str): User-entered key (GEOSAM3-XXXXX-XXXXX-XXXXX-XXXXX)
+            license_key (str): User-entered key (GEOOSAM3-XXXXX-XXXXX-XXXXX-XXXXX)
             email (str): User's email address
 
         Returns:

@@ -1,6 +1,6 @@
 # GeoOSAM - Advanced Segmentation for QGIS
 
-🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1, SAM3 (NEW in v1.3), and Ultralytics models with intelligent hardware optimization**
+🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1, SAM3, and Ultralytics models with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
@@ -8,12 +8,14 @@
 
 ## 🌟 Features
 
-- **🤖 SAM3 Integration**: Text prompts, similar object detection, auto-segment (NEW in v1.3!)
-- **🔑 SAM3 Pro Licensing**: Free tier (extent) + Pro tier (entire raster) (NEW in v1.3!)
-- **⚙️ Model Size Selection**: Choose from 4-5 sizes for both Meta & Ultralytics models (NEW in v1.3!)
-- **🗺️ Tiled Processing**: Process entire rasters with auto-tiling for large imagery (NEW in v1.3!)
-- **📥 Automatic Downloads**: All models download automatically with progress bars (NEW in v1.3!)
-- **🔐 Hugging Face Integration**: SAM3 downloads via token authentication (NEW in v1.3!)
+- **🤖 SAM3 Integration**: Text prompts, similar object detection, auto-segment
+- **🔍 Similar from Selection**: Use any segmented polygon as exemplar to find matching objects (v1.4)
+- **🗺️ Vector Extent ROI**: Restrict entire-raster processing to a polygon area of interest (v1.4, Pro)
+- **🔑 Pro Licensing**: Free tier (extent) + Pro tier (entire raster)
+- **⚙️ Model Size Selection**: Choose from 4-5 sizes for both Meta & Ultralytics models
+- **🗺️ Tiled Processing**: Process entire rasters with auto-tiling for large imagery
+- **📥 Automatic Downloads**: All models download automatically with progress bars
+- **🔐 Hugging Face Integration**: SAM3 downloads via token authentication
 - **🚀 Exceptional CPU Performance**: Sub-second segmentation on high-core CPUs (24+ cores)
 - **🧠 Intelligent Hardware Detection**: Automatically selects best models for GPU/CPU
 - **🛰️ Multi-spectral Support**: Native 5+ band UAV/satellite imagery with NDVI calculation
@@ -21,7 +23,7 @@
 - **📋 12 Pre-defined Classes**: Buildings, Roads, Vegetation, Water, Vehicle, Vessels, and more
 - **🌿 Enhanced Vegetation Detection**: Spectral analysis for superior vegetation mapping
 - **🌐 Online Map Support**: Works with ESRI, Google Satellite, and XYZ/WMS/WMTS tile services
-- **↶ Undo Support**: Mistake correction with polygon-level undo
+- **↶ Undo Support**: Mistake correction with polygon-level undo on both Segment and Detect tabs
 - **📁 Custom Output**: User-selectable output folders
 - **🎨 Class Management**: Custom classes with color coding
 - **📡 Smart Workflow**: Auto-raster selection, progress tracking
@@ -30,7 +32,7 @@
 
 ## 📊 Performance & Model Selection
 
-### Available Models (v1.3)
+### Available Models
 
 | Hardware Type     | Available Models                            | User Selection        |
 | ----------------- | ------------------------------------------- | --------------------- |
@@ -89,7 +91,7 @@ Select a class (Buildings, Water, etc.) and click on objects in your imagery. Wo
 ![Export Functionality](screenshots/export_shape.png)
 _Export segmented polygons in GeoPackage, Shapefile, GeoJSON, or FlatGeobuf format_
 
-## 🤖 SAM3 Features (v1.3)
+## 🤖 SAM3 Features
 
 **SAM3 integration with semantic segmentation**
 
@@ -143,7 +145,7 @@ Automatically find ALL objects in an area without clicking:
 3. Choose scope: "Visible Extent (AOI)" or "Entire Raster"\*
 4. Click on a reference object to find all similar ones
 
-**\*SAM3 Pro Licensing:**
+**\*Pro Licensing:**
 
 GeoOSAM is **free and open-source**, but SAM3 Pro features help sustain development:
 
@@ -347,7 +349,7 @@ if torch.cuda.is_available():
 
 ### Model Download (Automatic)
 
-**✨ NEW in v1.3.0: All models download automatically with progress bars!**
+**All models download automatically with progress bars on first use.**
 
 **🔄 How It Works:**
 
@@ -504,7 +506,7 @@ This project is licensed under the GPL v2 License - see the [LICENSE](LICENSE) f
 If you use GeoOSAM in your research, please cite:
 
 ```bibtex
-@software{geosam2025,
+@software{geoosam2025,
   title={GeoOSAM: Advanced Segmentation for QGIS with Intelligent Model Selection},
   author={Butbega, Ofer},
   year={2025},
@@ -513,6 +515,14 @@ If you use GeoOSAM in your research, please cite:
 ```
 
 ## 🔄 Changelog
+
+### v1.4.0 - UI Redesign & Workflow Improvements (2026-05-09)
+
+- **🎨 NEW**: Redesigned 4-tab flat UI — Segment, Detect, Results, Filters, Settings as gear overlay
+- **🔍 NEW**: Similar from Selection — use any segmented polygon as exemplar
+- **🗺️ NEW**: Vector Extent ROI for Entire Raster (Pro) — restrict tiled processing to a polygon
+- **↶ NEW**: Undo and Cancel buttons on Detect tab
+- **🔀 NEW**: Find Similar toggleable — click again to exit similar mode
 
 ### v1.3.6 - Code Quality & Security Fixes (2026-04-22)
 
@@ -679,6 +689,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-04-22
-**Plugin Version:** 1.3.6
+**Last updated:** 2026-05-09
+**Plugin Version:** 1.4.0
 **QGIS Compatibility:** 3.16+

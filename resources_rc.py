@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+# flake8: noqa
 # Resource object code
 #
 # Created by: The Resource Compiler for PyQt5 (Qt v5.15.3)

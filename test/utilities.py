@@ -1,4 +1,5 @@
 # coding=utf-8
+# flake8: noqa
 """Common functionality used by regression tests."""
 
 import sys

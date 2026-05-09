@@ -1,4 +1,5 @@
 # coding=utf-8
+# flake8: noqa
 """QGIS plugin implementation.
 
 .. note:: This program is free software; you can redistribute it and/or modify

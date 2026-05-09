@@ -1,4 +1,5 @@
 # coding=utf-8
+# flake8: noqa
 """Resources test.
 
 .. note:: This program is free software; you can redistribute it and/or modify

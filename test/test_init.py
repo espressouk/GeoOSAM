@@ -1,4 +1,5 @@
 # coding=utf-8
+# flake8: noqa
 """Tests QGIS plugin init."""
 
 __author__ = 'Tim Sutton <tim@linfiniti.com>'

@@ -2,10 +2,10 @@
 name=GeoOSAM
 qgisMinimumVersion=3.16
 qgisMaximumVersion=3.99
-description=Advanced segmentation tool with intelligent SAM 2.1/Ultralytics SAM2.1_B selection, exceptional CPU performance (<1s on 24+ cores), GPU acceleration, threading, and professional workflow features
-about=GeoOSAM brings Meta's latest Segment Anything Model (SAM 2.1) and Ultralytics SAM2.1_B to QGIS with intelligent hardware optimization. Features automatic model selection: SAM 2.1 for GPU systems (CUDA/Apple Silicon) and Ultralytics SAM2.1_B for CPU-only systems, providing 5-10x performance improvements. Ultralytics automatically handles SAM2.1_B downloads for seamless CPU setup. Includes GPU/CPU acceleration with automatic device detection, multi-threaded processing for responsive UI, Point and BBox segmentation modes, 12 pre-defined classes (Buildings, Roads, Vegetation, Water, Vehicle, Ship, etc.) plus custom class creation, Undo functionality for mistake correction, Custom output folder selection, Optional debug mask saving, Automatic raster layer re-selection, Professional shapefile export with detailed attributes. Perfect for remote sensing analysis, urban planning, environmental monitoring, and geospatial segmentation tasks. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU processing with intelligent model selection for optimal performance on any hardware.
+description=AI-powered segmentation for QGIS — SAM2.1 & SAM3 with text prompts, similar object detection, vector ROI, and professional GIS workflow features
+about=GeoOSAM brings Meta's SAM 2.1 and SAM3 to QGIS with a streamlined 4-tab UI (Segment, Detect, Results, Filters). Point-click or draw a bounding box on any raster to instantly segment objects. SAM3 users unlock the Detect tab: run text-prompt auto-segmentation ("find all vehicles"), click a reference object to find similar ones across the scene, or use any existing polygon as an exemplar via Similar from Selection. Pro users can run these modes over entire rasters with automatic tiling and restrict processing to a vector polygon ROI. Includes 12 pre-defined classes with color coding, custom class creation, real-world size and shape filters (GSD-based), multi-point segmentation (Shift/Ctrl+click), multi-format export (GeoPackage, Shapefile, GeoJSON), undo support, and persistent output folder. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU with automatic hardware detection and model selection.
 
-version=1.3.6
+version=1.4.0
 author=Ofer Butbega
 email=geoosamplugin@gmail.com
 
@@ -32,7 +32,14 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.3.6 - Code Quality & Security Fixes (2026-04-22)
+changelog=1.4.0 - UI Redesign & Workflow Improvements (2026-05-09)
+    - NEW: 4-tab flat UI (Segment, Detect, Results, Filters) with Settings as gear overlay
+    - NEW: Similar from Selection — use any segmented feature as exemplar
+    - NEW: Vector extent ROI for Entire Raster — restrict Pro tiled processing to a polygon area
+    - NEW: Cancel and Undo buttons on Detect tab
+    - NEW: Find Similar toggleable — click again to exit
+
+    1.3.6 - Code Quality & Security Fixes (2026-04-22)
     - FIXED: Flake8 code quality issues cleared (unused imports, bare excepts, ambiguous names, f-strings)
     - FIXED: Status label color styles now correctly applied (broken f-string in stylesheet)
 
@@ -178,4 +185,4 @@ changelog=1.3.6 - Code Quality & Security Fixes (2026-04-22)
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2026-04-22
+update_date=2026-05-09

@@ -20,7 +20,7 @@ import datetime
 import pathlib
 import urllib.request
 import tempfile
-from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal
+from qgis.PyQt.QtCore import QVariant, Qt, QThread, pyqtSignal, QSettings
 from qgis.core import (
     QgsProject,
     QgsRasterLayer,
@@ -33,8 +33,10 @@ from qgis.core import (
     QgsFillSymbol,
     QgsField,
     QgsVectorFileWriter,
+    QgsCoordinateTransform,
 )
-from qgis.gui import QgsRubberBand, QgsMapTool, QgsVertexMarker
+from qgis.gui import QgsRubberBand, QgsMapTool, QgsVertexMarker, QgsMapLayerComboBox
+from qgis.core import QgsMapLayerProxyModel
 from qgis.PyQt import QtWidgets, QtCore, QtGui
 
 # fmt: off
@@ -334,10 +336,13 @@ class SAM3PredictorWrapper:
 
                 # Try SAM3 semantic exemplar prompting first
                 if bbox is not None:
+                    print(f"🔍 Trying exemplar semantic for bbox: {bbox}")
                     exemplar_result = self._predict_exemplar_semantic(bbox)
                     if exemplar_result and exemplar_result[0]:
                         print(f"✅ Exemplar results: {len(exemplar_result[0])}")
                         return exemplar_result
+                    else:
+                        print("⚠️ Exemplar semantic failed or returned empty — falling back to ALL objects")
 
                 # Fallback to automatic instance segmentation - finds ALL objects
                 self._reset_predictor_if_semantic()
@@ -486,6 +491,7 @@ class SAM3PredictorWrapper:
         """Run SAM3 semantic predictor with exemplar bbox prompt."""
         try:
             if not self._ensure_semantic_predictor():
+                print(f"⚠️ Semantic predictor not available: {self.semantic_error}")
                 return None
 
             # Convert bbox to numpy array first to avoid slow tensor conversion warning
@@ -941,7 +947,8 @@ class TiledSegmentationWorker(QThread):
 
     def __init__(self, predictor, raster_path, request_type, text_prompt=None, bbox=None,
                  current_class=None, class_color=None, tile_size=1024, overlap=128,
-                 min_object_size=20, max_object_size_px=None, shape_filters=None):
+                 min_object_size=20, max_object_size_px=None, shape_filters=None,
+                 vector_extent_bounds=None, vector_extent_wkt=None):
         print("🔧 TiledSegmentationWorker.__init__() START")
         import sys
         sys.stdout.flush()
@@ -965,6 +972,8 @@ class TiledSegmentationWorker(QThread):
         self.min_object_size = min_object_size
         self.max_object_size_px = max_object_size_px
         self.shape_filters = shape_filters
+        self.vector_extent_bounds = vector_extent_bounds
+        self.vector_extent_wkt = vector_extent_wkt
         self.total_objects_found = 0
         self.tile_results = []  # List of (features, debug_info, transform) tuples
         self.cancel_requested = False  # Flag for cancellation
@@ -1012,16 +1021,49 @@ class TiledSegmentationWorker(QThread):
                 width, height = src.width, src.height
                 print(f"📐 Raster dimensions: {width}x{height}")
 
-                # Calculate tile grid
+                # Determine grid bounds (full raster or clipped to vector extent)
+                if self.vector_extent_bounds is not None:
+                    from rasterio.windows import from_bounds as _from_bounds
+                    xmin, ymin, xmax, ymax = self.vector_extent_bounds
+                    vw = _from_bounds(xmin, ymin, xmax, ymax, src.transform)
+                    grid_x0 = max(0, int(vw.col_off))
+                    grid_y0 = max(0, int(vw.row_off))
+                    grid_x1 = min(width, int(vw.col_off + vw.width))
+                    grid_y1 = min(height, int(vw.row_off + vw.height))
+                    print(f"🔒 Vector extent: pixel cols {grid_x0}-{grid_x1}, rows {grid_y0}-{grid_y1}")
+                else:
+                    grid_x0, grid_y0, grid_x1, grid_y1 = 0, 0, width, height
+
+                # Build ROI polygon for tile pre-filtering (shapely, in map CRS)
+                roi_polygon = None
+                if self.vector_extent_wkt:
+                    try:
+                        from shapely import wkt as _shapely_wkt
+                        roi_polygon = _shapely_wkt.loads(self.vector_extent_wkt)
+                    except Exception as e:
+                        print(f"⚠️  Could not parse ROI polygon for tile filtering: {e}")
+
+                # Calculate tile grid, skipping tiles that don't intersect the ROI polygon
+                from rasterio.windows import bounds as _window_bounds
+                from shapely.geometry import box as _shapely_box
                 tiles = []
-                for y in range(0, height, self.tile_size - self.overlap):
-                    for x in range(0, width, self.tile_size - self.overlap):
-                        w = min(self.tile_size, width - x)
-                        h = min(self.tile_size, height - y)
-                        tiles.append(Window(x, y, w, h))
+                skipped = 0
+                for y in range(grid_y0, grid_y1, self.tile_size - self.overlap):
+                    for x in range(grid_x0, grid_x1, self.tile_size - self.overlap):
+                        w = min(self.tile_size, grid_x1 - x)
+                        h = min(self.tile_size, grid_y1 - y)
+                        if w <= 0 or h <= 0:
+                            continue
+                        win = Window(x, y, w, h)
+                        if roi_polygon is not None:
+                            bx0, by0, bx1, by1 = _window_bounds(win, src.transform)
+                            if not roi_polygon.intersects(_shapely_box(bx0, by0, bx1, by1)):
+                                skipped += 1
+                                continue
+                        tiles.append(win)
 
                 total_tiles = len(tiles)
-                print(f"🔢 Total tiles to process: {total_tiles}")
+                print(f"🔢 Total tiles to process: {total_tiles} (skipped {skipped} outside ROI)")
 
                 if total_tiles > 100:
                     print(f"⚠️  Large raster will create {total_tiles} tiles - this may take a while")
@@ -1031,48 +1073,33 @@ class TiledSegmentationWorker(QThread):
                     )
                     time.sleep(1)
 
-                # For similar mode: extract exemplar from its tile first
+                # For similar mode: extract exemplar directly from raster (independent of ROI tiles)
+                # The exemplar may be outside the ROI — ROI only limits where we search, not the reference
                 exemplar_crop = None
                 if self.request_type == 'similar' and self.bbox is not None:
                     print("\n🎯 Extracting exemplar for similar mode...")
-                    # Find which tile contains the exemplar
-                    for window in tiles:
-                        tile_transform = src.window_transform(window)
-
-                        # Check if bbox is in this tile
+                    try:
                         corners = [
                             (self.bbox.xMinimum(), self.bbox.yMinimum()),
                             (self.bbox.xMaximum(), self.bbox.yMinimum()),
                             (self.bbox.xMaximum(), self.bbox.yMaximum()),
-                            (self.bbox.xMinimum(), self.bbox.yMaximum())
+                            (self.bbox.xMinimum(), self.bbox.yMaximum()),
                         ]
-                        pixel_coords = []
-                        for x, y in corners:
-                            px, py = ~tile_transform * (x, y)
-                            pixel_coords.append((px, py))
-
-                        xs, ys = zip(*pixel_coords)
-                        x1, x2 = min(xs), max(xs)
-                        y1, y2 = min(ys), max(ys)
-
-                        # Check if bbox is in this tile
-                        if (x1 >= -10 and x2 <= window.width + 10 and  # noqa: W504
-                            y1 >= -10 and y2 <= window.height + 10 and  # noqa: W504
-                            x2 > x1 and y2 > y1):  # noqa: E129
-
-                            # Read this tile
-                            tile_arr = src.read([1, 2, 3], window=window, out_dtype=np.uint8)
-                            tile_arr = np.moveaxis(tile_arr, 0, -1)
-
-                            # Extract exemplar crop
-                            x1 = max(0, min(tile_arr.shape[1] - 1, int(x1)))
-                            y1 = max(0, min(tile_arr.shape[0] - 1, int(y1)))
-                            x2 = max(0, min(tile_arr.shape[1] - 1, int(x2)))
-                            y2 = max(0, min(tile_arr.shape[0] - 1, int(y2)))
-
-                            exemplar_crop = tile_arr[y1:y2, x1:x2].copy()
+                        row_cols = [src.index(x, y) for x, y in corners]
+                        rows, cols = zip(*row_cols)
+                        ex_x1 = max(0, min(cols))
+                        ex_x2 = min(src.width, max(cols))
+                        ex_y1 = max(0, min(rows))
+                        ex_y2 = min(src.height, max(rows))
+                        if ex_x2 > ex_x1 and ex_y2 > ex_y1:
+                            ex_win = Window(ex_x1, ex_y1, ex_x2 - ex_x1, ex_y2 - ex_y1)
+                            ex_arr = src.read([1, 2, 3], window=ex_win, out_dtype=np.uint8)
+                            exemplar_crop = np.moveaxis(ex_arr, 0, -1)
                             print(f"✅ Exemplar extracted: shape={exemplar_crop.shape}")
-                            break
+                        else:
+                            print("⚠️  Invalid exemplar bounds")
+                    except Exception as e:
+                        print(f"⚠️  Could not extract exemplar: {e}")
 
                 # Process each tile
                 for tile_idx, window in enumerate(tiles):
@@ -1083,19 +1110,19 @@ class TiledSegmentationWorker(QThread):
                         return
 
                     try:
-                        print(f"\n--- Tile {tile_idx+1}/{total_tiles} ---")
+                        print(f"\n--- Tile {tile_idx + 1}/{total_tiles} ---")
                         print(f"Window: x={window.col_off}, y={window.row_off}, w={window.width}, h={window.height}")
 
                         # Read tile data
                         start_read = time.time()
                         tile_arr = src.read([1, 2, 3], window=window, out_dtype=np.uint8)
                         tile_arr = np.moveaxis(tile_arr, 0, -1)
-                        print(f"✅ Tile read: {tile_arr.shape} in {time.time()-start_read:.2f}s")
+                        print(f"✅ Tile read: {tile_arr.shape} in {time.time() - start_read:.2f}s")
 
                         # Update predictor with tile image
                         start_set = time.time()
                         self.predictor.set_image(tile_arr)
-                        print(f"✅ Image set in predictor: {time.time()-start_set:.2f}s")
+                        print(f"✅ Image set in predictor: {time.time() - start_set:.2f}s")
 
                         # Get tile transform (needed for similar mode coordinate conversion)
                         tile_transform = src.window_transform(window)
@@ -1178,7 +1205,7 @@ class TiledSegmentationWorker(QThread):
                                                     overlap_ratio = overlap_area / mask_area
                                                     # If >80% of mask overlaps with exemplar, skip it (it's the exemplar itself)
                                                     if overlap_ratio > 0.8:
-                                                        print(f"  Skipping mask {i+1}: exemplar itself (overlap {overlap_ratio:.1%})")
+                                                        print(f"  Skipping mask {i + 1}: exemplar itself (overlap {overlap_ratio:.1%})")
                                                         continue
 
                                             # Keep this mask
@@ -1200,7 +1227,7 @@ class TiledSegmentationWorker(QThread):
                             print(f"⚠️  Unknown request type: {self.request_type}")
                             continue
 
-                        print(f"⏱️  Inference time: {time.time()-start_infer:.2f}s")
+                        print(f"⏱️  Inference time: {time.time() - start_infer:.2f}s")
                         print(f"📊 Masks returned: {len(masks) if masks is not None else 0}")
 
                         # Convert masks to features using tile transform
@@ -1213,18 +1240,18 @@ class TiledSegmentationWorker(QThread):
                                 features = self._convert_mask_to_features(mask, tile_transform)
                                 if features:
                                     # Store results for main thread to add to layer
-                                    debug_info = {'mode': f'TILE_{tile_idx+1}/{total_tiles}'}
+                                    debug_info = {'mode': f'TILE_{tile_idx + 1}/{total_tiles}'}
                                     self.tile_results.append((features, debug_info, tile_transform))
                                     tile_objects += len(features)
                                     self.total_objects_found += len(features)
 
                         # Emit progress
-                        progress_msg = f"🔄 Tile {tile_idx+1}/{total_tiles} - Found {self.total_objects_found} objects"
+                        progress_msg = f"🔄 Tile {tile_idx + 1}/{total_tiles} - Found {self.total_objects_found} objects"
                         self.progress.emit(progress_msg, tile_idx + 1, total_tiles)
                         self.tile_completed.emit(tile_objects, tile_idx)
 
                     except Exception as e:
-                        print(f"❌ Error processing tile {tile_idx+1}: {e}")
+                        print(f"❌ Error processing tile {tile_idx + 1}: {e}")
                         import traceback
                         traceback.print_exc()
                         continue
@@ -1673,7 +1700,7 @@ class OptimizedSAM2Worker(QThread):
                 if isinstance(candidate, list):
                     # Grouped candidates (from road helper)
                     points_in_group = candidate
-                    print(f"🛣️ Processing road group {i+1} with {len(points_in_group)} points")
+                    print(f"🛣️ Processing road group {i + 1} with {len(points_in_group)} points")
                 else:
                     # Individual point
                     points_in_group = [candidate]
@@ -1684,8 +1711,8 @@ class OptimizedSAM2Worker(QThread):
                         int(np.mean([p[1] for p in points_in_group]))
                     )
 
-                    self.progress.emit(f"🎯 Segmenting object {i+1}/{len(candidates_to_process)}...")
-                    print(f"🔍 Processing candidate {i+1}: {len(points_in_group)} point(s)")
+                    self.progress.emit(f"🎯 Segmenting object {i + 1}/{len(candidates_to_process)}...")
+                    print(f"🔍 Processing candidate {i + 1}: {len(points_in_group)} point(s)")
 
                     # Prepare coordinates for SAM2
                     if len(points_in_group) == 1:
@@ -1710,7 +1737,7 @@ class OptimizedSAM2Worker(QThread):
                     elif isinstance(masks, (list, tuple)) and len(masks) > 0:
                         mask = masks[0]
                     else:
-                        print(f"  ❌ No valid mask returned for point {i+1}")
+                        print(f"  ❌ No valid mask returned for point {i + 1}")
                         continue
 
                     # Convert mask to proper format
@@ -1732,7 +1759,7 @@ class OptimizedSAM2Worker(QThread):
 
                     # Validate mask quality and size
                     pixel_count = np.sum(mask > 0)
-                    print(f"  📊 Mask {i+1}: {pixel_count} pixels")
+                    print(f"  📊 Mask {i + 1}: {pixel_count} pixels")
 
                     # Max size: use real-world filter if set, else 10% of image
                     image_area = self.arr.shape[0] * self.arr.shape[1]
@@ -1749,16 +1776,16 @@ class OptimizedSAM2Worker(QThread):
                             if self._validate_mask_for_class(mask, current_class, [px, py]):
                                 individual_masks.append(mask)
                                 successful_detections += 1
-                                print(f"  ✅ ACCEPTED: {current_class} mask {i+1} ({pixel_count} pixels)")
+                                print(f"  ✅ ACCEPTED: {current_class} mask {i + 1} ({pixel_count} pixels)")
                             else:
-                                print(f"  ❌ REJECTED: {current_class} mask {i+1} failed validation")
+                                print(f"  ❌ REJECTED: {current_class} mask {i + 1} failed validation")
                         else:
-                            print(f"  ❌ REJECTED: Object {i+1} too large ({pixel_count} > {max_object_size}, {pixel_count/image_area*100:.1f}% of image)")
+                            print(f"  ❌ REJECTED: Object {i + 1} too large ({pixel_count} > {max_object_size}, {pixel_count / image_area * 100:.1f}% of image)")
                     else:
-                        print(f"  ❌ REJECTED: Object {i+1} too small ({pixel_count} < {self.min_object_size})")
+                        print(f"  ❌ REJECTED: Object {i + 1} too small ({pixel_count} < {self.min_object_size})")
 
                 except Exception as e:
-                    print(f"  ❌ Error processing candidate {i+1}: {e}")
+                    print(f"  ❌ Error processing candidate {i + 1}: {e}")
                     continue
 
             # Remove any masks completely contained inside another mask
@@ -2005,7 +2032,7 @@ class OptimizedSAM2Worker(QThread):
             background_threshold = self._get_background_threshold(bbox_area, current_class)
 
             num_labels_initial, labels_initial, stats_initial, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
-            print(f"   Initial components in bbox: {num_labels_initial-1}")
+            print(f"   Initial components in bbox: {num_labels_initial - 1}")
 
             # Filter out background regions
             filtered_mask = np.zeros_like(binary_mask)
@@ -2029,7 +2056,7 @@ class OptimizedSAM2Worker(QThread):
 
             # Find individual objects with class-aware filtering
             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(final_mask, connectivity=8)
-            print(f"   Final objects in bbox: {num_labels-1}")
+            print(f"   Final objects in bbox: {num_labels - 1}")
 
             individual_masks = []
             rejected_count = 0
@@ -2312,12 +2339,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         'Vessels'     : {  # noqa: E203
             'color': '0,206,209',
             'description': 'Boats, ships',
-            'batch_defaults': {'min_size': 40, 'max_objects': 35, 'max_size': 2000}
+            'batch_defaults': {'min_size': 40, 'max_objects': 35, 'max_size': 0}
         },
         'Vehicle'     : {  # noqa: E203
             'color': '255,69,0',
             'description': 'Cars, trucks, and buses',
-            'batch_defaults': {'min_size': 20, 'max_objects': 50, 'max_size': 500}
+            'batch_defaults': {'min_size': 20, 'max_objects': 50, 'max_size': 0}
         },
         'Vegetation'  : {  # noqa: E203
             'color': '34,139,34',
@@ -2845,7 +2872,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             layout.addWidget(key_label)
 
             key_input = QtWidgets.QLineEdit()
-            key_input.setPlaceholderText("GEOSAM3-XXXXX-XXXXX-XXXXX-XXXXX")
+            key_input.setPlaceholderText("GEOOSAM3-XXXXX-XXXXX-XXXXX-XXXXX")
             layout.addWidget(key_input)
 
             layout.addSpacing(20)
@@ -3054,14 +3081,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _on_similar_mode_toggled(self, checked):
         if checked:
-            self.textPromptInput.clear()
             self.textPromptInput.setEnabled(False)
             self.segmentTextBtn.setEnabled(False)
         else:
             self.textPromptInput.setEnabled(True)
+            self.segmentTextBtn.setEnabled(bool(self.textPromptInput.text().strip()))
 
     def _on_license_banner_btn(self):
-        self.tabWidget.setCurrentIndex(1)  # Always go to Settings && Filters tab
+        self.tabWidget.setCurrentIndex(3)  # Always go to Settings tab (index 3)
 
     def _update_license_banner(self):
         """Update the compact license banner on the Segmentation tab"""
@@ -3070,10 +3097,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         from geo_osam_license import LicenseManager
         license_info = LicenseManager.get_license_info()
 
-        if license_info['type'] == 'pro':
+        is_pro = license_info['type'] == 'pro'
+
+        if is_pro:
             self.licenseBanner.setStyleSheet(
                 "#licenseBanner { background: #ECFDF3; border-radius: 8px; border: 1px solid #A6F4C5; }")
-            self.licenseBannerLabel.setText("✅ SAM3 Pro License Active")
+            self.licenseBannerLabel.setText("✅ Pro License Active")
             self.licenseBannerLabel.setStyleSheet("font-size: 13px; font-weight: 600; color: #027A48;")
             self.licenseBannerBtn.setVisible(False)
         else:
@@ -3092,7 +3121,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 QPushButton:hover { background: #D97706; }
             """)
 
-    def _on_scope_changed(self, index):
+    def _on_scope_changed(self, _index):
         """Handle scope selection change"""
         from geo_osam_license import LicenseManager
 
@@ -3127,21 +3156,83 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.scopeComboBox.setCurrentIndex(0)  # Back to 'aoi'
             self.scopeComboBox.blockSignals(False)
 
+        # Show vector extent selector only when full-raster mode is active
+        final_scope = self.scopeComboBox.currentData()
+        if hasattr(self, 'vectorExtentWidget'):
+            self.vectorExtentWidget.setVisible(final_scope == 'full')
+
+    def _get_vector_extent_bounds(self, raster_layer):
+        """Return (xmin, ymin, xmax, ymax) of selected vector layer in raster CRS, or None."""
+        if not hasattr(self, 'vectorExtentCombo'):
+            return None
+        vector_layer = self.vectorExtentCombo.currentLayer()
+        if vector_layer is None or not vector_layer.isValid():
+            return None
+        extent = vector_layer.extent()
+        if vector_layer.crs() != raster_layer.crs():
+            transform = QgsCoordinateTransform(
+                vector_layer.crs(), raster_layer.crs(), QgsProject.instance()
+            )
+            extent = transform.transformBoundingBox(extent)
+        return (extent.xMinimum(), extent.yMinimum(),
+                extent.xMaximum(), extent.yMaximum())
+
+    def _get_vector_extent_wkt(self, raster_layer):
+        """Return union WKT of selected vector layer in raster CRS, or None."""
+        if not hasattr(self, 'vectorExtentCombo'):
+            return None
+        vector_layer = self.vectorExtentCombo.currentLayer()
+        if vector_layer is None or not vector_layer.isValid():
+            return None
+        crs_transform = None
+        if vector_layer.crs() != raster_layer.crs():
+            crs_transform = QgsCoordinateTransform(
+                vector_layer.crs(), raster_layer.crs(), QgsProject.instance()
+            )
+        union_geom = None
+        for feat in vector_layer.getFeatures():
+            g = feat.geometry()
+            if crs_transform:
+                g.transform(crs_transform)
+            union_geom = g if union_geom is None else union_geom.combine(g)
+        return union_geom.asWkt() if union_geom else None
+
     def _init_save_directories(self):
         """Initialize output directories"""
-        self.export_save_dir = pathlib.Path.home() / "GeoOSAM_output"
-        self.mask_save_dir = pathlib.Path.home() / "GeoOSAM_masks"
+        settings = QSettings()
+        saved = settings.value("GeoOSAM/output_folder", "")
+        if saved and pathlib.Path(saved).parent.exists():
+            base = pathlib.Path(saved).parent
+        else:
+            base = pathlib.Path.home()
+        self.export_save_dir = base / "GeoOSAM_output"
+        self.mask_save_dir = base / "GeoOSAM_masks"
         self.export_save_dir.mkdir(exist_ok=True)
 
     def _connect_selection_signals(self):
         """Connect signals for layer management (simplified - no delete button)"""
-        # Connect to layer removals only (no selection tracking needed)
         QgsProject.instance().layersAdded.connect(self._on_layers_added)
         QgsProject.instance().layersRemoved.connect(self._on_layers_removed)
+        # Hook selection changes on all existing vector layers
+        for lyr in QgsProject.instance().mapLayers().values():
+            if isinstance(lyr, QgsVectorLayer):
+                lyr.selectionChanged.connect(self._update_similar_from_selection_btn)
+        self._update_similar_from_selection_btn()
+
+    def _update_similar_from_selection_btn(self):
+        has_selection = any(
+            isinstance(lyr, QgsVectorLayer) and lyr.selectedFeatureCount() > 0
+            for lyr in QgsProject.instance().mapLayers().values()
+        )
+        if hasattr(self, 'similarFromSelectionBtn'):
+            self.similarFromSelectionBtn.setEnabled(has_selection)
 
     def _on_layers_added(self, layers):
-        """Handle when layers are added (simplified)"""
-        # No need to connect selection signals anymore
+        """Connect selection tracking for newly added vector layers."""
+        for lyr in layers:
+            if isinstance(lyr, QgsVectorLayer):
+                lyr.selectionChanged.connect(self._update_similar_from_selection_btn)
+        self._update_similar_from_selection_btn()
 
     def _on_layers_removed(self, layer_ids):
         """Handle when layers are removed from the project"""
@@ -3192,66 +3283,58 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.setWidget(container_widget)
 
         container_layout = QtWidgets.QVBoxLayout(container_widget)
-        container_layout.setSpacing(6)
-        container_layout.setContentsMargins(10, 10, 10, 0)
-
-        # Tab widget
-        self.tabWidget = QtWidgets.QTabWidget()
-        self.tabWidget.setStyleSheet("""
-            QTabWidget::pane { border: none; background: transparent; }
-            QTabBar::tab {
-                font-size: 14px; font-weight: 600; padding: 7px 16px;
-                border: none; background: #F2F4F7; color: #667085;
-                border-top-left-radius: 8px; border-top-right-radius: 8px;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected { background: #fff; color: #1570EF; border-bottom: 2px solid #1570EF; }
-            QTabBar::tab:hover:!selected { background: #E4E7EC; }
-        """)
-
-        # Tab 1 — Segmentation (core workflow)
-        tab1_scroll = QtWidgets.QScrollArea()
-        tab1_scroll.setWidgetResizable(True)
-        tab1_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        tab1_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        tab1_scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
-        tab1_widget = QtWidgets.QWidget()
-        tab1_widget.setStyleSheet("background: transparent;")
-        tab1_scroll.setWidget(tab1_widget)
-        tab1_layout = QtWidgets.QVBoxLayout(tab1_widget)
-        tab1_layout.setSpacing(12)
-        tab1_layout.setContentsMargins(8, 10, 8, 10)
-
-        # Tab 2 — Settings (configure once)
-        tab2_scroll = QtWidgets.QScrollArea()
-        tab2_scroll.setWidgetResizable(True)
-        tab2_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        tab2_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        tab2_scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
-        tab2_widget = QtWidgets.QWidget()
-        tab2_widget.setStyleSheet("background: transparent;")
-        tab2_scroll.setWidget(tab2_widget)
-        tab2_layout = QtWidgets.QVBoxLayout(tab2_widget)
-        tab2_layout.setSpacing(12)
-        tab2_layout.setContentsMargins(8, 10, 8, 10)
-
-        self.tabWidget.addTab(tab1_scroll, "Segmentation")
-        self.tabWidget.addTab(tab2_scroll, "Settings && Filters")
-
-        # Keep references for adding cards later
-        self._tab1_layout = tab1_layout
-        self._tab2_layout = tab2_layout
-
-        # No global tooltip styling — using HTML tooltips instead (see _tip helper)
+        container_layout.setSpacing(4)
+        container_layout.setContentsMargins(8, 8, 8, 4)
 
         # Allow flexible resizing
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(500)
+        self.setMinimumWidth(360)
+        self.setMaximumWidth(520)
         self.setMinimumHeight(500)
-        self.resize(360, 700)
+        self.resize(380, 700)
 
-        # --- Card helper
-        def create_card(title, icon=""):
+        # --- Shared style definitions ---
+        combo_style = """
+            QComboBox {
+                padding: 7px 10px; font-size: 14px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox:hover { border: 1px solid #1570EF; }
+        """
+        primary_btn_style = """
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 10px;
+                border-radius: 8px; color: #FFF; background: #1570EF; border: none;
+            }
+            QPushButton:hover { background: #1366D6; }
+            QPushButton:disabled { background: #D0D5DD; color: #9CA3AF; }
+        """
+        secondary_btn_style = """
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 10px;
+                border-radius: 8px; background: #FFF; border: 1px solid #D0D5DD; color: #344054;
+            }
+            QPushButton:hover { background: #F9FAFB; }
+            QPushButton:checked { background: #1570EF; color: #FFF; border-color: #1570EF; }
+        """
+        danger_btn_style = """
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 10px;
+                border-radius: 8px; background: #FFF; border: 1.5px solid #DC2626; color: #DC2626;
+            }
+            QPushButton:hover { background: #FEF2F2; }
+            QPushButton:disabled { background: #F9FAFB; border-color: #E5E7EB; color: #D1D5DB; }
+        """
+        export_btn_style = """
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 10px;
+                border-radius: 8px; color: #FFF; background: #027A48; border: none;
+            }
+            QPushButton:hover { background: #015C38; }
+        """
+
+        # --- Card helper (kept for license card only) ---
+        def create_card(title, icon="", number=None):
             card = QtWidgets.QFrame()
             card.setObjectName("Card")
             card.setStyleSheet("""
@@ -3267,126 +3350,607 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             shadow.setOffset(0, 2)
             card.setGraphicsEffect(shadow)
             card_layout = QtWidgets.QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 12, 12, 12)  # Reduced from 15
-            card_layout.setSpacing(8)                        # Reduced from 12
+            card_layout.setContentsMargins(12, 12, 12, 12)
+            card_layout.setSpacing(8)
             if title:
                 header_layout = QtWidgets.QHBoxLayout()
-                icon_label = QtWidgets.QLabel(icon)
-                icon_label.setStyleSheet("font-size: 14px; margin-top: 1px;")  # Reduced from 22px
+                if number is not None:
+                    num_label = QtWidgets.QLabel(str(number))
+                    num_label.setFixedSize(20, 20)
+                    num_label.setAlignment(Qt.AlignCenter)
+                    num_label.setStyleSheet("""
+                        font-size: 11px; font-weight: 700; color: #fff;
+                        background: #1570EF; border-radius: 10px;
+                    """)
+                    header_layout.addWidget(num_label)
+                elif icon:
+                    icon_label = QtWidgets.QLabel(icon)
+                    icon_label.setStyleSheet("font-size: 14px; margin-top: 1px;")
+                    header_layout.addWidget(icon_label)
                 header_label = QtWidgets.QLabel(f"<b>{title}</b>")
-                header_label.setStyleSheet("font-size: 14px; color: #101828;")  # Reduced from 20px
-                header_layout.addWidget(icon_label)
+                header_label.setStyleSheet("font-size: 14px; color: #101828;")
                 header_layout.addWidget(header_label)
                 header_layout.addStretch()
                 card_layout.addLayout(header_layout)
             return card, card_layout
 
-        # --- Title and Device Header (above tabs) ---
-        title_label = QtWidgets.QLabel("GeoOSAM Control Panel")
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1D2939;")
-        title_label.setAlignment(Qt.AlignCenter)
-        container_layout.addWidget(title_label)
+        # --- Flat section helper (replaces create_card for most sections) ---
+        def create_section(title):
+            widget = QtWidgets.QWidget()
+            layout = QtWidgets.QVBoxLayout(widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(6)
+            if title:
+                lbl = QtWidgets.QLabel(title.upper())
+                lbl.setStyleSheet(
+                    "font-size: 10px; font-weight: 700; color: #9CA3AF; letter-spacing: 0.5px;")
+                layout.addWidget(lbl)
+            return widget, layout
 
-        device_icon = "🎮" if "cuda" in self.device else "🖥️"
+        def _model_badge_label(model_id):
+            _size_map = {'tiny': 'T', 'small': 'S', 'base': 'B', 'large': 'L'}
+            lower = model_id.lower()
+            for size, letter in _size_map.items():
+                if lower.endswith(size):
+                    return f"SAM2 {letter}"
+            return model_id  # SAM3 or unknown
+
+        # --- Compact header with inline badges ---
+        header_widget = QtWidgets.QWidget()
+        header_layout = QtWidgets.QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 4)
+        header_layout.setSpacing(6)
+
+        title_label = QtWidgets.QLabel("GeoOSAM Control Panel")
+        title_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #1D2939;")
+
+        device_badge_text = "CUDA" if "cuda" in self.device else ("MPS" if "mps" in self.device else "CPU")
+        device_badge = QtWidgets.QLabel(device_badge_text)
+        device_badge.setStyleSheet("""
+            font-size: 11px; font-weight: 600; color: #fff;
+            background: #1570EF; border-radius: 4px; padding: 2px 7px;
+        """)
+
+        model_badge_color = "#027A48" if self.model_choice == "SAM3" else "#475467"
+        self.model_badge = QtWidgets.QLabel(_model_badge_label(self.model_choice))
+        self.model_badge.setStyleSheet(f"""
+            font-size: 11px; font-weight: 600; color: #fff;
+            background: {model_badge_color}; border-radius: 4px; padding: 2px 7px;
+        """)
+
+        self.settings_btn = QtWidgets.QPushButton("⚙️")
+        self.settings_btn.setFixedSize(34, 34)
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setFocusPolicy(Qt.NoFocus)
+        self.settings_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 18px; border-radius: 8px;
+                background: #F2F4F7; border: 1px solid #E4E7EC; color: #344054;
+            }
+            QPushButton:hover { background: #E4E7EC; }
+            QPushButton:checked { background: #1570EF; color: #fff; border-color: #1570EF; }
+        """)
+        self.settings_btn.setCheckable(True)
+
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(device_badge)
+        header_layout.addWidget(self.model_badge)
+        header_layout.addWidget(self.settings_btn)
+
+        container_layout.addWidget(header_widget)
+
+        # Keep self.deviceLabel constructed (referenced elsewhere for updates) but not in layout
+        device_icon = "\U0001f3ae" if "cuda" in self.device else "\U0001f5a5\ufe0f"
         device_info = f"{device_icon} {self.device.upper()} | {self.model_choice}"
         if getattr(self, "num_cores", None):
             device_info += f" ({self.num_cores} cores)"
         self.deviceLabel = QtWidgets.QLabel(device_info)
         self.deviceLabel.setStyleSheet("font-size: 14px; color: #475467;")
         self.deviceLabel.setAlignment(Qt.AlignCenter)
-        container_layout.addWidget(self.deviceLabel)
+        self.deviceLabel.setVisible(False)
 
-        container_layout.addWidget(self.tabWidget)
-
-        # --- Model Selection Card (NEW) ---
-        model_card, model_layout = create_card("Model Selection", "🤖")
-
-        self.modelComboBox = QtWidgets.QComboBox()
-        self.modelComboBox.setToolTip(self._tip("Choose SAM model size based on your hardware"))
-        self.modelComboBox.setStyleSheet("""
-            QComboBox {
-                padding: 8px 10px; font-size: 14px; border-radius: 7px;
-                border: 1px solid #D0D5DD; background: #FFF;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox:hover { border: 1px solid #1570EF; }
-        """)
-        self.modelComboBox.setFocusPolicy(Qt.NoFocus)
-
-        # Populate based on device-specific model options
-        for option in self.model_options:
-            self.modelComboBox.addItem(option['display'], option['id'])
-
-        # Set current model
-        current_idx = self.modelComboBox.findData(self.model_choice)
-        if current_idx >= 0:
-            self.modelComboBox.setCurrentIndex(current_idx)
-
-        model_layout.addWidget(self.modelComboBox)
-
-        # Add info label about model selection
-        if "cuda" in self.device or "mps" in self.device:
-            info_text = f"💡 {len(self.model_options)} GPU-optimized models available"
-        else:
-            info_text = f"💡 {len(self.model_options)} CPU-optimized models available"
-
-        info_label = QtWidgets.QLabel(info_text)
-        info_label.setStyleSheet("font-size: 14px; color: #475467; margin-top: 4px;")
-        model_layout.addWidget(info_label)
-
-        # Help text for SAM3 if not available (GPU only)
-        self.sam3HelpLabel = None
-        if ("cuda" in self.device or "mps" in self.device) and not self.available_models.get('SAM3', False):
-            self.sam3HelpLabel = QtWidgets.QLabel(
-                "⚠️ SAM3 not available. <a href='#sam3help' style='color: #1570EF;'>Download instructions</a>"
-            )
-            self.sam3HelpLabel.setStyleSheet("font-size: 14px; color: #DC6803;")
-            self.sam3HelpLabel.setOpenExternalLinks(False)
-            self.sam3HelpLabel.linkActivated.connect(self._show_sam3_download_dialog)
-            model_layout.addWidget(self.sam3HelpLabel)
-
-        # --- Compact license banner (above model card, SAM3 only) ---
+        # --- Compact license banner (above tabs, SAM3 only) ---
         self.licenseBanner = None
         if self.model_choice == "SAM3" or self.available_models.get('SAM3', False):
             self.licenseBanner = QtWidgets.QWidget()
             self.licenseBanner.setObjectName("licenseBanner")
+            self.licenseBanner.setStyleSheet("""
+                QWidget#licenseBanner {
+                    background: #ECFDF3;
+                    border: 1px solid #A6F4C5;
+                    border-radius: 8px;
+                }
+            """)
             banner_layout = QtWidgets.QHBoxLayout(self.licenseBanner)
             banner_layout.setContentsMargins(10, 6, 10, 6)
             banner_layout.setSpacing(8)
 
             self.licenseBannerLabel = QtWidgets.QLabel()
-            self.licenseBannerLabel.setStyleSheet("font-size: 13px; font-weight: 600;")
+            self.licenseBannerLabel.setStyleSheet("font-size: 12px; font-weight: 600; color: #027A48;")
 
             self.licenseBannerBtn = QtWidgets.QPushButton()
             self.licenseBannerBtn.setCursor(Qt.PointingHandCursor)
             self.licenseBannerBtn.setFocusPolicy(Qt.NoFocus)
             self.licenseBannerBtn.setAutoDefault(False)
             self.licenseBannerBtn.setDefault(False)
+            self.licenseBannerBtn.setStyleSheet("""
+                QPushButton {
+                    font-size: 12px; font-weight: 600; color: #027A48;
+                    background: transparent; border: none; padding: 2px 6px;
+                    text-decoration: underline;
+                }
+                QPushButton:hover { color: #015C38; }
+            """)
             self.licenseBannerBtn.clicked.connect(self._on_license_banner_btn)
 
             banner_layout.addWidget(self.licenseBannerLabel, stretch=1)
             banner_layout.addWidget(self.licenseBannerBtn)
-            tab1_layout.addWidget(self.licenseBanner)
+            container_layout.addWidget(self.licenseBanner)
             self._update_license_banner()
 
-        tab1_layout.addWidget(model_card)
+        # --- Tab widget ---
+        self.tabWidget = QtWidgets.QTabWidget()
+        self.tabWidget.setStyleSheet("""
+            QTabWidget::pane { border: none; background: transparent; }
+            QTabBar::tab {
+                font-size: 14px; font-weight: 600; padding: 7px 16px;
+                border: none; background: #F2F4F7; color: #667085;
+                border-top-left-radius: 8px; border-top-right-radius: 8px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected { background: #fff; color: #1570EF; border-bottom: 2px solid #1570EF; }
+            QTabBar::tab:hover:!selected { background: #E4E7EC; }
+            QTabBar::tab:disabled { color: #D0D5DD; background: #F9FAFB; }
+        """)
 
-        # --- SAM3 License Status (only show if SAM3 available or selected) ---
+        def _make_tab_scroll():
+            scroll = QtWidgets.QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+            inner = QtWidgets.QWidget()
+            inner.setStyleSheet("background: transparent;")
+            scroll.setWidget(inner)
+            layout = QtWidgets.QVBoxLayout(inner)
+            layout.setSpacing(8)
+            layout.setContentsMargins(8, 8, 8, 8)
+            return scroll, layout
+
+        tab1_scroll, tab1_layout = _make_tab_scroll()
+        tab2_scroll, tab2_layout = _make_tab_scroll()
+        tab3_scroll, tab3_layout = _make_tab_scroll()
+        tab5_scroll, tab5_layout = _make_tab_scroll()
+
+        self.tabWidget.addTab(tab1_scroll, "Segment")
+        self.tabWidget.addTab(tab2_scroll, "Detect")
+        self.tabWidget.addTab(tab3_scroll, "Results")
+        self.tabWidget.addTab(tab5_scroll, "Filters")
+        self.tabWidget.setTabEnabled(1, self.model_choice == "SAM3")
+
+        # Keep references
+        self._tab1_layout = tab1_layout
+        self._tab2_layout = tab2_layout
+        self._tab3_layout = tab3_layout
+        self._tab5_layout = tab5_layout
+
+        container_layout.addWidget(self.tabWidget)
+
+        # Unified log panel — always visible below tabs, replaces status label
+        self.logPanel = QtWidgets.QPlainTextEdit()
+        self.logPanel.setReadOnly(True)
+        self.logPanel.setMaximumHeight(100)
+        self.logPanel.setPlaceholderText("Ready to segment")
+        self.logPanel.setStyleSheet("""
+            QPlainTextEdit {
+                background: #F8F9FA; color: #344054; border: 1px solid #D0D5DD;
+                border-radius: 6px; font-size: 12px; font-family: monospace;
+                padding: 4px; margin: 2px 8px 0px 8px;
+            }
+        """)
+        container_layout.addWidget(self.logPanel)
+
+        self.progressBar = QtWidgets.QProgressBar()
+        self.progressBar.setRange(0, 0)
+        self.progressBar.setVisible(False)
+        self.progressBar.setTextVisible(False)
+        self.progressBar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #D0D5DD; border-radius: 4px;
+                background-color: #F2F4F7; height: 4px; margin: 0px 8px;
+            }
+            QProgressBar::chunk { background-color: #1570EF; border-radius: 4px; }
+        """)
+        container_layout.addWidget(self.progressBar)
+
+        # --- Settings panel (overlay, toggled by gear button) ---
+        self.settings_panel = QtWidgets.QScrollArea()
+        self.settings_panel.setWidgetResizable(True)
+        self.settings_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.settings_panel.setStyleSheet("QScrollArea { border: none; background: #f8f9fa; }")
+        settings_widget = QtWidgets.QWidget()
+        settings_widget.setStyleSheet("background: transparent;")
+        self.settings_panel.setWidget(settings_widget)
+        settings_layout = QtWidgets.QVBoxLayout(settings_widget)
+        settings_layout.setSpacing(8)
+        settings_layout.setContentsMargins(8, 8, 8, 8)
+        self.settings_panel.setVisible(False)
+        self._settings_layout = settings_layout
+
+        container_layout.addWidget(self.settings_panel)
+
+        self.settings_btn.toggled.connect(self._toggle_settings_panel)
+
+        # ================================================================
+        # TAB 1 — SEGMENT
+        # ================================================================
+
+        # 1. Class section
+        class_section_w, class_section_layout = create_section("Class")
+        self.classComboBox = QtWidgets.QComboBox()
+        self.classComboBox.addItem("-- Select Class --", None)
+        for class_name in self.classes.keys():
+            self._add_class_item(self.classComboBox, class_name)
+        self.classComboBox.setStyleSheet("""
+            QComboBox {
+                padding: 7px 10px; font-size: 14px; border-radius: 7px;
+                border: 2px solid #F59E0B; background: #FFFBEB;
+            }
+            QComboBox::drop-down { border: none; }
+        """)
+        self.classComboBox.setFocusPolicy(Qt.NoFocus)
+        class_section_layout.addWidget(self.classComboBox)
+
+        # Construct currentClassLabel (referenced in logic) but don't add to layout
+        self.currentClassLabel = QtWidgets.QLabel("No class selected")
+        self.currentClassLabel.setWordWrap(True)
+        self.currentClassLabel.setStyleSheet("""
+            font-weight: 600; padding: 12px; margin: 4px;
+            border: 2px solid #D0D5DD; background-color: #F9FAFB;
+            color: #667085; border-radius: 8px; font-size: 14px;
+        """)
+
+        self.addClassBtn = QtWidgets.QPushButton("\u2795 Add")
+        self.editClassBtn = QtWidgets.QPushButton("\u270f\ufe0f Edit")
+        for btn in [self.addClassBtn, self.editClassBtn]:
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 14px; font-weight: 600; padding: 6px;
+                    border-radius: 8px; background: #FFF; border: 1px solid #D0D5DD; color: #344054;
+                }
+                QPushButton:hover { background: #F9FAFB; }
+            """)
+        tab1_layout.addWidget(class_section_w)
+
+        # 2. Mode section
+        mode_section_w, mode_section_layout = create_section("Mode")
+        self.pointModeBtn = QtWidgets.QPushButton("Point Mode")
+        self.pointModeBtn.setCheckable(True)
+        self.pointModeBtn.setChecked(True)
+        self.bboxModeBtn = QtWidgets.QPushButton("BBox Mode")
+        self.bboxModeBtn.setCheckable(True)
+        self.bboxModeBtn.setVisible(True)
+
+        # similarModeBtn constructed here (added to group, not shown in this tab)
+        self.similarModeBtn = QtWidgets.QPushButton("\U0001f441 Find Similar")
+        self.similarModeBtn.setCheckable(True)
+        self.similarModeBtn.setVisible(self.model_choice == "SAM3")
+        self.similarModeBtn.setToolTip("")
+        self.similarModeBtn.setFocusPolicy(Qt.NoFocus)
+
+        self.mode_button_group = QtWidgets.QButtonGroup()
+        self.mode_button_group.addButton(self.pointModeBtn)
+        self.mode_button_group.addButton(self.bboxModeBtn)
+        self.mode_button_group.setExclusive(True)
+        # similarModeBtn is NOT in the exclusive group — it toggles independently
+
+        self.pointModeBtn.setStyleSheet(secondary_btn_style)
+        self.bboxModeBtn.setStyleSheet(secondary_btn_style)
+        self.similarModeBtn.setStyleSheet(secondary_btn_style)
+
+        mode_btn_row = QtWidgets.QHBoxLayout()
+        mode_btn_row.setSpacing(6)
+        mode_btn_row.addWidget(self.pointModeBtn, stretch=1)
+        mode_btn_row.addWidget(self.bboxModeBtn, stretch=1)
+        mode_section_layout.addLayout(mode_btn_row)
+        tab1_layout.addWidget(mode_section_w)
+
+        # 3. Batch section
+        batch_section_w, batch_section_layout = create_section("Batch")
+
+        batch_toggle_row = QtWidgets.QHBoxLayout()
+        batch_label = QtWidgets.QLabel("Batch Segmentation")
+        batch_label.setStyleSheet("font-size: 14px;")
+        self.batchModeSwitch = Switch()
+        batch_toggle_row.addWidget(batch_label)
+        batch_toggle_row.addStretch()
+        batch_toggle_row.addWidget(self.batchModeSwitch)
+        batch_section_layout.addLayout(batch_toggle_row)
+
+        self.batchSettingsFrame = QtWidgets.QFrame()
+        self.batchSettingsFrame.setStyleSheet("""
+            QFrame {
+                background: #F9FAFB; border: 1px solid #E5E7EB;
+                border-radius: 6px; margin: 2px;
+            }
+        """)
+        self.batchSettingsFrame.setSizePolicy(
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+        batch_settings_layout = QtWidgets.QVBoxLayout(self.batchSettingsFrame)
+        batch_settings_layout.setContentsMargins(8, 6, 8, 6)
+        batch_settings_layout.setSpacing(3)
+
+        size_row = QtWidgets.QHBoxLayout()
+        size_row.setSpacing(4)
+        size_label = QtWidgets.QLabel("Min size:")
+        size_label.setStyleSheet("font-size: 14px; color: #667085;")
+        size_label.setFixedWidth(70)
+        self.minSizeSpinBox = QtWidgets.QSpinBox()
+        self.minSizeSpinBox.setRange(10, 500)
+        self.minSizeSpinBox.setValue(50)
+        self.minSizeSpinBox.setSuffix("px")
+        self.minSizeSpinBox.setFixedWidth(100)
+        self.minSizeSpinBox.setStyleSheet("""
+            QSpinBox {
+                font-size: 14px; padding: 2px;
+                border: 1px solid #D0D5DD; border-radius: 3px;
+            }
+        """)
+        self.minSizeSpinBox.setToolTip("")
+        size_row.addWidget(size_label)
+        size_row.addWidget(self.minSizeSpinBox)
+        size_row.addStretch()
+
+        max_row = QtWidgets.QHBoxLayout()
+        max_row.setSpacing(4)
+        max_label = QtWidgets.QLabel("Max obj:")
+        max_label.setStyleSheet("font-size: 14px; color: #667085;")
+        max_label.setFixedWidth(70)
+        self.maxObjectsSpinBox = QtWidgets.QSpinBox()
+        self.maxObjectsSpinBox.setRange(1, 50)
+        self.maxObjectsSpinBox.setValue(20)
+        self.maxObjectsSpinBox.setFixedWidth(100)
+        self.maxObjectsSpinBox.setStyleSheet("""
+            QSpinBox {
+                font-size: 14px; padding: 2px;
+                border: 1px solid #D0D5DD; border-radius: 3px;
+            }
+        """)
+        self.maxObjectsSpinBox.setToolTip("")
+        max_row.addWidget(max_label)
+        max_row.addWidget(self.maxObjectsSpinBox)
+        max_row.addStretch()
+
+        batch_settings_layout.addLayout(size_row)
+        batch_settings_layout.addLayout(max_row)
+
+        # classHintsLabel constructed (referenced in logic) but not added to layout
+        self.classHintsLabel = QtWidgets.QLabel("Auto-adjusts based on selected class")
+        self.classHintsLabel.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
+        self.classHintsLabel.setAlignment(Qt.AlignCenter)
+
+        self.batchSettingsFrame.setVisible(False)
+        self.batchSettingsFrame.setMaximumHeight(80)
+        batch_section_layout.addWidget(self.batchSettingsFrame)
+        tab1_layout.addWidget(batch_section_w)
+
+        # 4. Undo button (no section wrapper)
+        self.undoBtn = QtWidgets.QPushButton("\u27f2 Undo Last Polygon")
+        self.undoBtn.setEnabled(False)
+        self.undoBtn.setCursor(Qt.PointingHandCursor)
+        self.undoBtn.setStyleSheet(danger_btn_style)
+        self.undoBtn.setAutoDefault(False)
+        self.undoBtn.setDefault(False)
+        self.undoBtn.setFocusPolicy(Qt.NoFocus)
+        tab1_layout.addWidget(self.undoBtn)
+
+        tab1_layout.addStretch()
+
+        # ================================================================
+        # TAB 2 — DETECT
+        # ================================================================
+
+        # 1. Class section (synced copy)
+        det_class_section_w, det_class_section_layout = create_section("Class")
+        self.classComboBoxDetect = QtWidgets.QComboBox()
+        self.classComboBoxDetect.addItem("-- Select Class --", None)
+        for class_name in self.classes.keys():
+            self._add_class_item(self.classComboBoxDetect, class_name)
+        self.classComboBoxDetect.setStyleSheet("""
+            QComboBox {
+                padding: 7px 10px; font-size: 14px; border-radius: 7px;
+                border: 2px solid #F59E0B; background: #FFFBEB;
+            }
+            QComboBox::drop-down { border: none; }
+        """)
+        self.classComboBoxDetect.setFocusPolicy(Qt.NoFocus)
+        det_class_section_layout.addWidget(self.classComboBoxDetect)
+        tab2_layout.addWidget(det_class_section_w)
+
+        # 2. Prompt section (SAM3 only)
+        prompt_section_w, prompt_section_layout = create_section("Prompt")
+        self.textPromptInput = QtWidgets.QLineEdit()
+        self.textPromptInput.setPlaceholderText("Text prompt \u2014 e.g. building, car, tree")
+        self.textPromptInput.setStyleSheet("""
+            QLineEdit {
+                padding: 8px 10px; font-size: 14px; border-radius: 7px;
+                border: 1px solid #D0D5DD; background: #FFF;
+            }
+            QLineEdit:focus { border: 2px solid #1570EF; }
+            QLineEdit:disabled {
+                background: #F3F4F6; color: #9CA3AF; border: 1px solid #E5E7EB;
+            }
+        """)
+        self.textPromptInput.setFocusPolicy(Qt.StrongFocus)
+        prompt_section_layout.addWidget(self.textPromptInput)
+
+        self.segmentTextBtn = QtWidgets.QPushButton("\U0001f916 Auto-Segment")
+        self.segmentTextBtn.setCursor(Qt.PointingHandCursor)
+        self.segmentTextBtn.setEnabled(False)
+        self.segmentTextBtn.setStyleSheet(primary_btn_style)
+        self.segmentTextBtn.setAutoDefault(False)
+        self.segmentTextBtn.setFocusPolicy(Qt.NoFocus)
+
+        or_lbl = QtWidgets.QLabel("or")
+        or_lbl.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        or_lbl.setFixedWidth(20)
+        or_lbl.setAlignment(Qt.AlignCenter)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(4)
+        btn_row.addWidget(self.segmentTextBtn, stretch=1)
+        btn_row.addWidget(or_lbl)
+        btn_row.addWidget(self.similarModeBtn, stretch=1)
+        prompt_section_layout.addLayout(btn_row)
+
+        self.similarFromSelectionBtn = QtWidgets.QPushButton("\U0001f50d Similar from Selection")
+        self.similarFromSelectionBtn.setFocusPolicy(Qt.NoFocus)
+        self.similarFromSelectionBtn.setEnabled(False)
+        self.similarFromSelectionBtn.setVisible(self.model_choice == "SAM3")
+        self.similarFromSelectionBtn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 8px 12px;
+                border-radius: 8px; border: 1px solid #6941C6; color: #6941C6;
+                background: #F9F5FF;
+            }
+            QPushButton:hover { background: #EDE9FE; }
+            QPushButton:disabled { background: #F3F4F6; border: 1px solid #D0D5DD; color: #9CA3AF; }
+        """)
+        prompt_section_layout.addWidget(self.similarFromSelectionBtn)
+
+        prompt_section_w.setVisible(self.model_choice == "SAM3")
+        self.textPromptCard = prompt_section_w  # keep existing references working
+        tab2_layout.addWidget(prompt_section_w)
+
+        # 3. Scope section
+        scope_section_w, scope_section_layout = create_section("Scope")
+        self.scopeSectionWidget = scope_section_w
+        self.scopeComboBox = QtWidgets.QComboBox()
+        self.scopeComboBox.addItem("Visible Extent (AOI)", "aoi")
+        self.scopeComboBox.addItem("Entire Raster (Auto-slice)", "full")
+        self.scopeComboBox.setStyleSheet(combo_style)
+        self.scopeComboBox.setFocusPolicy(Qt.NoFocus)
+        self.scopeComboBox.currentIndexChanged.connect(self._on_scope_changed)
+        scope_section_layout.addWidget(self.scopeComboBox)
+
+        self.vectorExtentWidget = QtWidgets.QWidget()
+        _vex_layout = QtWidgets.QHBoxLayout(self.vectorExtentWidget)
+        _vex_layout.setContentsMargins(0, 0, 0, 0)
+        _vex_layout.setSpacing(8)
+        _vex_label = QtWidgets.QLabel("Limit to:")
+        _vex_label.setStyleSheet("font-size: 14px; color: #475467;")
+        self.vectorExtentCombo = QgsMapLayerComboBox()
+        self.vectorExtentCombo.setFilters(QgsMapLayerProxyModel.VectorLayer)
+        self.vectorExtentCombo.setAllowEmptyLayer(True)
+        self.vectorExtentCombo.setShowCrs(False)
+        self.vectorExtentCombo.setFocusPolicy(Qt.NoFocus)
+        self.vectorExtentCombo.setStyleSheet("""
+            QComboBox {
+                font-size: 14px; padding: 6px; border-radius: 6px;
+                border: 1px solid #D0D5DD; background: #FFF;
+            }
+            QComboBox:hover { border-color: #1570EF; }
+        """)
+        _vex_layout.addWidget(_vex_label)
+        _vex_layout.addWidget(self.vectorExtentCombo, stretch=1)
+        self.vectorExtentWidget.setVisible(False)
+        scope_section_layout.addWidget(self.vectorExtentWidget)
+        scope_section_w.setVisible(self.model_choice == "SAM3")
+        tab2_layout.addWidget(scope_section_w)
+
+        # 4. Undo button (tab 2 copy)
+        self.undoBtn2 = QtWidgets.QPushButton("\u27f2 Undo Last Polygon")
+        self.undoBtn2.setEnabled(False)
+        self.undoBtn2.setStyleSheet(danger_btn_style)
+        self.undoBtn2.setFocusPolicy(Qt.NoFocus)
+        self.undoBtn2.setAutoDefault(False)
+        self.undoBtn2.clicked.connect(self._undo_last_polygon)
+        tab2_layout.addWidget(self.undoBtn2)
+
+        tab2_layout.addStretch()
+
+        # ================================================================
+        # TAB 3 — RESULTS
+        # ================================================================
+
+        # 1. Status section
+        self.statsLabel = QtWidgets.QLabel("Total Segments: 0 | Classes: 0")
+        self.statsLabel.setStyleSheet(
+            "font-size: 14px; color: #475467; margin-top: 3px; margin-bottom: 3px;")
+        tab3_layout.addWidget(self.statsLabel)
+
+        # 2. Export section
+        export_section_w, export_section_layout = create_section("Export")
+        self.exportBtn = QtWidgets.QPushButton("\U0001f4be Export All")
+        self.exportBtn.setCursor(Qt.PointingHandCursor)
+        self.exportBtn.setStyleSheet(export_btn_style)
+        self.exportBtn.setAutoDefault(False)
+        self.exportBtn.setDefault(False)
+        self.exportBtn.setFocusPolicy(Qt.NoFocus)
+        export_section_layout.addWidget(self.exportBtn)
+
+        self.exportSelectedBtn = QtWidgets.QPushButton("\U0001f4be Export Selected")
+        self.exportSelectedBtn.setCursor(Qt.PointingHandCursor)
+        self.exportSelectedBtn.setStyleSheet(export_btn_style)
+        self.exportSelectedBtn.setAutoDefault(False)
+        self.exportSelectedBtn.setDefault(False)
+        self.exportSelectedBtn.setFocusPolicy(Qt.NoFocus)
+        export_section_layout.addWidget(self.exportSelectedBtn)
+        tab3_layout.addWidget(export_section_w)
+
+        tab3_layout.addStretch()
+
+        # ================================================================
+        # TAB 4 — SETTINGS
+        # ================================================================
+
+        # 1. Model section (built first so widgets exist; added to layout after license)
+        model_section_w, model_section_layout = create_section("Model")
+        self.modelComboBox = QtWidgets.QComboBox()
+        self.modelComboBox.setStyleSheet(combo_style)
+        self.modelComboBox.setFocusPolicy(Qt.NoFocus)
+        for option in self.model_options:
+            self.modelComboBox.addItem(option['display'], option['id'])
+        current_idx = self.modelComboBox.findData(self.model_choice)
+        if current_idx >= 0:
+            self.modelComboBox.setCurrentIndex(current_idx)
+        model_section_layout.addWidget(self.modelComboBox)
+
+        self.sam3HelpLabel = None
+        if ("cuda" in self.device or "mps" in self.device) and not self.available_models.get('SAM3', False):
+            self.sam3HelpLabel = QtWidgets.QLabel(
+                "\u26a0\ufe0f SAM3 not available. <a href='#sam3help' style='color: #1570EF;'>Download instructions</a>"
+            )
+            self.sam3HelpLabel.setStyleSheet("font-size: 14px; color: #DC6803;")
+            self.sam3HelpLabel.setOpenExternalLinks(False)
+            self.sam3HelpLabel.linkActivated.connect(self._show_sam3_download_dialog)
+            model_section_layout.addWidget(self.sam3HelpLabel)
+
+        # 2. Classes section (built here; added to layout after license + model)
+        classes_section_w, classes_section_layout = create_section("Classes")
+        class_btn_row = QtWidgets.QHBoxLayout()
+        class_btn_row.addWidget(self.addClassBtn)
+        class_btn_row.addWidget(self.editClassBtn)
+        classes_section_layout.addLayout(class_btn_row)
+
+        # 0. License section — added first (use create_card — special visual weight)
         self.licenseCard = None
         self.licenseStatusLabel = None
         self.manageLicenseBtn = None
-
         if self.model_choice == "SAM3" or self.available_models.get('SAM3', False):
-            license_card, license_layout = create_card("SAM3 Pro License", "🔑")
+            license_card, license_layout = create_card("SAM3 Pro License", "\U0001f511")
             self.licenseCard = license_card
 
-            # License status label
             self.licenseStatusLabel = QtWidgets.QLabel()
             self.licenseStatusLabel.setWordWrap(True)
             self.licenseStatusLabel.setStyleSheet("font-size: 14px; padding: 5px;")
             license_layout.addWidget(self.licenseStatusLabel)
 
-            # Manage License button
             self.manageLicenseBtn = QtWidgets.QPushButton("Manage License")
             self.manageLicenseBtn.setCursor(Qt.PointingHandCursor)
             self.manageLicenseBtn.setStyleSheet("""
@@ -3402,16 +3966,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.manageLicenseBtn.clicked.connect(self._show_license_dialog)
             license_layout.addWidget(self.manageLicenseBtn)
 
-            # Update license status
             self._update_license_status()
+            settings_layout.addWidget(license_card)
 
-            tab2_layout.addWidget(license_card)
+        # Add model then classes after license
+        settings_layout.addWidget(model_section_w)
+        settings_layout.addWidget(classes_section_w)
 
-        # --- Output Settings ---
-        output_card, output_layout = create_card("Output Settings", "📂")
+        # 3. Output section
+        output_section_w, output_section_layout = create_section("Output")
+
         folder_layout = QtWidgets.QHBoxLayout()
-        self.outputFolderLabel = QtWidgets.QLabel("Default folder")
-        self.outputFolderLabel.setStyleSheet("font-size: 14px; color: #475467;")  # Reduced from 18px
+        _saved_path = str(self.export_save_dir)
+        _folder_display = ("..." + _saved_path[-20:] if len(_saved_path) > 23 else _saved_path)
+        self.outputFolderLabel = QtWidgets.QLabel(_folder_display)
+        self.outputFolderLabel.setStyleSheet("font-size: 14px; color: #475467;")
+        self.outputFolderLabel.setMinimumWidth(0)
+        self.outputFolderLabel.setSizePolicy(
+            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.selectFolderBtn = QtWidgets.QPushButton("Choose")
         self.selectFolderBtn.setCursor(Qt.PointingHandCursor)
         self.selectFolderBtn.setStyleSheet("""
@@ -3420,48 +3992,52 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 background: #FFF; border: 1px solid #D0D5DD;
             }
             QPushButton:hover { background: #F9FAFB; }
-        """)  # Reduced font-size and padding
+        """)
         self.selectFolderBtn.setAutoDefault(False)
         self.selectFolderBtn.setDefault(False)
         self.selectFolderBtn.setFocusPolicy(Qt.NoFocus)
-        folder_layout.addWidget(self.outputFolderLabel)
-        folder_layout.addStretch()
+        folder_layout.addWidget(self.outputFolderLabel, 1)
         folder_layout.addWidget(self.selectFolderBtn)
-        output_layout.addLayout(folder_layout)
+        output_section_layout.addLayout(folder_layout)
 
         format_layout = QtWidgets.QHBoxLayout()
         format_label = QtWidgets.QLabel("Export format")
         format_label.setStyleSheet("font-size: 14px; color: #475467;")
         self.formatComboBox = QtWidgets.QComboBox()
-        self.formatComboBox.setStyleSheet("""
-            QComboBox {
-                padding: 8px 10px; font-size: 14px; border-radius: 7px;
-                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox:hover { border: 1px solid #1570EF; }
-        """)
+        self.formatComboBox.setStyleSheet(combo_style)
         self.formatComboBox.setFocusPolicy(Qt.NoFocus)
         for fmt in self.EXPORT_FORMATS:
             self.formatComboBox.addItem(fmt)
         format_layout.addWidget(format_label)
         format_layout.addStretch()
         format_layout.addWidget(self.formatComboBox)
-        output_layout.addLayout(format_layout)
+        output_section_layout.addLayout(format_layout)
 
         debug_layout = QtWidgets.QHBoxLayout()
         debug_label = QtWidgets.QLabel("Save debug masks")
-        debug_label.setStyleSheet("font-size: 14px;")  # Reduced from 18px
+        debug_label.setStyleSheet("font-size: 14px;")
         self.saveDebugSwitch = Switch()
         debug_layout.addWidget(debug_label)
         debug_layout.addStretch()
         debug_layout.addWidget(self.saveDebugSwitch)
-        output_layout.addLayout(debug_layout)
-        tab2_layout.addWidget(output_card)
+        output_section_layout.addLayout(debug_layout)
+        settings_layout.addWidget(output_section_w)
 
-        # --- GSD / Resolution Card (Tab 2) ---
-        gsd_card, gsd_layout = create_card("GSD / Resolution", "📐")
+        settings_layout.addStretch()
 
+        # ================================================================
+        # TAB 5 — FILTERS
+        # ================================================================
+
+        spinbox_style = """
+            QDoubleSpinBox {
+                padding: 4px 6px; font-size: 14px; border-radius: 5px;
+                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
+            }
+        """
+
+        # 1. GSD section
+        gsd_section_w, gsd_section_layout = create_section("GSD / Resolution")
         gsd_row = QtWidgets.QHBoxLayout()
         gsd_label = QtWidgets.QLabel("GSD:")
         gsd_label.setStyleSheet("font-size: 14px; color: #475467;")
@@ -3478,10 +4054,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             }
             QDoubleSpinBox:hover { border: 1px solid #1570EF; }
         """)
-        self.gsdSpinBox.setToolTip(self._tip("Ground Sample Distance — centimeters per pixel.\nAuto-detect reads from raster metadata."))
         self.gsdSpinBox.setFixedWidth(110)
         self.gsdSpinBox.setFocusPolicy(Qt.NoFocus)
-
         self.autoGsdBtn = QtWidgets.QPushButton("Auto-Detect")
         self.autoGsdBtn.setCursor(Qt.PointingHandCursor)
         self.autoGsdBtn.setStyleSheet("""
@@ -3494,31 +4068,27 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.autoGsdBtn.setAutoDefault(False)
         self.autoGsdBtn.setDefault(False)
         self.autoGsdBtn.setFocusPolicy(Qt.NoFocus)
-
         gsd_row.addWidget(gsd_label)
         gsd_row.addWidget(self.gsdSpinBox)
         gsd_row.addStretch()
         gsd_row.addWidget(self.autoGsdBtn)
-        gsd_layout.addLayout(gsd_row)
-
-        self.gsdSourceLabel = QtWidgets.QLabel("Not set — click Auto-Detect or enter manually")
+        gsd_section_layout.addLayout(gsd_row)
+        self.gsdSourceLabel = QtWidgets.QLabel("Not set \u2014 click Auto-Detect or enter manually")
         self.gsdSourceLabel.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
-        gsd_layout.addWidget(self.gsdSourceLabel)
+        gsd_section_layout.addWidget(self.gsdSourceLabel)
+        tab5_layout.addWidget(gsd_section_w)
 
-        tab2_layout.addWidget(gsd_card)
-
-        # --- Size Filtering Card (Tab 2) ---
-        size_card, size_layout = create_card("Size Filtering", "📏")
-
+        # 2. Size section
+        size_section_w, size_section_layout = create_section("Size Filtering")
         sf_toggle_row = QtWidgets.QHBoxLayout()
         sf_toggle_label = QtWidgets.QLabel("Real-world filtering")
         sf_toggle_label.setStyleSheet("font-size: 14px;")
         self.realWorldFilterSwitch = Switch()
-        self.realWorldFilterSwitch.setEnabled(False)  # Disabled until GSD is set
+        self.realWorldFilterSwitch.setEnabled(False)
         sf_toggle_row.addWidget(sf_toggle_label)
         sf_toggle_row.addStretch()
         sf_toggle_row.addWidget(self.realWorldFilterSwitch)
-        size_layout.addLayout(sf_toggle_row)
+        size_section_layout.addLayout(sf_toggle_row)
 
         self.realWorldFilterFrame = QtWidgets.QFrame()
         self.realWorldFilterFrame.setStyleSheet("""
@@ -3528,14 +4098,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         rwf_layout.setContentsMargins(8, 8, 8, 8)
         rwf_layout.setSpacing(6)
 
-        spinbox_style = """
-            QDoubleSpinBox {
-                padding: 4px 6px; font-size: 14px; border-radius: 5px;
-                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
-            }
-        """
-
-        # Min diameter
         rwf_layout.addWidget(QtWidgets.QLabel("Min diameter:"), 0, 0)
         self.minDiameterSpinBox = QtWidgets.QDoubleSpinBox()
         self.minDiameterSpinBox.setRange(0, 100000)
@@ -3549,7 +4111,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.minDiameterPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
         rwf_layout.addWidget(self.minDiameterPixelLabel, 0, 2)
 
-        # Max diameter
         rwf_layout.addWidget(QtWidgets.QLabel("Max diameter:"), 1, 0)
         self.maxDiameterSpinBox = QtWidgets.QDoubleSpinBox()
         self.maxDiameterSpinBox.setRange(0, 100000)
@@ -3563,12 +4124,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.maxDiameterPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
         rwf_layout.addWidget(self.maxDiameterPixelLabel, 1, 2)
 
-        # Min area
         rwf_layout.addWidget(QtWidgets.QLabel("Min area:"), 2, 0)
         self.minAreaSpinBox = QtWidgets.QDoubleSpinBox()
         self.minAreaSpinBox.setRange(0, 1e9)
         self.minAreaSpinBox.setDecimals(2)
-        self.minAreaSpinBox.setSuffix(" m\u00B2")
+        self.minAreaSpinBox.setSuffix(" m\u00b2")
         self.minAreaSpinBox.setStyleSheet(spinbox_style)
         self.minAreaSpinBox.setFixedWidth(95)
         self.minAreaSpinBox.setFocusPolicy(Qt.NoFocus)
@@ -3577,12 +4137,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.minAreaPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
         rwf_layout.addWidget(self.minAreaPixelLabel, 2, 2)
 
-        # Max area
         rwf_layout.addWidget(QtWidgets.QLabel("Max area:"), 3, 0)
         self.maxAreaSpinBox = QtWidgets.QDoubleSpinBox()
         self.maxAreaSpinBox.setRange(0, 1e9)
         self.maxAreaSpinBox.setDecimals(2)
-        self.maxAreaSpinBox.setSuffix(" m\u00B2")
+        self.maxAreaSpinBox.setSuffix(" m\u00b2")
         self.maxAreaSpinBox.setStyleSheet(spinbox_style)
         self.maxAreaSpinBox.setFixedWidth(95)
         self.maxAreaSpinBox.setFocusPolicy(Qt.NoFocus)
@@ -3591,23 +4150,20 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.maxAreaPixelLabel.setStyleSheet("font-size: 14px; color: #9CA3AF;")
         rwf_layout.addWidget(self.maxAreaPixelLabel, 3, 2)
 
-        # Style grid labels
         for i in range(4):
-            label = rwf_layout.itemAtPosition(i, 0).widget()
-            label.setStyleSheet("font-size: 14px; color: #475467;")
+            rwf_layout.itemAtPosition(i, 0).widget().setStyleSheet("font-size: 14px; color: #475467;")
 
         self.realWorldFilterFrame.setVisible(False)
-        size_layout.addWidget(self.realWorldFilterFrame)
+        size_section_layout.addWidget(self.realWorldFilterFrame)
 
+        # gsdRequiredLabel constructed (referenced in logic) but not added to layout
         self.gsdRequiredLabel = QtWidgets.QLabel("Requires GSD to be set above")
         self.gsdRequiredLabel.setStyleSheet("font-size: 14px; color: #DC6803; font-style: italic;")
-        size_layout.addWidget(self.gsdRequiredLabel)
 
-        tab2_layout.addWidget(size_card)
+        tab5_layout.addWidget(size_section_w)
 
-        # --- Shape Filters Card (Tab 2) ---
-        shape_card, shape_layout = create_card("Shape Filtering", "🔷")
-
+        # 3. Shape section
+        shape_section_w, shape_section_layout = create_section("Shape Filtering")
         shape_toggle_row = QtWidgets.QHBoxLayout()
         shape_toggle_label = QtWidgets.QLabel("Enable shape filtering")
         shape_toggle_label.setStyleSheet("font-size: 14px;")
@@ -3615,7 +4171,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         shape_toggle_row.addWidget(shape_toggle_label)
         shape_toggle_row.addStretch()
         shape_toggle_row.addWidget(self.shapeFilterSwitch)
-        shape_layout.addLayout(shape_toggle_row)
+        shape_section_layout.addLayout(shape_toggle_row)
 
         self.shapeFilterFrame = QtWidgets.QFrame()
         self.shapeFilterFrame.setStyleSheet("""
@@ -3625,7 +4181,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         shf_layout.setContentsMargins(8, 8, 8, 8)
         shf_layout.setSpacing(6)
 
-        # Min circularity
         circ_label = QtWidgets.QLabel("Min circularity:")
         circ_label.setStyleSheet("font-size: 14px; color: #475467;")
         shf_layout.addWidget(circ_label, 0, 0)
@@ -3637,10 +4192,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.circularitySpinBox.setStyleSheet(spinbox_style)
         self.circularitySpinBox.setFixedWidth(70)
         self.circularitySpinBox.setFocusPolicy(Qt.NoFocus)
-        self.circularitySpinBox.setToolTip(self._tip("4*pi*area/perimeter\u00B2\n1.0 = perfect circle, 0.0 = any shape"))
         shf_layout.addWidget(self.circularitySpinBox, 0, 1)
 
-        # Min compactness
         comp_label = QtWidgets.QLabel("Min compactness:")
         comp_label.setStyleSheet("font-size: 14px; color: #475467;")
         shf_layout.addWidget(comp_label, 1, 0)
@@ -3652,10 +4205,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.compactnessSpinBox.setStyleSheet(spinbox_style)
         self.compactnessSpinBox.setFixedWidth(70)
         self.compactnessSpinBox.setFocusPolicy(Qt.NoFocus)
-        self.compactnessSpinBox.setToolTip(self._tip("area / bounding_box_area\n1.0 = fills bbox perfectly, 0.0 = any shape"))
         shf_layout.addWidget(self.compactnessSpinBox, 1, 1)
 
-        # Max aspect ratio
         ar_label = QtWidgets.QLabel("Max aspect ratio:")
         ar_label.setStyleSheet("font-size: 14px; color: #475467;")
         shf_layout.addWidget(ar_label, 2, 0)
@@ -3667,7 +4218,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.aspectRatioSpinBox.setStyleSheet(spinbox_style)
         self.aspectRatioSpinBox.setFixedWidth(70)
         self.aspectRatioSpinBox.setFocusPolicy(Qt.NoFocus)
-        self.aspectRatioSpinBox.setToolTip(self._tip("max(w,h)/min(w,h)\n1.0 = square, high = elongated"))
         shf_layout.addWidget(self.aspectRatioSpinBox, 2, 1)
 
         shape_hint = QtWidgets.QLabel("Filters objects by geometric shape after segmentation")
@@ -3675,369 +4225,27 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         shf_layout.addWidget(shape_hint, 3, 0, 1, 2)
 
         self.shapeFilterFrame.setVisible(False)
-        shape_layout.addWidget(self.shapeFilterFrame)
+        shape_section_layout.addWidget(self.shapeFilterFrame)
+        tab5_layout.addWidget(shape_section_w)
 
-        tab2_layout.addWidget(shape_card)
+        tab5_layout.addStretch()
 
-        # --- Class Selection ---
-        class_card, class_layout = create_card("Class Selection", "🏷️")
-
-        # Class dropdown
-        self.classComboBox = QtWidgets.QComboBox()
-        self.classComboBox.addItem("-- Select Class --", None)
-        for class_name in self.classes.keys():
-            self.classComboBox.addItem(class_name, class_name)
-        self.classComboBox.setStyleSheet("""
-            QComboBox {
-                padding: 8px 10px; font-size: 14px; border-radius: 7px;
-                border: 2px solid #F59E0B; background: #FFFBEB;
-            }
-            QComboBox::drop-down { border: none; }
-        """)  # Reduced padding and font-size
-        self.classComboBox.setFocusPolicy(Qt.NoFocus)
-        class_layout.addWidget(self.classComboBox)
-
-        # Current class label
-        self.currentClassLabel = QtWidgets.QLabel("No class selected")
-        self.currentClassLabel.setWordWrap(True)
-        self.currentClassLabel.setStyleSheet("""
-            font-weight: 600; padding: 12px; margin: 4px;
-            border: 2px solid #D0D5DD;
-            background-color: #F9FAFB;
-            color: #667085;
-            border-radius: 8px; font-size: 14px;
-        """)  # Reduced padding and font-size
-        class_layout.addWidget(self.currentClassLabel)
-
-        # Add/Edit buttons
-        class_btn_layout = QtWidgets.QHBoxLayout()
-        self.addClassBtn = QtWidgets.QPushButton("➕ Add")
-        self.editClassBtn = QtWidgets.QPushButton("✏️ Edit")
-        for btn in [self.addClassBtn, self.editClassBtn]:
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setAutoDefault(False)
-            btn.setDefault(False)
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setStyleSheet("""
-                QPushButton {
-                    font-size: 14px; padding: 8px; border-radius: 8px;
-                    background: #FFF; border: 1px solid #D0D5DD;
-                }
-                QPushButton:hover { background: #F9FAFB; }
-            """)  # Reduced font-size and padding
-            class_btn_layout.addWidget(btn)
-        class_layout.addLayout(class_btn_layout)
-        tab1_layout.addWidget(class_card)
-
-        # --- SAM3 Modes Card (SAM3 only: text prompt + find similar) ---
-        self.textPromptCard, text_prompt_layout = create_card("SAM3 Modes", "🤖")
-        self.textPromptCard.setVisible(self.model_choice == "SAM3")
-
-        # Row 1: [input - full width]
-        self.textPromptInput = QtWidgets.QLineEdit()
-        self.textPromptInput.setPlaceholderText("Text prompt — e.g. building, car, tree")
-        self.textPromptInput.setStyleSheet("""
-            QLineEdit {
-                padding: 8px 10px; font-size: 14px; border-radius: 7px;
-                border: 1px solid #D0D5DD; background: #FFF;
-            }
-            QLineEdit:focus { border: 2px solid #1570EF; }
-            QLineEdit:disabled {
-                background: #F3F4F6; color: #9CA3AF;
-                border: 1px solid #E5E7EB;
-            }
-        """)
-        self.textPromptInput.setFocusPolicy(Qt.StrongFocus)
-        text_prompt_layout.addWidget(self.textPromptInput)
-
-        # Row 2: [🤖 Auto-Segment]  or  [👁 Find Similar]
-        self.segmentTextBtn = QtWidgets.QPushButton("🤖 Auto-Segment")
-        self.segmentTextBtn.setCursor(Qt.PointingHandCursor)
-        self.segmentTextBtn.setEnabled(False)  # Enabled only when text is entered
-        self.segmentTextBtn.setStyleSheet("""
-            QPushButton {
-                font-size: 14px; font-weight: 600; padding: 8px 12px;
-                border-radius: 8px; color: #FFF;
-                background: #1570EF; border: 1px solid #1570EF;
-            }
-            QPushButton:hover { background: #1849A9; }
-            QPushButton:disabled { background: #D0D5DD; border: 1px solid #D0D5DD; color: #9CA3AF; }
-        """)
-        self.segmentTextBtn.setAutoDefault(False)
-        self.segmentTextBtn.setFocusPolicy(Qt.NoFocus)
-
-        self.similarModeBtn = QtWidgets.QPushButton("👁 Find Similar")
-        self.similarModeBtn.setCheckable(True)
-        self.similarModeBtn.setVisible(self.model_choice == "SAM3")
-        self.similarModeBtn.setToolTip("")
-        self.similarModeBtn.setFocusPolicy(Qt.NoFocus)
-
-        or_lbl = QtWidgets.QLabel("or")
-        or_lbl.setStyleSheet("font-size: 12px; color: #9CA3AF;")
-        or_lbl.setFixedWidth(20)
-        or_lbl.setAlignment(Qt.AlignCenter)
-
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(4)
-        btn_row.addWidget(self.segmentTextBtn, stretch=1)
-        btn_row.addWidget(or_lbl)
-        btn_row.addWidget(self.similarModeBtn, stretch=1)
-        text_prompt_layout.addLayout(btn_row)
-
-        # Row 3: Scope
-        self.scopeComboBox = QtWidgets.QComboBox()
-        self.scopeComboBox.addItem("Visible Extent (AOI)", "aoi")
-        self.scopeComboBox.addItem("Entire Raster (Auto-slice)", "full")
-        self.scopeComboBox.setStyleSheet("""
-            QComboBox {
-                font-size: 14px; padding: 6px; border-radius: 6px;
-                border: 1px solid #D0D5DD; background: #FFF;
-            }
-            QComboBox:hover { border-color: #1570EF; }
-        """)
-        self.scopeComboBox.setFocusPolicy(Qt.NoFocus)
-        self.scopeComboBox.currentIndexChanged.connect(self._on_scope_changed)
-
-        scope_row = QtWidgets.QHBoxLayout()
-        scope_row.setSpacing(8)
-        scope_row.addWidget(QtWidgets.QLabel("Scope:"))
-        scope_row.itemAt(0).widget().setStyleSheet("font-size: 14px; color: #475467;")
-        scope_row.addWidget(self.scopeComboBox, stretch=1)
-        text_prompt_layout.addLayout(scope_row)
-
-        tab1_layout.addWidget(self.textPromptCard)
-
-        # --- Enhanced Segmentation Mode ---
-        mode_card, mode_layout = create_card("Segmentation Mode", "🎯")
-
-        # Point mode button (existing)
-        self.pointModeBtn = QtWidgets.QPushButton("Point Mode")
-        self.pointModeBtn.setCheckable(True)
-        self.pointModeBtn.setChecked(True)
-
-        # Enhanced BBox mode button
-        self.bboxModeBtn = QtWidgets.QPushButton("BBox Mode")
-        self.bboxModeBtn.setCheckable(True)
-        self.bboxModeBtn.setVisible(True)
-
-        # Button group for click-based modes only — Auto-Segment is an action, not a mode
-        self.mode_button_group = QtWidgets.QButtonGroup()
-        self.mode_button_group.addButton(self.pointModeBtn)
-        self.mode_button_group.addButton(self.bboxModeBtn)
-        self.mode_button_group.addButton(self.similarModeBtn)
-        self.mode_button_group.setExclusive(True)
-
-        mode_btn_style = """
-            QPushButton {
-                font-size: 14px; font-weight: 600; padding: 10px;
-                border-radius: 8px; border: 1px solid #D0D5DD;
-                background: #FFF; color: #344054;
-            }
-            QPushButton:hover { background: #F9FAFB; }
-            QPushButton:checked {
-                color: #FFF; background: #1570EF; border: 1px solid #1570EF;
-            }
-        """
-        self.pointModeBtn.setStyleSheet(mode_btn_style)
-        self.bboxModeBtn.setStyleSheet(mode_btn_style)
-        self.similarModeBtn.setStyleSheet(mode_btn_style)
-
-        # NEW: Batch mode toggle
-        batch_layout = QtWidgets.QHBoxLayout()
-        batch_label = QtWidgets.QLabel("Batch Segmentation")
-        batch_label.setStyleSheet("font-size: 14px;")
-        batch_label.setToolTip(self._tip("Find multiple objects in bbox area"))
-        self.batchModeSwitch = Switch()
-        self.batchModeSwitch.setToolTip(self._tip("Enable to find multiple objects in bbox"))
-        batch_layout.addWidget(batch_label)
-        batch_layout.addStretch()
-        batch_layout.addWidget(self.batchModeSwitch)
-
-        # NEW: Batch settings (initially hidden) - ENHANCED WITH TOOLTIPS
-        self.batchSettingsFrame = QtWidgets.QFrame()
-        self.batchSettingsFrame.setStyleSheet("""
-            QFrame {
-                background: #F9FAFB;
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
-                margin: 2px;
-            }
-        """)
-        self.batchSettingsFrame.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred,
-            QtWidgets.QSizePolicy.Maximum
-        )
-
-        batch_settings_layout = QtWidgets.QVBoxLayout(self.batchSettingsFrame)
-        batch_settings_layout.setContentsMargins(8, 6, 8, 6)  # Reduced margins
-        batch_settings_layout.setSpacing(3)  # Reduced spacing
-
-        # Min object size setting - ENHANCED WITH TOOLTIPS
-        size_layout = QtWidgets.QHBoxLayout()
-        size_layout.setSpacing(4)
-        size_label = QtWidgets.QLabel("Min size:")
-        size_label.setStyleSheet("font-size: 14px; color: #667085;")
-        size_label.setFixedWidth(70)
-        self.minSizeSpinBox = QtWidgets.QSpinBox()
-        self.minSizeSpinBox.setRange(10, 500)
-        self.minSizeSpinBox.setValue(50)
-        self.minSizeSpinBox.setSuffix("px")
-        self.minSizeSpinBox.setFixedWidth(100)
-        self.minSizeSpinBox.setStyleSheet("""
-            QSpinBox {
-                font-size: 14px; padding: 2px;
-                border: 1px solid #D0D5DD; border-radius: 3px;
-            }
-        """)
-        # ENHANCED: Add helpful tooltip with class recommendations
-        self.minSizeSpinBox.setToolTip("")
-        size_layout.addWidget(size_label)
-        size_layout.addWidget(self.minSizeSpinBox)
-        size_layout.addStretch()
-
-        # Max objects setting - ENHANCED WITH TOOLTIPS
-        max_layout = QtWidgets.QHBoxLayout()
-        max_layout.setSpacing(4)
-        max_label = QtWidgets.QLabel("Max obj:")
-        max_label.setStyleSheet("font-size: 14px; color: #667085;")
-        max_label.setFixedWidth(70)
-        self.maxObjectsSpinBox = QtWidgets.QSpinBox()
-        self.maxObjectsSpinBox.setRange(1, 50)
-        self.maxObjectsSpinBox.setValue(20)
-        self.maxObjectsSpinBox.setFixedWidth(100)
-        self.maxObjectsSpinBox.setStyleSheet("""
-            QSpinBox {
-                font-size: 14px; padding: 2px;
-                border: 1px solid #D0D5DD; border-radius: 3px;
-            }
-        """)
-        # ENHANCED: Add helpful tooltip with class recommendations
-        self.maxObjectsSpinBox.setToolTip("")
-        max_layout.addWidget(max_label)
-        max_layout.addWidget(self.maxObjectsSpinBox)
-        max_layout.addStretch()
-
-        batch_settings_layout.addLayout(size_layout)
-        batch_settings_layout.addLayout(max_layout)
-
-        # ENHANCED: Add helpful hints label
-        self.classHintsLabel = QtWidgets.QLabel("Auto-adjusts based on selected class")
-        self.classHintsLabel.setStyleSheet("font-size: 14px; color: #9CA3AF; font-style: italic;")
-        self.classHintsLabel.setAlignment(Qt.AlignCenter)
-        batch_settings_layout.addWidget(self.classHintsLabel)
-
-        # Initially hidden and properly sized
-        self.batchSettingsFrame.setVisible(False)
-        self.batchSettingsFrame.setMaximumHeight(80)  # Slightly increased for hints label
-
-        # Add all to mode layout
-        mode_layout.addWidget(self.pointModeBtn)
-        mode_layout.addWidget(self.bboxModeBtn)
-        mode_layout.addLayout(batch_layout)
-        mode_layout.addWidget(self.batchSettingsFrame)
-        tab1_layout.addWidget(mode_card)
-
-        # --- Status & Controls Card ---
-        status_card, status_layout = create_card("Status & Controls", "⚙️")
-        self.statusLabel = QtWidgets.QLabel("Ready to segment")
-        self.statusLabel.setWordWrap(True)
-        self.statusLabel.setStyleSheet("""
-            padding: 10px; border-radius: 8px; font-size: 16px; font-weight: 500;
-            background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;
-        """)  # Reduced padding and font-size
-        status_layout.addWidget(self.statusLabel)
-
-        self.statsLabel = QtWidgets.QLabel("Total Segments: 0 | Classes: 0")
-        self.statsLabel.setStyleSheet(
-            "font-size: 14px; color: #475467; margin-top: 3px; margin-bottom: 3px;")  # Reduced from 18px
-        status_layout.addWidget(self.statsLabel)
-
-        # Filter info is shown inside the status label (no separate indicator)
-
-        self.progressBar = QtWidgets.QProgressBar()
-        self.progressBar.setRange(0, 0)
-        self.progressBar.setVisible(False)
-        self.progressBar.setTextVisible(False)
-        self.progressBar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #D0D5DD; border-radius: 8px;
-                background-color: #F2F4F7; height: 8px;
-            }
-            QProgressBar::chunk {
-                background-color: #1570EF; border-radius: 8px;
-            }
-        """)  # Reduced height
-        status_layout.addWidget(self.progressBar)
-
-        self.undoBtn = QtWidgets.QPushButton("⟲ Undo Last Polygon")
-        self.undoBtn.setEnabled(False)
-        self.undoBtn.setCursor(Qt.PointingHandCursor)
-        self.undoBtn.setStyleSheet("""
-            QPushButton {
-                font-size: 14px; font-weight: 600; padding: 10px;
-                border-radius: 8px; background: #DC2626; color: #FFF;
-                border: 1px solid #DC2626;
-            }
-            QPushButton:hover { background: #B91C1C; }
-            QPushButton:disabled {
-                background: #F2F4F7; color: #98A2B3; border-color: #EAECF0;
-            }
-        """)  # Reduced font-size and padding
-
-        self.undoBtn.setAutoDefault(False)
-        self.undoBtn.setDefault(False)
-        self.undoBtn.setFocusPolicy(Qt.NoFocus)
-
-        export_btn_style = """
-            QPushButton {
-                font-size: 14px; font-weight: 600; padding: 10px;
-                border-radius: 8px; color: #FFF;
-                background: #027A48; border: 1px solid #027A48;
-            }
-            QPushButton:hover { background: #039855; }
-        """
-
-        self.exportBtn = QtWidgets.QPushButton("💾 Export All")
-        self.exportBtn.setCursor(Qt.PointingHandCursor)
-        self.exportBtn.setStyleSheet(export_btn_style)
-        self.exportBtn.setAutoDefault(False)
-        self.exportBtn.setDefault(False)
-        self.exportBtn.setFocusPolicy(Qt.NoFocus)
-
-        self.exportSelectedBtn = QtWidgets.QPushButton("💾 Export Selected")
-        self.exportSelectedBtn.setCursor(Qt.PointingHandCursor)
-        self.exportSelectedBtn.setStyleSheet(export_btn_style)
-        self.exportSelectedBtn.setAutoDefault(False)
-        self.exportSelectedBtn.setDefault(False)
-        self.exportSelectedBtn.setFocusPolicy(Qt.NoFocus)
-        self.exportSelectedBtn.setToolTip(self._tip("Export layers selected in the QGIS Layers panel"))
-
-        export_row = QtWidgets.QHBoxLayout()
-        export_row.setSpacing(6)
-        export_row.addWidget(self.exportBtn, stretch=1)
-        export_row.addWidget(self.exportSelectedBtn, stretch=1)
-
-        status_layout.addWidget(self.undoBtn)
-        status_layout.addLayout(export_row)
-        tab1_layout.addWidget(status_card)
-
-        tab1_layout.addStretch()
-        tab2_layout.addStretch()
+        # ================================================================
+        # Sizing & focus
+        # ================================================================
         self.setFocusPolicy(Qt.ClickFocus)
-
-        # Enable proper resizing
         self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         container_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
-
-        # Force initial layout
         self.adjustSize()
 
-        # Connect all the signals (keeping original connections)
+        # ================================================================
+        # Signal connections (keeping all original connections)
+        # ================================================================
         self.selectFolderBtn.clicked.connect(self._select_output_folder)
         self.saveDebugSwitch.toggled.connect(self._on_debug_toggle)
         self.addClassBtn.clicked.connect(self._add_new_class)
         self.editClassBtn.clicked.connect(self._edit_classes)
-        self.classComboBox.currentTextChanged.connect(self._on_class_changed)
+        self.classComboBox.currentTextChanged.connect(lambda _: self._on_class_changed())
         self.pointModeBtn.clicked.connect(self._activate_point_tool)
         self.bboxModeBtn.clicked.connect(self._activate_bbox_tool)
         self.undoBtn.clicked.connect(self._undo_last_polygon)
@@ -4056,6 +4264,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         )
         self.similarModeBtn.clicked.connect(self._activate_similar_tool)
         self.similarModeBtn.toggled.connect(self._on_similar_mode_toggled)
+        self.similarFromSelectionBtn.clicked.connect(self._run_similar_from_selection)
 
         # GSD / Size / Shape filter connections
         self.autoGsdBtn.clicked.connect(self._auto_detect_gsd)
@@ -4070,6 +4279,28 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.compactnessSpinBox.valueChanged.connect(lambda: self._update_filter_indicator())
         self.aspectRatioSpinBox.valueChanged.connect(lambda: self._update_filter_indicator())
 
+        # Sync classComboBox and classComboBoxDetect
+        def _sync_class_combos(index):
+            for cb in [self.classComboBox, self.classComboBoxDetect]:
+                if cb.currentIndex() != index:
+                    cb.blockSignals(True)
+                    cb.setCurrentIndex(index)
+                    cb.blockSignals(False)
+            self._on_class_changed()
+
+        self.classComboBox.currentIndexChanged.connect(_sync_class_combos)
+        self.classComboBoxDetect.currentIndexChanged.connect(_sync_class_combos)
+
+        # Reset to point mode when switching back to Segment tab (index 0)
+        # so that any active similar/text mode from the Detect tab doesn't persist.
+        def _on_tab_changed(index):
+            if index == 0 and self.current_mode in ("similar", "text"):
+                if hasattr(self, 'similarModeBtn') and self.similarModeBtn.isChecked():
+                    self.similarModeBtn.setChecked(False)
+                self._activate_point_tool()
+
+        self.tabWidget.currentChanged.connect(_on_tab_changed)
+
         # Refresh model options in case SAM3 was downloaded during init
         self._refresh_model_options()
 
@@ -4078,15 +4309,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self, "Select Output Folder", str(self.export_save_dir.parent))
 
         if folder:
-            self.export_save_dir = pathlib.Path(
-                folder) / "GeoOSAM_output"
+            self.export_save_dir = pathlib.Path(folder) / "GeoOSAM_output"
             self.mask_save_dir = pathlib.Path(folder) / "GeoOSAM_masks"
             self.export_save_dir.mkdir(exist_ok=True)
             if self.save_debug_masks:
                 self.mask_save_dir.mkdir(exist_ok=True)
 
-            short_path = "..." + str(self.export_save_dir)[-35:] if len(
-                str(self.export_save_dir)) > 40 else str(self.export_save_dir)
+            QSettings().setValue("GeoOSAM/output_folder", str(self.export_save_dir))
+
+            short_path = "..." + str(self.export_save_dir)[-20:] if len(
+                str(self.export_save_dir)) > 23 else str(self.export_save_dir)
             self.outputFolderLabel.setText(short_path)
             self._update_status(
                 f"📁 Output folder: {self.export_save_dir}", "info")
@@ -4130,7 +4362,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     "font-weight: 600; padding: 12px; margin: 4px; "
                     f"border: 3px solid rgb({r},{g},{b}); "
                     f"background-color: rgba({r},{g},{b}, 30); "
-                    f"color: rgb({max(0, r-50)},{max(0, g-50)},{max(0, b-50)}); "
+                    f"color: rgb({max(0, r - 50)},{max(0, g - 50)},{max(0, b - 50)}); "
                     "border-radius: 8px; font-size: 16px;")
             except Exception:
                 self.currentClassLabel.setStyleSheet(
@@ -4203,7 +4435,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 'batch_defaults': {'min_size': 50, 'max_objects': 20, 'max_size': 0}  # Generic defaults
             }
 
-            self.classComboBox.addItem(class_name, class_name)
+            self._add_class_item(self.classComboBox, class_name)
+            if hasattr(self, 'classComboBoxDetect') and self.classComboBoxDetect:
+                self._add_class_item(self.classComboBoxDetect, class_name)
             self._update_status(
                 f"Added class: {class_name} (RGB:{color}) with default batch settings", "info")
 
@@ -4330,7 +4564,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if self.real_world_filter_enabled:
                 self.realWorldFilterSwitch.setChecked(False)
             self.realWorldFilterSwitch.setEnabled(False)
-            self._update_status("Ready to segment", "info")
+            self._update_status("Segmentation cancelled", "warning")
         self._update_real_world_filter_hints()
         self._update_filter_indicator()
 
@@ -4378,7 +4612,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Refresh status label to include/remove filter line
         self._update_status(self._last_status_text, self._last_status_type)
 
-    def _update_real_world_filter_hints(self, _value=None):
+    def _update_real_world_filter_hints(self, *_):
         """Update pixel-equivalent hint labels next to each spinbox"""
         gsd = self.gsd_cm_per_px
 
@@ -4511,7 +4745,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.iface.actionPan().trigger()
         self._clear_widget_focus()
 
-    def _on_model_changed(self, index):
+    def _on_model_changed(self, *_):
         """Handle model selection change"""
         new_model = self.modelComboBox.currentData()
 
@@ -4532,6 +4766,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.model_choice = new_model
             self._reload_model()
             self._update_ui_for_model()
+            _size_map = {'tiny': 'T', 'small': 'S', 'base': 'B', 'large': 'L'}
+            _lower = self.model_choice.lower()
+            _label = next((f"SAM2 {v}" for k, v in _size_map.items() if _lower.endswith(k)), self.model_choice)
+            badge_color = "#027A48" if self.model_choice == "SAM3" else "#475467"
+            self.model_badge.setText(_label)
+            self.model_badge.setStyleSheet(f"""
+                font-size: 11px; font-weight: 600; color: #fff;
+                background: {badge_color}; border-radius: 4px; padding: 2px 7px;
+            """)
         else:
             # Revert dropdown
             current_idx = self.modelComboBox.findData(self.model_choice)
@@ -4552,10 +4795,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 f"Failed to load {self.model_choice}:\n{e}"
             )
 
+    def _toggle_settings_panel(self, checked):
+        geo = self.geometry()
+        self.tabWidget.setVisible(not checked)
+        self.settings_panel.setVisible(checked)
+        self.logPanel.setVisible(not checked)
+        if checked:
+            self.progressBar.setVisible(False)
+        self.setGeometry(geo)
+
     def _update_ui_for_model(self):
         """Update UI based on selected model capabilities"""
         # Check if current model is SAM3 (model_choice is now "SAM3" or "SAM2_tiny", etc.)
         is_sam3 = self.model_choice == "SAM3"
+
+        # Enable/disable Detect tab
+        self.tabWidget.setTabEnabled(1, is_sam3)
+        if not is_sam3 and self.tabWidget.currentIndex() == 1:
+            self.tabWidget.setCurrentIndex(0)
 
         # Show/hide text prompt card
         self.textPromptCard.setVisible(is_sam3)
@@ -4568,10 +4825,22 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Update similar mode button visibility
         self.similarModeBtn.setVisible(is_sam3)
+        if hasattr(self, 'similarFromSelectionBtn'):
+            self.similarFromSelectionBtn.setVisible(is_sam3)
         if not is_sam3 and self.current_mode == "similar":
             # Revert to point mode if similar mode was active
             self.pointModeBtn.setChecked(True)
             self.current_mode = "point"
+
+        # Show/hide scope section
+        if hasattr(self, 'scopeSectionWidget'):
+            self.scopeSectionWidget.setVisible(is_sam3)
+        if not is_sam3 and hasattr(self, 'scopeComboBox'):
+            self.scopeComboBox.blockSignals(True)
+            self.scopeComboBox.setCurrentIndex(0)
+            self.scopeComboBox.blockSignals(False)
+            if hasattr(self, 'vectorExtentWidget'):
+                self.vectorExtentWidget.setVisible(False)
 
         # Update device label
         device_icon = "🎮" if "cuda" in self.device else "🖥️"
@@ -4587,13 +4856,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.classComboBox.clear()
         self.classComboBox.addItem("-- Select Class --", None)
 
-        for class_name, class_info in self.classes.items():
-            self.classComboBox.addItem(class_name, class_name)
+        for class_name in self.classes.keys():
+            self._add_class_item(self.classComboBox, class_name)
+
+        if hasattr(self, 'classComboBoxDetect') and self.classComboBoxDetect:
+            self.classComboBoxDetect.clear()
+            self.classComboBoxDetect.addItem("-- Select Class --", None)
+            for class_name in self.classes.keys():
+                self._add_class_item(self.classComboBoxDetect, class_name)
 
         if current_class and current_class in self.classes:
             index = self.classComboBox.findData(current_class)
             if index >= 0:
                 self.classComboBox.setCurrentIndex(index)
+                if hasattr(self, 'classComboBoxDetect') and self.classComboBoxDetect:
+                    self.classComboBoxDetect.setCurrentIndex(index)
 
     def _detect_tile_layer_type(self, layer):
         """Detect if layer is a tile service (XYZ, WMS, WMTS) and return type"""
@@ -4745,9 +5022,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         current_layer = self.iface.activeLayer()
         if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
-            self._update_status(
-                "Please select a valid raster layer first!", "warning")
-            return False
+            # Active layer is not a raster (e.g. user selected a vector to pick an exemplar)
+            # Fall back to the last known raster
+            current_layer = getattr(self, 'original_raster_layer', None)
+            if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
+                self._update_status(
+                    "Please select a valid raster layer first!", "warning")
+                return False
 
         # Check if this is a tile layer and show appropriate message
         tile_type = self._detect_tile_layer_type(current_layer)
@@ -4768,6 +5049,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def _activate_point_tool(self):
         if not self._validate_class_selection():
             return
+
+        if hasattr(self, 'similarModeBtn') and self.similarModeBtn.isChecked():
+            self.similarModeBtn.setChecked(False)
 
         self.current_mode = 'point'
         self.original_map_tool = self.canvas.mapTool()
@@ -4791,6 +5075,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if not self._validate_class_selection():
             return
 
+        if hasattr(self, 'similarModeBtn') and self.similarModeBtn.isChecked():
+            self.similarModeBtn.setChecked(False)
+
         self.current_mode = 'bbox'
         self.original_map_tool = self.canvas.mapTool()
 
@@ -4804,19 +5091,24 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._clear_widget_focus()
 
     def _activate_similar_tool(self):
-        """Activate similar object detection mode (SAM3 exemplar)"""
+        """Activate or deactivate similar object detection mode (SAM3 exemplar)"""
+        if not self.similarModeBtn.isChecked():
+            # User clicked again to toggle off — deactivate
+            self.current_mode = 'point'
+            self.batchModeSwitch.setEnabled(True)
+            return
+
         if self.model_choice != "SAM3":
             QtWidgets.QMessageBox.warning(
                 self, "Not Available",
                 "Similar Objects mode requires SAM3 model.\n\n"
                 "Please select SAM3 from the Model Selection dropdown."
             )
-            # Revert to point mode
-            self.pointModeBtn.setChecked(True)
+            self.similarModeBtn.setChecked(False)
             return
 
         if not self._validate_class_selection():
-            self.pointModeBtn.setChecked(True)
+            self.similarModeBtn.setChecked(False)
             return
 
         self.current_mode = "similar"
@@ -4834,7 +5126,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.canvas.setMapTool(self.pointTool)
         self._clear_widget_focus()
 
-    def _on_map_tool_changed(self, new_tool, old_tool):
+    def _on_map_tool_changed(self, new_tool, *_):
         """Detect when user switches away from plugin tools to external QGIS tools"""
         # Check if the new tool is NOT one of our plugin tools
         if new_tool != self.pointTool and new_tool != self.bboxTool:
@@ -4907,6 +5199,77 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         from qgis.core import QgsRectangle
         return QgsRectangle(pt1, pt2)
+
+    def _run_similar_from_selection(self):
+        """Use a selected output feature as the exemplar for similar-object search."""
+        if self.model_choice != "SAM3":
+            QtWidgets.QMessageBox.warning(
+                self, "Not Available",
+                "Similar from Selection requires SAM3 model."
+            )
+            return
+
+        if not self._validate_class_selection():
+            return
+
+        scope = self.scopeComboBox.currentData() if hasattr(self, 'scopeComboBox') else 'aoi'
+        if scope == 'full' and not self._check_raster_access():
+            return
+
+        # Find any vector layer with a selected feature
+        layer = None
+        for lyr in QgsProject.instance().mapLayers().values():
+            if isinstance(lyr, QgsVectorLayer) and lyr.isValid() and lyr.selectedFeatureCount() > 0:
+                layer = lyr
+                break
+
+        if layer is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No Selection",
+                "Select one segmented feature with the QGIS selection tool, then click this button."
+            )
+            return
+
+        selected = layer.selectedFeatures()
+        if not selected:
+            QtWidgets.QMessageBox.warning(
+                self, "No Selection",
+                "No feature selected.\n\nSelect one segmented feature first."
+            )
+            return
+        if len(selected) > 1:
+            QtWidgets.QMessageBox.warning(
+                self, "Too Many Selected",
+                f"{len(selected)} features selected — please select exactly one exemplar."
+            )
+            return
+
+        feat = selected[0]
+        geom = feat.geometry()
+        if geom.isEmpty():
+            QtWidgets.QMessageBox.warning(self, "Invalid Feature", "Selected feature has no geometry.")
+            return
+
+        # Get bbox in project/map CRS
+        bbox = geom.boundingBox()
+        map_crs = QgsProject.instance().crs()
+        if layer.crs() != map_crs:
+            ct = QgsCoordinateTransform(layer.crs(), map_crs, QgsProject.instance())
+            bbox = ct.transformBoundingBox(bbox)
+
+        request = {
+            'type': 'similar',
+            'point': bbox.center(),
+            'bbox': bbox,
+            'scope': scope,
+            'class': self.current_class,
+            'timestamp': datetime.datetime.now()
+        }
+        self._add_to_queue(request)
+        self._update_status(
+            f"Finding similar objects using selected [{self.current_class}] feature as exemplar...",
+            "processing"
+        )
 
     def _bbox_done(self, rect):
         # Add to queue instead of blocking
@@ -5011,12 +5374,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self.is_processing = False
             return
 
-        # Get the CURRENT active layer (not stored reference)
+        # Get the CURRENT active layer — fall back to last known raster
+        # (active layer may be a vector layer when using "Similar from Selection")
         current_layer = self.iface.activeLayer()
         if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
-            self._update_status("Please select a valid raster layer", "error")
-            self.is_processing = False
-            return
+            current_layer = getattr(self, 'original_raster_layer', None)
+            if not isinstance(current_layer, QgsRasterLayer) or not current_layer.isValid():
+                self._update_status("Please select a valid raster layer", "error")
+                self.is_processing = False
+                return
 
         # Update stored reference to current layer
         self.original_raster_layer = current_layer
@@ -5102,8 +5468,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 effective_min_size = max(effective_min_size, int(real_world_filters['min_area_px']))
             if 'max_area_px' in real_world_filters:
                 effective_max_size = int(real_world_filters['max_area_px'])
-        # Apply class-level max_size if no real-world override
-        if effective_max_size is None and self.max_object_size > 0:
+        # Apply class-level max_size if no real-world override.
+        # Skip for point mode — user clicked a specific object.
+        is_point_request = getattr(self, 'request_type', None) == 'point'
+        if effective_max_size is None and self.max_object_size > 0 and not is_point_request:
             effective_max_size = self.max_object_size
 
         self.worker = OptimizedSAM2Worker(
@@ -5135,6 +5503,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.worker.error.connect(self._on_segmentation_error)
         self.worker.progress.connect(self._on_segmentation_progress)
         self.worker.start()
+        self._create_cancel_button()
 
     def _run_semantic_text_full_raster(self, raster_layer):
         """
@@ -5265,7 +5634,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 print(f"🔍 Running SAM3 semantic predictor with text: '{self.text_prompt}'...")
                 self._update_status(f"🔍 SAM3 finding '{self.text_prompt}'...", "processing")
 
-                masks, scores, logits = self.predictor.predict(
+                masks, _, _ = self.predictor.predict(
                     text=self.text_prompt,
                     multimask_output=False
                 )
@@ -5282,7 +5651,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                     from qgis.PyQt.QtWidgets import QApplication
                     for i, mask in enumerate(masks):
-                        self._update_status(f"🔄 Processing mask {i+1}/{total_masks}...", "processing")
+                        self._update_status(f"🔄 Processing mask {i + 1}/{total_masks}...", "processing")
                         self.progressBar.setValue(i + 1)
                         QApplication.processEvents()
 
@@ -5299,9 +5668,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         debug_info = {'mode': 'TEXT_EXTENT'}
                         self._add_features_to_layer(all_features, debug_info, len(all_features))
                         self._update_status(f"✅ Found {len(all_features)} objects matching '{self.text_prompt}'", "success")
-                        print(f"\n{'='*80}")
+                        print(f"\n{'=' * 80}")
                         print(f"✅ COMPLETED: {len(all_features)} objects found matching '{self.text_prompt}'")
-                        print(f"{'='*80}\n")
+                        print(f"{'=' * 80}\n")
                     else:
                         self._update_status("⚠️  No features created from masks", "warning")
                 else:
@@ -5474,7 +5843,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     print("🔍 Running SAM3 semantic predictor (finding similar objects)...")
                     self._update_status("🔍 SAM3 finding similar objects...", "processing")
 
-                    masks, scores, logits = self.predictor.predict(
+                    masks, _, _ = self.predictor.predict(
                         box=[pixel_bbox],
                         exemplar_mode=True,
                         multimask_output=False
@@ -5492,7 +5861,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                         from qgis.PyQt.QtWidgets import QApplication
                         for i, mask in enumerate(masks):
-                            self._update_status(f"🔄 Processing mask {i+1}/{total_masks}...", "processing")
+                            self._update_status(f"🔄 Processing mask {i + 1}/{total_masks}...", "processing")
                             self.progressBar.setValue(i + 1)
                             QApplication.processEvents()
 
@@ -5509,9 +5878,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             debug_info = {'mode': 'SIMILAR_EXTENT'}
                             self._add_features_to_layer(all_features, debug_info, len(all_features))
                             self._update_status(f"✅ Found {len(all_features)} similar objects", "success")
-                            print(f"\n{'='*80}")
+                            print(f"\n{'=' * 80}")
                             print(f"✅ COMPLETED: {len(all_features)} similar objects found")
-                            print(f"{'='*80}\n")
+                            print(f"{'=' * 80}\n")
                         else:
                             self._update_status("⚠️  No features created from masks", "warning")
                     else:
@@ -5547,6 +5916,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._tiled_initial_feature_ids = set(f.id() for f in result_layer.getFeatures())
         else:
             self._tiled_initial_feature_ids = set()
+        self._vector_extent_layer = (
+            self.vectorExtentCombo.currentLayer()
+            if hasattr(self, 'vectorExtentCombo') else None
+        )
 
         try:
             # Get class color
@@ -5581,7 +5954,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     'min_circularity': self.circularitySpinBox.value(),
                     'min_compactness': self.compactnessSpinBox.value(),
                     'max_aspect_ratio': self.aspectRatioSpinBox.value(),
-                } if self.shape_filter_enabled else None
+                } if self.shape_filter_enabled else None,
+                vector_extent_bounds=self._get_vector_extent_bounds(raster_layer),
+                vector_extent_wkt=self._get_vector_extent_wkt(raster_layer)
             )
 
             # Connect signals
@@ -5622,6 +5997,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._tiled_initial_feature_ids = set(f.id() for f in result_layer.getFeatures())
         else:
             self._tiled_initial_feature_ids = set()
+        self._vector_extent_layer = (
+            self.vectorExtentCombo.currentLayer()
+            if hasattr(self, 'vectorExtentCombo') else None
+        )
 
         try:
             # Get class color
@@ -5639,12 +6018,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if tiled_max is None and self.max_object_size > 0:
                 tiled_max = self.max_object_size
 
+            # Transform exemplar bbox to raster CRS so the worker can use src.index() directly
+            exemplar_bbox = self.bbox if hasattr(self, 'bbox') else None
+            if exemplar_bbox is not None:
+                _canvas_crs = self.canvas.mapSettings().destinationCrs()
+                _raster_crs = raster_layer.crs()
+                if _canvas_crs != _raster_crs:
+                    _ct = QgsCoordinateTransform(_canvas_crs, _raster_crs, QgsProject.instance())
+                    exemplar_bbox = _ct.transformBoundingBox(exemplar_bbox)
+
             self.tiled_worker = TiledSegmentationWorker(
                 predictor=self.predictor,
                 raster_path=raster_layer.source(),
                 request_type='similar',
                 text_prompt=None,
-                bbox=self.bbox if hasattr(self, 'bbox') else None,
+                bbox=exemplar_bbox,
                 current_class=self.current_class,
                 class_color=class_color,
                 tile_size=1024,
@@ -5656,7 +6044,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     'min_circularity': self.circularitySpinBox.value(),
                     'min_compactness': self.compactnessSpinBox.value(),
                     'max_aspect_ratio': self.aspectRatioSpinBox.value(),
-                } if self.shape_filter_enabled else None
+                } if self.shape_filter_enabled else None,
+                vector_extent_bounds=self._get_vector_extent_bounds(raster_layer),
+                vector_extent_wkt=self._get_vector_extent_wkt(raster_layer)
             )
 
             # Connect signals
@@ -5751,7 +6141,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     'min_circularity': self.circularitySpinBox.value(),
                     'min_compactness': self.compactnessSpinBox.value(),
                     'max_aspect_ratio': self.aspectRatioSpinBox.value(),
-                } if self.shape_filter_enabled else None
+                } if self.shape_filter_enabled else None,
+                vector_extent_bounds=self._get_vector_extent_bounds(raster_layer),
+                vector_extent_wkt=self._get_vector_extent_wkt(raster_layer)
             )
             print("✅ Worker created successfully")
         except Exception as e:
@@ -5775,16 +6167,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.tiled_worker.start()
         print("✅ Worker thread started")
 
-    def _on_tiled_segmentation_progress(self, message, current_tile, total_tiles):
+    def _on_tiled_segmentation_progress(self, message, *_):
         """Handle progress updates from tiled worker"""
         self._update_status(message, "processing")
 
-    def _on_tile_completed(self, objects_found, tile_index):
+    def _on_tile_completed(self, *_):
         """Handle completion of individual tile - add features to layer"""
         # Process results from worker's tile_results list
         if hasattr(self.tiled_worker, 'tile_results') and self.tiled_worker.tile_results:
             # Get the latest result
-            for features_data, debug_info, transform in self.tiled_worker.tile_results:
+            for features_data, debug_info, _ in self.tiled_worker.tile_results:
                 if features_data:
                     # Convert feature dicts to QgsFeature objects
                     from qgis.core import QgsFeature, QgsGeometry, QgsPointXY
@@ -5817,9 +6209,44 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Keep undo button disabled during tiled processing
                         if not undo_was_enabled:
                             self.undoBtn.setEnabled(False)
+                            self.undoBtn2.setEnabled(False)
 
             # Clear processed results
             self.tiled_worker.tile_results.clear()
+
+    def _clip_results_to_vector_extent(self, result_layer, vector_layer):
+        """Remove newly added features that fall outside the selected vector polygon."""
+        if not vector_layer or not vector_layer.isValid() or not result_layer:
+            return
+
+        # Build union geometry of all ROI features (in result_layer CRS)
+        roi_geom = None
+        transform = None
+        if vector_layer.crs() != result_layer.crs():
+            transform = QgsCoordinateTransform(
+                vector_layer.crs(), result_layer.crs(), QgsProject.instance()
+            )
+        for feat in vector_layer.getFeatures():
+            g = feat.geometry()
+            if transform:
+                g.transform(transform)
+            roi_geom = g if roi_geom is None else roi_geom.combine(g)
+
+        if roi_geom is None or roi_geom.isEmpty():
+            return
+
+        # Collect IDs of new features that don't intersect the ROI
+        initial_ids = getattr(self, '_tiled_initial_feature_ids', set())
+        to_delete = []
+        for feat in result_layer.getFeatures():
+            if feat.id() not in initial_ids and not feat.geometry().intersects(roi_geom):
+                to_delete.append(feat.id())
+
+        if to_delete:
+            result_layer.startEditing()
+            result_layer.deleteFeatures(to_delete)
+            result_layer.commitChanges()
+            print(f"✂️  Clipped {len(to_delete)} features outside ROI polygon")
 
     def _on_tiled_segmentation_finished(self, total_objects):
         """Handle completion of tiled segmentation"""
@@ -5827,6 +6254,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Quick deduplication pass - only for similar mode where duplicates are common
         if hasattr(self.tiled_worker, 'request_type') and self.tiled_worker.request_type == 'similar':
             self._deduplicate_layer_features(iou_threshold=0.5)
+
+        # Clip results to vector ROI polygon if one was selected
+        if getattr(self, '_vector_extent_layer', None):
+            result_layer = self._get_or_create_class_layer(self.current_class)
+            self._clip_results_to_vector_extent(result_layer, self._vector_extent_layer)
 
         # Add all tiled operation features to undo stack as a single operation
         # Use the difference between current and initial feature IDs (accounts for deduplication)
@@ -5841,12 +6273,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if new_feature_ids:
                     self.undo_stack.append((self.current_class, new_feature_ids))
                     self.undoBtn.setEnabled(True)
+                    self.undoBtn2.setEnabled(True)
                     print(f"✅ Added {len(new_feature_ids)} features to undo stack (single operation)")
                 else:
                     print("⚠️  No new features were added")
 
             # Clean up initial tracking
             delattr(self, '_tiled_initial_feature_ids')
+        self._vector_extent_layer = None
 
         self._update_status(f"✅ Tiled segmentation complete - Found {total_objects} objects", "success")
 
@@ -5915,66 +6349,92 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._process_queue()
 
     def _create_cancel_button(self):
-        """Create and show cancel button for tiled processing (replaces undo button during processing)"""
-        # Simply hide undo button and show cancel button (swap them)
-        if not hasattr(self, 'cancelTiledBtn'):
-            # Create cancel button with same style as undo button
-            self.cancelTiledBtn = QtWidgets.QPushButton("🛑 Cancel Processing")
-            self.cancelTiledBtn.setCursor(Qt.PointingHandCursor)
-            self.cancelTiledBtn.setStyleSheet("""
-                QPushButton {
-                    font-size: 14px; font-weight: 600; padding: 10px;
-                    border-radius: 8px; background: #DC2626; color: #FFF;
-                    border: 1px solid #DC2626;
-                }
-                QPushButton:hover { background: #B91C1C; }
-                QPushButton:disabled {
-                    background: #FCA5A5; color: #FFFFFF;
-                    border: 1px solid #DC2626;
-                }
-            """)
-            self.cancelTiledBtn.setAutoDefault(False)
-            self.cancelTiledBtn.setDefault(False)
-            self.cancelTiledBtn.setFocusPolicy(Qt.NoFocus)
-            self.cancelTiledBtn.clicked.connect(self._cancel_tiled_processing)
+        """Create and show cancel button for tiled processing (replaces undo buttons during processing)"""
+        cancel_style = """
+            QPushButton {
+                font-size: 14px; font-weight: 600; padding: 10px;
+                border-radius: 8px; background: #DC2626; color: #FFF;
+                border: 1px solid #DC2626;
+            }
+            QPushButton:hover { background: #B91C1C; }
+            QPushButton:disabled {
+                background: #FCA5A5; color: #FFFFFF;
+                border: 1px solid #DC2626;
+            }
+        """
 
-            # Find the undo button's parent layout and insert cancel button at same position
+        def _make_cancel_btn():
+            btn = QtWidgets.QPushButton("🛑 Cancel Processing")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(cancel_style)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.clicked.connect(self._cancel_tiled_processing)
+            return btn
+
+        # Tab 1 — Segment
+        if not hasattr(self, 'cancelTiledBtn'):
+            self.cancelTiledBtn = _make_cancel_btn()
             parent_layout = self.undoBtn.parent().layout()
             if parent_layout:
-                # Get undo button index
                 for i in range(parent_layout.count()):
                     item = parent_layout.itemAt(i)
                     if item and item.widget() == self.undoBtn:
                         parent_layout.insertWidget(i, self.cancelTiledBtn)
                         break
 
-        # Hide undo button and show cancel button
         self.undoBtn.setVisible(False)
-
-        # Reset button state
         self.cancelTiledBtn.setEnabled(True)
         self.cancelTiledBtn.setText("🛑 Cancel Processing")
         self.cancelTiledBtn.setVisible(True)
-        print("✅ Cancel button shown (undo button hidden)")
+
+        # Tab 2 — Detect
+        if not hasattr(self, 'cancelTiledBtn2'):
+            self.cancelTiledBtn2 = _make_cancel_btn()
+            parent_layout2 = self.undoBtn2.parent().layout()
+            if parent_layout2:
+                for i in range(parent_layout2.count()):
+                    item = parent_layout2.itemAt(i)
+                    if item and item.widget() == self.undoBtn2:
+                        parent_layout2.insertWidget(i, self.cancelTiledBtn2)
+                        break
+
+        self.undoBtn2.setVisible(False)
+        self.cancelTiledBtn2.setEnabled(True)
+        self.cancelTiledBtn2.setText("🛑 Cancel Processing")
+        self.cancelTiledBtn2.setVisible(True)
 
     def _remove_cancel_button(self):
-        """Remove/hide cancel button after tiled processing (restore undo button)"""
+        """Remove/hide cancel buttons after tiled processing (restore undo buttons)"""
         if hasattr(self, 'cancelTiledBtn'):
             self.cancelTiledBtn.setVisible(False)
-            print("✅ Cancel button hidden")
-
-        # Restore undo button visibility
+        if hasattr(self, 'cancelTiledBtn2'):
+            self.cancelTiledBtn2.setVisible(False)
         self.undoBtn.setVisible(True)
+        self.undoBtn2.setVisible(True)
 
     def _cancel_tiled_processing(self):
-        """Cancel ongoing tiled processing"""
+        """Cancel any ongoing processing (tiled or batch)"""
+        for attr in ('cancelTiledBtn', 'cancelTiledBtn2'):
+            btn = getattr(self, attr, None)
+            if btn:
+                btn.setEnabled(False)
+                btn.setText("Cancelling...")
+
         if hasattr(self, 'tiled_worker') and self.tiled_worker:
-            print("🛑 User clicked cancel button")
+            print("🛑 User cancelled tiled processing")
             self.tiled_worker.cancel()
-            # Disable cancel button to prevent double-clicks
-            if hasattr(self, 'cancelTiledBtn'):
-                self.cancelTiledBtn.setEnabled(False)
-                self.cancelTiledBtn.setText("Cancelling...")
+        elif hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            print("🛑 User cancelled batch processing")
+            self.worker.terminate()
+            self.worker.wait()
+            self.worker.deleteLater()
+            self.worker = None
+            self._remove_cancel_button()
+            self._update_status("Processing cancelled", "warning")
+            self._set_ui_enabled(True)
+            self.is_processing = False
 
     def _convert_mask_to_features(self, mask, mask_transform):
         """Convert a single mask to QgsFeature objects with size/shape filtering"""
@@ -6255,6 +6715,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 new_feature_ids = [f.id() for f in all_features[-len(features):]]
                 self.undo_stack.append((self.current_class, new_feature_ids))
                 self.undoBtn.setEnabled(True)
+                self.undoBtn2.setEnabled(True)
 
             result_layer.updateExtents()
             result_layer.triggerRepaint()
@@ -6302,6 +6763,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         try:
             with rasterio.open(rpath) as src:
+                # Transform from canvas CRS to raster CRS once — reused for all coordinate conversions
+                canvas_crs = self.canvas.mapSettings().destinationCrs()
+                raster_crs = rlayer.crs()
+                _crs_transform = None
+                if canvas_crs != raster_crs:
+                    _crs_transform = QgsCoordinateTransform(canvas_crs, raster_crs, QgsProject.instance())
+
+                def _to_raster_crs(x, y):
+                    if _crs_transform is None:
+                        return x, y
+                    pt = _crs_transform.transform(QgsPointXY(x, y))
+                    return pt.x(), pt.y()
+
                 # Handle multi-band images
                 band_count = src.count
 
@@ -6333,10 +6807,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         if scope == 'full':
                             xmin, ymin, xmax, ymax = extent.left, extent.bottom, extent.right, extent.top
                         else:
-                            xmin, ymin, xmax, ymax = (
-                                extent.xMinimum(), extent.yMinimum(),
-                                extent.xMaximum(), extent.yMaximum()
-                            )
+                            xmin, ymin = _to_raster_crs(extent.xMinimum(), extent.yMinimum())
+                            xmax, ymax = _to_raster_crs(extent.xMaximum(), extent.yMaximum())
 
                         window = rasterio.windows.from_bounds(
                             xmin, ymin, xmax, ymax,
@@ -6401,7 +6873,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                             # Expand if bbox is too small
                             if (x2 - x1) < 5 or (y2 - y1) < 5:
-                                print(f"⚠️  Bbox too small ({x2-x1}x{y2-y1}px), expanding to minimum size")
+                                print(f"⚠️  Bbox too small ({x2 - x1}x{y2 - y1}px), expanding to minimum size")
                                 center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                                 x1 = max(0, center_x - 10)
                                 y1 = max(0, center_y - 10)
@@ -6426,7 +6898,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                 elif self.point is not None:  # POINT MODE
                     try:
-                        row, col = src.index(self.point.x(), self.point.y())
+                        px, py = _to_raster_crs(self.point.x(), self.point.y())
+                        row, col = src.index(px, py)
                         center_pixel_x, center_pixel_y = col, row
                     except Exception as e:
                         self._update_status(f"Point is outside raster bounds: {e}", "error")
@@ -6442,7 +6915,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         all_py = [center_pixel_y]
                         for map_pt, _ in multi_points:
                             try:
-                                r, c = src.index(map_pt.x(), map_pt.y())
+                                mpx, mpy = _to_raster_crs(map_pt.x(), map_pt.y())
+                                r, c = src.index(mpx, mpy)
                                 all_px.append(c)
                                 all_py.append(r)
                             except Exception:
@@ -6525,7 +6999,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         labels_list = []
                         for map_pt, label in multi_points:
                             try:
-                                r, c = src.index(map_pt.x(), map_pt.y())
+                                mpx, mpy = _to_raster_crs(map_pt.x(), map_pt.y())
+                                r, c = src.index(mpx, mpy)
                                 rel_x = max(0, min(arr.shape[1] - 1, c - x_min))
                                 rel_y = max(0, min(arr.shape[0] - 1, r - y_min))
                                 coords_list.append([rel_x, rel_y])
@@ -6558,9 +7033,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     }
 
                 else:  # BBOX MODE - SMART HYBRID VERSION
-                    # Calculate bbox dimensions in geographic coordinates
-                    bbox_width = self.bbox.width()
-                    bbox_height = self.bbox.height()
+                    # Calculate bbox dimensions in raster CRS units for correct pixel math
+                    _bbox_min = _to_raster_crs(self.bbox.xMinimum(), self.bbox.yMinimum())
+                    _bbox_max = _to_raster_crs(self.bbox.xMaximum(), self.bbox.yMaximum())
+                    bbox_width = abs(_bbox_max[0] - _bbox_min[0])
+                    bbox_height = abs(_bbox_max[1] - _bbox_min[1])
                     bbox_area = bbox_width * bbox_height
 
                     # SMART HYBRID: Adaptive padding based on area size
@@ -6569,16 +7046,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                     if bbox_area > large_area_threshold:  # Large areas get adaptive padding
                         padding_factor = self._get_adaptive_bbox_padding(bbox_area)
-                        print(f"🎯 LARGE area ({bbox_area:.0f}): adaptive padding {padding_factor*100:.1f}%")
+                        print(f"🎯 LARGE area ({bbox_area:.0f}): adaptive padding {padding_factor * 100:.1f}%")
 
                         # Extra reduction for batch mode on large areas
                         if hasattr(self, 'batch_mode_enabled') and self.batch_mode_enabled:
                             padding_factor *= 0.6
-                            print(f"🔄 Batch mode: further reduced to {padding_factor*100:.1f}%")
+                            print(f"🔄 Batch mode: further reduced to {padding_factor * 100:.1f}%")
 
                     else:  # Small areas use original fixed logic
                         padding_factor = 0.3  # 30% for small areas
-                        print(f"📍 SMALL area ({bbox_area:.0f}): fixed padding {padding_factor*100:.1f}%")
+                        print(f"📍 SMALL area ({bbox_area:.0f}): fixed padding {padding_factor * 100:.1f}%")
 
                     # FIXED: Define max_crop_size based on area and device
                     if bbox_area > 1000000:  # Very large area (1M map units²)
@@ -6598,19 +7075,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
                     print(f"📐 Max crop size: {max_crop_size}px (device: {self.device})")
 
-                    # Create padded bbox for context
-                    padded_bbox = QgsRectangle(
-                        self.bbox.xMinimum() - bbox_width * padding_factor,
-                        self.bbox.yMinimum() - bbox_height * padding_factor,
-                        self.bbox.xMaximum() + bbox_width * padding_factor,
-                        self.bbox.yMaximum() + bbox_height * padding_factor
-                    )
+                    # Build padded bbox in raster CRS units
+                    pb_left   = _bbox_min[0] - bbox_width  * padding_factor
+                    pb_bottom = _bbox_min[1] - bbox_height * padding_factor
+                    pb_right  = _bbox_max[0] + bbox_width  * padding_factor
+                    pb_top    = _bbox_max[1] + bbox_height * padding_factor
 
                     try:
-                        # Use from_bounds correctly
                         padded_window = rasterio.windows.from_bounds(
-                            padded_bbox.xMinimum(), padded_bbox.yMinimum(),
-                            padded_bbox.xMaximum(), padded_bbox.yMaximum(),
+                            pb_left, pb_bottom, pb_right, pb_top,
                             src.transform
                         )
 
@@ -6719,12 +7192,12 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         padded_transform = Affine(a/scale_factor, b, c, d, e/scale_factor, f)  # noqa: E226
 
                     try:
-                        # Convert bbox corners to pixel coordinates correctly
+                        # Convert bbox corners to pixel coordinates (via raster CRS)
                         corners = [
-                            (self.bbox.xMinimum(), self.bbox.yMinimum()),  # bottom-left
-                            (self.bbox.xMaximum(), self.bbox.yMinimum()),  # bottom-right
-                            (self.bbox.xMaximum(), self.bbox.yMaximum()),  # top-right
-                            (self.bbox.xMinimum(), self.bbox.yMaximum())   # top-left
+                            _to_raster_crs(self.bbox.xMinimum(), self.bbox.yMinimum()),
+                            _to_raster_crs(self.bbox.xMaximum(), self.bbox.yMinimum()),
+                            _to_raster_crs(self.bbox.xMaximum(), self.bbox.yMaximum()),
+                            _to_raster_crs(self.bbox.xMinimum(), self.bbox.yMaximum()),
                         ]
 
                         pixel_coords = []
@@ -6772,7 +7245,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'crop_size': f"{arr.shape[1]}x{arr.shape[0]}",
                         'padding_factor': f"{padding_factor:.3f}",
                         'target_bbox': f"({x1},{y1})-({x2},{y2})",
-                        'target_size': f"{x2-x1}x{y2-y1}",
+                        'target_size': f"{x2 - x1}x{y2 - y1}",
                         'bands_used': f"{band_count} -> {len(bands_to_read)}",
                         'downsampled': 'scale_factor' in locals(),
                         'max_crop_size': max_crop_size,
@@ -6880,6 +7353,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             error_msg += f"Full traceback:\n{traceback.format_exc()}"
             self._update_status(error_msg, "error")
         finally:
+            self._remove_cancel_button()
             self._set_ui_enabled(True)
             self.is_processing = False  # Reset processing state
             if hasattr(self, 'worker') and self.worker:
@@ -6889,7 +7363,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Process next item in queue
             self._process_queue()
 
-    def _get_next_segment_id(self, layer, class_name):
+    def _get_next_segment_id(self, layer, *_):
         """Get the next available segment ID for a class"""
         if layer.featureCount() == 0:
             return 1
@@ -6973,7 +7447,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         removed_count = len(new_features) - len(filtered_features)
         if removed_count > 0:
-            print(f"🚫 Removed {removed_count} spatial duplicates (overlap > {overlap_threshold*100}%)")
+            print(f"🚫 Removed {removed_count} spatial duplicates (overlap > {overlap_threshold * 100}%)")
 
         return filtered_features
 
@@ -7010,16 +7484,16 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             try:
                 # Save individual debug mask if enabled
                 if self.save_debug_masks and filename_base:
-                    individual_filename = f"{filename_base}_obj{obj_idx+1}.png"
+                    individual_filename = f"{filename_base}_obj{obj_idx + 1}.png"
                     individual_filename = "".join(c for c in individual_filename if c.isalnum() or c in "._-")
                     mask_path = self.mask_save_dir / individual_filename
                     try:
                         cv2.imwrite(str(mask_path), mask)
                     except Exception as e:
-                        print(f"Failed to save debug mask for object {obj_idx+1}: {e}")
+                        print(f"Failed to save debug mask for object {obj_idx + 1}: {e}")
 
                 # FIXED: Process this individual mask and add directly to layer
-                print(f"🔍 Converting mask {obj_idx+1} to features...")
+                print(f"🔍 Converting mask {obj_idx + 1} to features...")
                 features = self._convert_mask_to_features(mask, mask_transform)
                 print(f"  📊 Generated {len(features) if features else 0} features")
 
@@ -7037,14 +7511,14 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Add each individual object immediately to avoid combining
                         self._add_individual_features_to_layer(features, debug_info, obj_idx + 1)
                         successful_objects += 1
-                        print(f"  ✅ Successfully added object {obj_idx+1}")
+                        print(f"  ✅ Successfully added object {obj_idx + 1}")
                     else:
                         print("  ❌ No features to add after duplicate filtering")
                 else:
-                    print(f"  ❌ No features generated from mask {obj_idx+1}")
+                    print(f"  ❌ No features generated from mask {obj_idx + 1}")
 
             except Exception as e:
-                print(f"Error processing individual object {obj_idx+1}: {e}")
+                print(f"Error processing individual object {obj_idx + 1}: {e}")
                 continue
 
         if successful_objects == 0:
@@ -7061,6 +7535,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         if hasattr(self, '_current_batch_undo') and self._current_batch_undo:
             self.undo_stack.append((self.current_class, self._current_batch_undo))
             self.undoBtn.setEnabled(True)
+            self.undoBtn2.setEnabled(True)
 
         # Update status
         undo_hint = " (↶ Undo available)" if successful_objects > 0 else ""
@@ -7187,7 +7662,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             features = self._convert_mask_to_features(mask, mask_transform)
             if features:
                 all_features.extend(features)
-                print(f"  Mask {i+1}/{len(masks)}: {len(features)} features")
+                print(f"  Mask {i + 1}/{len(masks)}: {len(features)} features")
 
         if not all_features:
             self._update_status("No segments found", "warning")
@@ -7308,6 +7783,21 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         return layer
 
+    def _class_icon(self, class_name):
+        """Return a 16x16 QIcon filled with the class color."""
+        color_str = self.classes.get(class_name, {}).get('color', '128,128,128')
+        try:
+            r, g, b = [int(c.strip()) for c in color_str.split(',')]
+        except Exception:
+            r, g, b = 128, 128, 128
+        px = QtGui.QPixmap(16, 16)
+        px.fill(QtGui.QColor(r, g, b))
+        return QtGui.QIcon(px)
+
+    def _add_class_item(self, combo, class_name):
+        """Add a class item with its color swatch to a combo box."""
+        combo.addItem(self._class_icon(class_name), class_name, class_name)
+
     def _apply_class_style(self, layer, class_name):
         try:
             class_info = self.classes.get(class_name, {'color': '128,128,128'})
@@ -7370,6 +7860,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             if not self.undo_stack:
                 self.undoBtn.setEnabled(False)
+                self.undoBtn2.setEnabled(False)
 
         except Exception as e:
             self._update_status(f"Failed to undo: {e}", "error")
@@ -7486,6 +7977,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _on_segmentation_error(self, error_message):
         self._update_status(f"❌ {error_message}", "error")
+        self._remove_cancel_button()
         self._set_ui_enabled(True)
         self.is_processing = False  # Reset processing state
         if hasattr(self, 'worker') and self.worker:
@@ -7528,47 +8020,45 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         if enabled and self.undo_stack:
             self.undoBtn.setEnabled(True)
+            self.undoBtn2.setEnabled(True)
         elif not enabled:
             pass  # Keep undo available during processing
         else:
             self.undoBtn.setEnabled(False)
+            self.undoBtn2.setEnabled(False)
 
         if hasattr(self, 'progressBar'):
             self.progressBar.setVisible(not enabled)
 
         if not enabled:
             self.setCursor(Qt.WaitCursor)
+            if hasattr(self, 'logPanel'):
+                self.logPanel.clear()
         else:
             self.setCursor(Qt.ArrowCursor)
 
     def _update_status(self, message, status_type="info"):
-        # Store for filter indicator refresh
         self._last_status_text = message
         self._last_status_type = status_type
 
-        color_styles = {
-            "info": "background: #ECFDF3; color: #027A48; border: 1px solid #D1FADF;",
-            "warning": "background: #FFFBEB; color: #DC6803; border: 1px solid #FED7AA;",
-            "error": "background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA;",
-            "processing": "background: #EFF8FF; color: #1570EF; border: 1px solid #B2DDFF;"
-        }
-        color_style = color_styles.get(status_type, color_styles["info"])
-
-        # Append active filter summary if any
         filter_summary = getattr(self, '_active_filter_summary', '')
         display = message
         if filter_summary:
-            display = f"{message}\n🔹 Filters: {filter_summary}"
+            display = f"{message}  [Filters: {filter_summary}]"
 
-        self.statusLabel.setText(display)
-        self.statusLabel.setStyleSheet(f"""
-            padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 500;
-            {color_style}
-        """)
+        if hasattr(self, 'logPanel'):
+            self.logPanel.appendPlainText(display)
+            self.logPanel.verticalScrollBar().setValue(self.logPanel.verticalScrollBar().maximum())
 
     def closeEvent(self, event):
         """Handle close event to clean up tools"""
         try:
+            try:
+                QgsProject.instance().layersAdded.disconnect(self._on_layers_added)
+                QgsProject.instance().layersRemoved.disconnect(self._on_layers_removed)
+            except Exception:
+                pass
+
             # Reset to original map tool if we changed it
             if self.original_map_tool:
                 self.canvas.setMapTool(self.original_map_tool)
