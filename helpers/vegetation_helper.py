@@ -62,7 +62,7 @@ class VegetationHelper(BaseDetectionHelper):
     def _detect_textured_objects(self, bbox_image, bbox):
         """Detect textured objects (vegetation) using local standard deviation"""
         x1, y1, x2, y2 = bbox
-        print(f"  🌿 Analyzing texture in {x2-x1}x{y2-y1}px bbox")
+        print(f"  🌿 Analyzing texture in {x2 - x1}x{y2 - y1}px bbox")
 
         # Auto-detect and normalize image values
         bbox_image = self._normalize_image_values(bbox_image)
@@ -95,7 +95,7 @@ class VegetationHelper(BaseDetectionHelper):
         threshold = np.percentile(texture_norm, 70)
         print(f"  🎯 TEXTURE: 70th percentile threshold: {threshold}")
         _, binary = cv2.threshold(texture_norm, threshold, 255, cv2.THRESH_BINARY)
-        print(f"  🎯 TEXTURE: Binary pixels above threshold: {np.sum(binary > 0)}/{binary.size} ({100*np.sum(binary > 0)/binary.size:.1f}%)")
+        print(f"  🎯 TEXTURE: Binary pixels above threshold: {np.sum(binary > 0)}/{binary.size} ({100 * np.sum(binary > 0) / binary.size:.1f}%)")
 
         # Morphological operations
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -240,7 +240,7 @@ class VegetationHelper(BaseDetectionHelper):
             ndvi = np.zeros_like(red_f)
             mask = denominator > 0
             valid_pixels = np.sum(mask)
-            print(f"  🔍 BANDS: Valid pixels for NDVI: {valid_pixels}/{mask.size} ({100*valid_pixels/mask.size:.1f}%)")
+            print(f"  🔍 BANDS: Valid pixels for NDVI: {valid_pixels}/{mask.size} ({100 * valid_pixels / mask.size:.1f}%)")
 
             if valid_pixels > 0:
                 ndvi[mask] = (nir_f[mask] - red_f[mask]) / denominator[mask]

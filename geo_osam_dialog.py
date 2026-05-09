@@ -4424,7 +4424,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 color = available_colors[0]
             else:
                 import random
-                color = f"{random.randint(100,255)},{random.randint(100,255)},{random.randint(100,255)}"
+                color = f"{random.randint(100, 255)},{random.randint(100, 255)},{random.randint(100, 255)}"
 
             description = f'Custom class: {class_name}'
 
@@ -7076,10 +7076,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     print(f"📐 Max crop size: {max_crop_size}px (device: {self.device})")
 
                     # Build padded bbox in raster CRS units
-                    pb_left   = _bbox_min[0] - bbox_width  * padding_factor
+                    pb_left = _bbox_min[0] - bbox_width * padding_factor
                     pb_bottom = _bbox_min[1] - bbox_height * padding_factor
-                    pb_right  = _bbox_max[0] + bbox_width  * padding_factor
-                    pb_top    = _bbox_max[1] + bbox_height * padding_factor
+                    pb_right = _bbox_max[0] + bbox_width * padding_factor
+                    pb_top = _bbox_max[1] + bbox_height * padding_factor
 
                     try:
                         padded_window = rasterio.windows.from_bounds(
