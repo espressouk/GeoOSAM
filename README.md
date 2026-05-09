@@ -516,6 +516,10 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.4.1 - Code Quality Fix (2026-05-09)
+
+- **🔧 FIXED**: Flake8 E231/E221/E226 whitespace issues in geo_osam_dialog.py and vegetation_helper.py
+
 ### v1.4.0 - UI Redesign & Workflow Improvements (2026-05-09)
 
 - **🎨 NEW**: Redesigned 4-tab flat UI — Segment, Detect, Results, Filters, Settings as gear overlay
@@ -690,5 +694,5 @@ To be determined based on user feedback and usage patterns.
 ---
 
 **Last updated:** 2026-05-09
-**Plugin Version:** 1.4.0
+**Plugin Version:** 1.4.1
 **QGIS Compatibility:** 3.16+
