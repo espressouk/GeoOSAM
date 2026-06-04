@@ -236,6 +236,14 @@ For current limitations and upcoming fixes, see:
 - 16GB+ RAM
 - SSD storage
 
+## 🧪 Running Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+Requires: `pytest`, `numpy`, `opencv-python`, `rasterio`, `shapely`
+
 ## 📦 Installation
 
 **⚠️ Important: Both installation methods require manual dependency installation**
@@ -294,13 +302,15 @@ pip install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iop
 # pip install torch torchvision "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iopath pillow numpy
 ```
 
-**Optional for SAM3 text/similar (PCS)**
+**Required for SAM3 text prompts and similar-object detection**
 
-SAM3 text and exemplar prompts are still under active development in Ultralytics and may be unstable. If you want to use them:
+SAM3 concept-prompt modes (text prompts, Find Similar) require the Ultralytics CLIP fork. The standard `pip install clip` package will **not** work and will cause a `TypeError: 'SimpleTokenizer' object is not callable` crash.
 
 ```bash
 pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
+
+GeoOSAM includes a runtime compatibility shim (`sam3_clip_fix.py`) that handles tokenizer differences across CLIP versions, but the Ultralytics fork is still required for SAM3 text features to function.
 
 **Hugging Face Access (SAM3 Weights)**
 

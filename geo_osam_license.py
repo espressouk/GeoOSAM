@@ -10,6 +10,7 @@ Offline mode: Cached for 30 days after online validation.
 """
 
 import hashlib
+import hmac
 import json
 import urllib.request
 import platform
@@ -33,8 +34,17 @@ class LicenseManager:
     _KEY_LICENSE_CACHE_DATE = f"{_SETTINGS_PREFIX}/license_cache_date"
     _KEY_DEVICE_ID = f"{_SETTINGS_PREFIX}/device_id"
 
+    # In-memory session cache — avoids a network round-trip on every Pro feature check.
+    # None = not yet checked this session; 'pro'/'free' = result of last check.
+    _session_license_type = None
+
     # Cache expiry (30 days)
     _CACHE_EXPIRY_DAYS = 30
+
+    # HMAC secret for cache tamper-detection.
+    # Stops QSettings manipulation — forging a valid signature without this key is hard.
+    _CACHE_SECRET = b"G30OSAM$c4ch3$1nt3gr1ty$2025$v1"
+    _KEY_LICENSE_CACHE_SIG = f"{_SETTINGS_PREFIX}/license_cache_sig"
 
     @staticmethod
     def _get_device_id():
@@ -48,25 +58,16 @@ class LicenseManager:
         device_id = settings.value(LicenseManager._KEY_DEVICE_ID, "")
 
         if not device_id:
-            # Generate device ID from machine characteristics
             try:
-                # Combine hostname + MAC address + platform
                 hostname = platform.node()
                 mac = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff)
                                 for elements in range(0, 2 * 6, 2)][::-1])
                 system = platform.system()
-
-                # Hash to create stable device ID
                 device_str = f"{hostname}:{mac}:{system}"
                 device_id = hashlib.sha256(
                     device_str.encode()).hexdigest()[:16]
-
-                # Save for future use
                 settings.setValue(LicenseManager._KEY_DEVICE_ID, device_id)
-                print(f"Generated device ID: {device_id}")
-            except Exception as e:
-                print(f"⚠️  Error generating device ID, using fallback: {e}")
-                # Fallback to random UUID (less stable but works)
+            except Exception:
                 device_id = str(uuid.uuid4())[:16]
                 settings.setValue(LicenseManager._KEY_DEVICE_ID, device_id)
 
@@ -91,26 +92,17 @@ class LicenseManager:
             # Try online validation first
             result = LicenseManager._validate_online(license_key, email)
             if result['valid']:
-                print(
-                    f"✅ License validated online: {result.get('message', '')}")
-                # Cache the validation
                 LicenseManager._cache_validation(email, license_key)
                 return True
             else:
-                # Show error from server
                 error_msg = result.get('error', 'Unknown error')
-                print(f"❌ Online validation failed: {error_msg}")
-
-                # If device limit reached, don't try cache
                 if 'already activated' in error_msg.lower():
                     return False
 
-        except Exception as e:
-            print(f"⚠️  Online validation failed, trying offline cache: {e}")
+        except Exception:
+            pass
 
-        # Fallback to cached validation (offline mode)
         if LicenseManager._validate_from_cache(email, license_key):
-            print("✅ License validated from cache (offline mode)")
             return True
 
         return False
@@ -128,7 +120,6 @@ class LicenseManager:
             dict: {'valid': bool, 'message': str, 'error': str}
         """
         if LicenseManager._WORKER_URL == "REPLACE_WITH_YOUR_WORKER_URL":
-            print("⚠️  Worker URL not configured - using offline mode only")
             return {'valid': False, 'error': 'Worker not configured'}
 
         try:
@@ -175,21 +166,25 @@ class LicenseManager:
             return {'valid': False, 'error': f'Validation error: {e}'}
 
     @staticmethod
-    def _cache_validation(email, license_key):
-        """
-        Cache a successful validation for offline use
+    def _compute_cache_sig(email, license_key, device_id, date_str):
+        """HMAC signature over the cache entry — detects QSettings tampering."""
+        msg = f"{email.lower().strip()}:{license_key.upper().strip()}:{device_id}:{date_str}".encode()
+        return hmac.new(LicenseManager._CACHE_SECRET, msg, hashlib.sha256).hexdigest()
 
-        Args:
-            email (str): User's email
-            license_key (str): Valid license key
-        """
+    @staticmethod
+    def _cache_validation(email, license_key):
+        """Cache a successful validation for offline use."""
         try:
             settings = QSettings()
-            settings.setValue(
-                LicenseManager._KEY_LICENSE_CACHE_DATE, datetime.now().isoformat())
-            print("✅ License cached for offline use (30 days)")
-        except Exception as e:
-            print(f"⚠️  Failed to cache license: {e}")
+            date_str = datetime.now().isoformat()
+            device_id = LicenseManager._get_device_id()
+            sig = LicenseManager._compute_cache_sig(email, license_key, device_id, date_str)
+            settings.setValue(LicenseManager._KEY_LICENSE_EMAIL, email)
+            settings.setValue(LicenseManager._KEY_LICENSE_KEY, license_key)
+            settings.setValue(LicenseManager._KEY_LICENSE_CACHE_DATE, date_str)
+            settings.setValue(LicenseManager._KEY_LICENSE_CACHE_SIG, sig)
+        except Exception:
+            pass
 
     @staticmethod
     def _validate_from_cache(email, license_key):
@@ -223,51 +218,58 @@ class LicenseManager:
                     timedelta(days=LicenseManager._CACHE_EXPIRY_DAYS)
 
                 if datetime.now() > expiry_date:
-                    print(
-                        "⚠️  Cached license expired (>30 days) - please connect to internet to revalidate")
                     return False
             except ValueError:
                 return False
 
-            # Compare with cached credentials
+            # Verify HMAC signature — rejects any entry whose QSettings were tampered with
+            stored_sig = settings.value(LicenseManager._KEY_LICENSE_CACHE_SIG, "")
+            device_id = LicenseManager._get_device_id()
+            expected_sig = LicenseManager._compute_cache_sig(
+                cached_email, cached_key, device_id, cache_date_str)
+            if not stored_sig or not hmac.compare_digest(stored_sig, expected_sig):
+                return False
+
+            # Credentials must match what was cached
             if (email.lower().strip() == cached_email.lower().strip() and  # noqa: W504
                     license_key.upper().strip().replace(" ", "") == cached_key.upper().strip().replace(" ", "")):
-                days_remaining = (expiry_date - datetime.now()).days
-                print(
-                    f"ℹ️  Using cached license ({days_remaining} days remaining)")
                 return True
 
             return False
 
-        except Exception as e:
-            print(f"⚠️  Cache validation error: {e}")
+        except Exception:
             return False
 
     @staticmethod
     def get_license_type():
         """
-        Get current license type
+        Get current license type.
+
+        Returns the in-memory session result on repeated calls within the same
+        QGIS session, avoiding a network round-trip on every Pro feature check.
+        The session cache is invalidated when save_license() or clear_license()
+        is called (i.e. when the user changes their licence state).
 
         Returns:
             str: 'pro' if licensed, 'free' otherwise
         """
-        settings = QSettings()
+        if LicenseManager._session_license_type is not None:
+            return LicenseManager._session_license_type
 
-        # Check if license is validated
+        settings = QSettings()
         is_validated = settings.value(
             LicenseManager._KEY_LICENSE_VALIDATED, False, type=bool)
 
+        result = 'free'
         if is_validated:
-            # Double-check by re-validating stored credentials (uses cache if offline)
             stored_key = settings.value(LicenseManager._KEY_LICENSE_KEY, "")
-            stored_email = settings.value(
-                LicenseManager._KEY_LICENSE_EMAIL, "")
-
+            stored_email = settings.value(LicenseManager._KEY_LICENSE_EMAIL, "")
             if stored_key and stored_email:
                 if LicenseManager.validate_license(stored_key, stored_email):
-                    return 'pro'
+                    result = 'pro'
 
-        return 'free'
+        LicenseManager._session_license_type = result
+        return result
 
     @staticmethod
     def save_license(license_key, email):
@@ -283,16 +285,18 @@ class LicenseManager:
         """
         try:
             settings = QSettings()
+            date_str = datetime.now().isoformat()
+            device_id = LicenseManager._get_device_id()
+            sig = LicenseManager._compute_cache_sig(email, license_key, device_id, date_str)
             settings.setValue(LicenseManager._KEY_LICENSE_KEY, license_key)
             settings.setValue(LicenseManager._KEY_LICENSE_EMAIL, email)
             settings.setValue(LicenseManager._KEY_LICENSE_VALIDATED, True)
             settings.setValue(LicenseManager._KEY_LICENSE_TYPE, 'pro')
-            settings.setValue(
-                LicenseManager._KEY_LICENSE_CACHE_DATE, datetime.now().isoformat())
-            print(f"✅ License saved for {email}")
+            settings.setValue(LicenseManager._KEY_LICENSE_CACHE_DATE, date_str)
+            settings.setValue(LicenseManager._KEY_LICENSE_CACHE_SIG, sig)
+            LicenseManager._session_license_type = 'pro'
             return True
-        except Exception as e:
-            print(f"⚠️  Failed to save license: {e}")
+        except Exception:
             return False
 
     @staticmethod
@@ -324,8 +328,7 @@ class LicenseManager:
 
             return None
 
-        except Exception as e:
-            print(f"⚠️  Failed to load license: {e}")
+        except Exception:
             return None
 
     @staticmethod
@@ -338,11 +341,11 @@ class LicenseManager:
             settings.remove(LicenseManager._KEY_LICENSE_VALIDATED)
             settings.remove(LicenseManager._KEY_LICENSE_TYPE)
             settings.remove(LicenseManager._KEY_LICENSE_CACHE_DATE)
+            settings.remove(LicenseManager._KEY_LICENSE_CACHE_SIG)
             # Note: Don't remove device_id - it should persist
-            print("✅ License cleared")
+            LicenseManager._session_license_type = None
             return True
-        except Exception as e:
-            print(f"⚠️  Failed to clear license: {e}")
+        except Exception:
             return False
 
     @staticmethod

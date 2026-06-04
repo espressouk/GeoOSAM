@@ -291,60 +291,44 @@ class SAM3PredictorWrapper:
         - Exemplar mode (SAM3 find-similar)
         """
 
-        # Text prompt mode - use automatic instance segmentation
-        # SAM3 will segment ALL objects, user filters by selected class
+        # Text prompt mode — use SAM3SemanticPredictor for native concept-prompting,
+        # falling back to auto-segmentation when CLIP is unavailable.
         if text is not None:
             try:
-                print(f"🤖 SAM3 automatic instance segmentation (text prompt: '{text}' is used as filter hint)")
-                print(f"📸 Image source: {self.cached_image_path}")
-                print(f"🖼️ Image shape: {self.current_image.shape if self.current_image is not None else 'None'}")
-
-                # Use automatic instance segmentation - finds ALL objects
-                results = self.model.predict(
-                    source=self.cached_image_path,
-                    verbose=False,
-                    conf=0.25,  # Confidence threshold
-                    iou=0.7,  # IOU threshold for NMS
-                    imgsz=1024,  # Image size
-                    save=False,
-                    retina_masks=True  # High quality masks
-                )
-
-                print(f"📊 Results: {len(results) if results else 0} result sets")
-
-                extracted = self._extract_masks(results)
-                print(f"✅ Extracted masks: {len(extracted[0]) if extracted and extracted[0] else 0}")
-                return extracted
-            except Exception as e:
-                print(f"❌ SAM3 auto-segmentation error: {e}")
+                if self._ensure_semantic_predictor():
+                    results = self.semantic_predictor(
+                        source=self.cached_image_path,
+                        text=[text],
+                        stream=False
+                    )
+                else:
+                    self._reset_predictor_if_semantic()
+                    results = self.model.predict(
+                        source=self.cached_image_path,
+                        verbose=False,
+                        conf=0.25,
+                        iou=0.7,
+                        imgsz=1024,
+                        save=False,
+                        retina_masks=True
+                    )
+                return self._extract_masks(results)
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 return self._empty_result()
 
-        # Exemplar/Similar mode - use automatic instance segmentation
-        # SAM3 will segment ALL objects, user can filter by selected example
+        # Exemplar/Similar mode — try SAM3 semantic exemplar prompting first,
+        # falling back to full auto-segmentation.
         if exemplar_mode and box is not None:
             try:
-                print("🤖 SAM3 automatic instance segmentation (similar objects mode)")
-                print(f"📦 Box hint: {box}")
-                print(f"📸 Image source: {self.cached_image_path}")
+                bbox = box[0] if len(box) > 0 else None
 
-                if len(box) > 0:
-                    bbox = box[0]
-                else:
-                    bbox = None
-
-                # Try SAM3 semantic exemplar prompting first
                 if bbox is not None:
-                    print(f"🔍 Trying exemplar semantic for bbox: {bbox}")
                     exemplar_result = self._predict_exemplar_semantic(bbox)
                     if exemplar_result and exemplar_result[0]:
-                        print(f"✅ Exemplar results: {len(exemplar_result[0])}")
                         return exemplar_result
-                    else:
-                        print("⚠️ Exemplar semantic failed or returned empty — falling back to ALL objects")
 
-                # Fallback to automatic instance segmentation - finds ALL objects
                 self._reset_predictor_if_semantic()
                 results = self.model.predict(
                     source=self.cached_image_path,
@@ -355,14 +339,8 @@ class SAM3PredictorWrapper:
                     save=False,
                     retina_masks=True
                 )
-
-                print(f"📊 Auto-segmentation results: {len(results) if results else 0}")
-
-                extracted = self._extract_masks(results)
-                print(f"✅ Extracted masks: {len(extracted[0]) if extracted and extracted[0] else 0}")
-                return extracted
-            except Exception as e:
-                print(f"❌ SAM3 auto-segmentation error: {e}")
+                return self._extract_masks(results)
+            except Exception:
                 import traceback
                 traceback.print_exc()
                 return self._empty_result()
@@ -412,20 +390,10 @@ class SAM3PredictorWrapper:
     def _extract_masks(self, results):
         """Extract masks from SAM3 results"""
         try:
-            print("🔬 Extracting masks from results...")
-            print(f"   Results type: {type(results)}")
-            print(f"   Results length: {len(results) if results else 0}")
-
             if results and len(results) > 0:
                 result = results[0]
-                print(f"   Result[0] type: {type(result)}")
-                print(f"   Has masks: {hasattr(result, 'masks')}")
-
                 if hasattr(result, 'masks') and result.masks is not None:
                     masks_tensor = result.masks.data
-                    print(f"   Masks tensor shape: {masks_tensor.shape if hasattr(masks_tensor, 'shape') else 'N/A'}")
-
-                    # SAM3 may return multiple masks
                     masks_list = []
                     scores_list = []
 
@@ -435,18 +403,13 @@ class SAM3PredictorWrapper:
                         else:
                             mask = np.array(mask_tensor)
 
-                        # Ensure uint8 format
                         if mask.max() <= 1.0:
                             mask = (mask * 255).astype(np.uint8)
                         else:
                             mask = mask.astype(np.uint8)
 
-                        # Only add non-empty masks
-                        num_pixels = np.sum(mask > 0)
-
-                        if num_pixels > 0:
+                        if np.sum(mask > 0) > 0:
                             masks_list.append(mask)
-                            # Get confidence if available
                             if hasattr(result, 'boxes') and hasattr(result.boxes, 'conf'):
                                 try:
                                     score = float(result.boxes.conf[i]) if i < len(result.boxes.conf) else 1.0
@@ -456,18 +419,11 @@ class SAM3PredictorWrapper:
                                 score = 1.0
                             scores_list.append(score)
 
-                    if len(masks_list) > 0:
-                        print(f"✅ Extracted {len(masks_list)} masks")
-
-                    if len(masks_list) > 0:
+                    if masks_list:
                         return masks_list, scores_list, None
-                else:
-                    print("⚠️  No masks attribute or masks is None")
 
-            print("⚠️  Returning empty result")
             return self._empty_result()
-        except Exception as e:
-            print(f"❌ SAM3 mask extraction error: {e}")
+        except Exception:
             import traceback
             traceback.print_exc()
             return self._empty_result()
@@ -491,7 +447,6 @@ class SAM3PredictorWrapper:
         """Run SAM3 semantic predictor with exemplar bbox prompt."""
         try:
             if not self._ensure_semantic_predictor():
-                print(f"⚠️ Semantic predictor not available: {self.semantic_error}")
                 return None
 
             # Convert bbox to numpy array first to avoid slow tensor conversion warning
@@ -502,10 +457,7 @@ class SAM3PredictorWrapper:
             self.semantic_predictor.set_prompts(prompts)
             results = self.semantic_predictor(source=self.cached_image_path, stream=False)
             return self._extract_masks(results)
-        except Exception as e:
-            print(f"❌ SAM3 exemplar semantic error: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
             return None
 
     def _ensure_semantic_predictor(self):
@@ -531,7 +483,6 @@ class SAM3PredictorWrapper:
             return True
         except Exception as e:
             self.semantic_error = str(e)
-            print(f"⚠️ SAM3 semantic predictor init failed: {e}")
             return False
 
 
@@ -949,18 +900,8 @@ class TiledSegmentationWorker(QThread):
                  current_class=None, class_color=None, tile_size=1024, overlap=128,
                  min_object_size=20, max_object_size_px=None, shape_filters=None,
                  vector_extent_bounds=None, vector_extent_wkt=None):
-        print("🔧 TiledSegmentationWorker.__init__() START")
-        import sys
-        sys.stdout.flush()
-
         super().__init__()
-        print("🔧 QThread super().__init__() completed")
-        sys.stdout.flush()
-
         self.predictor = predictor
-        print(f"🔧 Predictor assigned: {type(predictor)}")
-        sys.stdout.flush()
-
         self.raster_path = raster_path
         self.request_type = request_type
         self.text_prompt = text_prompt
@@ -978,21 +919,12 @@ class TiledSegmentationWorker(QThread):
         self.tile_results = []  # List of (features, debug_info, transform) tuples
         self.cancel_requested = False  # Flag for cancellation
 
-        print("🔧 TiledSegmentationWorker.__init__() COMPLETE")
-        sys.stdout.flush()
-
     def cancel(self):
         """Request cancellation of processing"""
-        print("🛑 Cancellation requested")
         self.cancel_requested = True
 
     def run(self):
         """Process raster in tiles"""
-        import sys
-        print("🔧 TiledSegmentationWorker.run() CALLED")
-        sys.stdout.flush()
-        print(f"🔧 Thread ID: {int(self.currentThreadId())}")
-        sys.stdout.flush()
 
         try:
             import rasterio
@@ -2456,15 +2388,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Connect to selection changes for remove button
         self._connect_selection_signals()
 
-    def _debug_current_settings(self):
-        """Debug current batch settings"""
-        print("\n🔧 CURRENT SETTINGS:")
-        print(f"   Batch mode enabled: {self.batch_mode_enabled}")
-        print(f"   Min object size: {self.min_object_size}px")
-        print(f"   Max objects: {self.max_objects}")
-        print(f"   Current class: {self.current_class}")
-        print(f"   Current mode: {self.current_mode}")
-
     def _init_sam_model(self):
         """Initialize the selected SAM model with size variant"""
         plugin_dir = os.path.dirname(os.path.abspath(__file__))
@@ -3099,6 +3022,17 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         is_pro = license_info['type'] == 'pro'
 
+        # Sync Pro Features block in Filters tab
+        if hasattr(self, 'fillHolesSwitch'):
+            self.fillHolesSwitch.setEnabled(is_pro)
+            if not is_pro:
+                self.fillHolesSwitch.setChecked(False)
+            if hasattr(self, 'fillHolesFrame'):
+                self.fillHolesFrame.setVisible(
+                    is_pro and self.fillHolesSwitch.isChecked())
+        if hasattr(self, 'maxHoleSizeSpinBox'):
+            self.maxHoleSizeSpinBox.setEnabled(is_pro)
+
         if is_pro:
             self.licenseBanner.setStyleSheet(
                 "#licenseBanner { background: #ECFDF3; border-radius: 8px; border: 1px solid #A6F4C5; }")
@@ -3691,7 +3625,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         size_label.setStyleSheet("font-size: 14px; color: #667085;")
         size_label.setFixedWidth(70)
         self.minSizeSpinBox = QtWidgets.QSpinBox()
-        self.minSizeSpinBox.setRange(10, 500)
+        self.minSizeSpinBox.setRange(3, 500)
         self.minSizeSpinBox.setValue(50)
         self.minSizeSpinBox.setSuffix("px")
         self.minSizeSpinBox.setFixedWidth(100)
@@ -4228,6 +4162,96 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         shape_section_layout.addWidget(self.shapeFilterFrame)
         tab5_layout.addWidget(shape_section_w)
 
+        # ================================================================
+        # Pro Features block
+        # ================================================================
+        from geo_osam_license import LicenseManager as _LM
+        _is_pro = _LM.has_raster_access()
+
+        pro_section_w, pro_section_layout = create_section("Pro Features")
+
+        pro_frame = QtWidgets.QFrame()
+        pro_frame.setObjectName("proFeaturesFrame")
+        pro_frame.setStyleSheet("""
+            QFrame#proFeaturesFrame {
+                background: #FFFBEB;
+                border: 1px solid #FDE68A;
+                border-radius: 8px;
+            }
+        """)
+        pro_frame_layout = QtWidgets.QVBoxLayout(pro_frame)
+        pro_frame_layout.setContentsMargins(10, 10, 10, 10)
+        pro_frame_layout.setSpacing(8)
+
+        # Header row
+        pro_header_row = QtWidgets.QHBoxLayout()
+        pro_badge = QtWidgets.QLabel("PRO")
+        pro_badge.setStyleSheet("""
+            font-size: 10px; font-weight: 700; color: #FFF;
+            background: #F59E0B; border-radius: 4px; padding: 1px 6px;
+        """)
+        pro_header_row.addWidget(pro_badge)
+        if not _is_pro:
+            pro_lock = QtWidgets.QLabel("🔒 Upgrade to Pro to unlock these features")
+            pro_lock.setStyleSheet("font-size: 12px; color: #92400E;")
+            pro_header_row.addWidget(pro_lock)
+        pro_header_row.addStretch()
+        pro_frame_layout.addLayout(pro_header_row)
+
+        # Separator
+        sep = QtWidgets.QFrame()
+        sep.setFrameShape(QtWidgets.QFrame.HLine)
+        sep.setStyleSheet("color: #FDE68A;")
+        pro_frame_layout.addWidget(sep)
+
+        # ── Fill Holes ──
+        fill_toggle_row = QtWidgets.QHBoxLayout()
+        fill_label = QtWidgets.QLabel("Fill holes in polygons")
+        fill_label.setStyleSheet("font-size: 14px; color: #475467;")
+        self.fillHolesSwitch = Switch()
+        self.fillHolesSwitch.setEnabled(_is_pro)
+        fill_toggle_row.addWidget(fill_label)
+        fill_toggle_row.addStretch()
+        fill_toggle_row.addWidget(self.fillHolesSwitch)
+        pro_frame_layout.addLayout(fill_toggle_row)
+
+        self.fillHolesFrame = QtWidgets.QFrame()
+        fh_outer = QtWidgets.QVBoxLayout(self.fillHolesFrame)
+        fh_outer.setContentsMargins(0, 0, 0, 0)
+        fh_outer.setSpacing(2)
+
+        fh_row = QtWidgets.QHBoxLayout()
+        fh_row.setSpacing(8)
+        hole_label = QtWidgets.QLabel("Max hole size:")
+        hole_label.setStyleSheet("font-size: 14px; color: #475467;")
+        self.maxHoleSizeSpinBox = QtWidgets.QSpinBox()
+        self.maxHoleSizeSpinBox.setRange(0, 1000000)
+        self.maxHoleSizeSpinBox.setValue(500)
+        self.maxHoleSizeSpinBox.setSuffix(" px²")
+        self.maxHoleSizeSpinBox.setFixedWidth(110)
+        self.maxHoleSizeSpinBox.setStyleSheet("""
+            QSpinBox {
+                padding: 4px 6px; font-size: 14px; border-radius: 5px;
+                border: 1px solid #D0D5DD; background: #FFF; color: #344054;
+            }
+        """)
+        self.maxHoleSizeSpinBox.setFocusPolicy(Qt.NoFocus)
+        self.maxHoleSizeSpinBox.setEnabled(_is_pro)
+        fh_row.addWidget(hole_label)
+        fh_row.addWidget(self.maxHoleSizeSpinBox)
+        fh_row.addStretch()
+        fh_outer.addLayout(fh_row)
+
+        hole_hint = QtWidgets.QLabel("Holes smaller than this value are filled")
+        hole_hint.setStyleSheet("font-size: 12px; color: #9CA3AF; font-style: italic;")
+        fh_outer.addWidget(hole_hint)
+
+        self.fillHolesFrame.setVisible(False)
+        pro_frame_layout.addWidget(self.fillHolesFrame)
+
+        pro_section_layout.addWidget(pro_frame)
+        tab5_layout.addSpacing(16)
+        tab5_layout.addWidget(pro_section_w)
         tab5_layout.addStretch()
 
         # ================================================================
@@ -4271,6 +4295,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self.gsdSpinBox.valueChanged.connect(self._on_gsd_changed)
         self.realWorldFilterSwitch.toggled.connect(self._on_real_world_filter_toggle)
         self.shapeFilterSwitch.toggled.connect(self._on_shape_filter_toggle)
+        self.fillHolesSwitch.toggled.connect(
+            lambda on: self.fillHolesFrame.setVisible(on))
         self.minDiameterSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
         self.maxDiameterSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
         self.minAreaSpinBox.valueChanged.connect(self._update_real_world_filter_hints)
@@ -5902,10 +5928,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _run_tiled_text_segmentation(self, raster_layer):
         """Run tiled segmentation for text prompt mode (large rasters)"""
-        print("\n" + "="*80)  # noqa: E226
-        print("🔧 TILED TEXT MODE - Processing large raster in tiles")
-        print("="*80)  # noqa: E226
-
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
         self._update_status(f"🗺️  Finding '{self.text_prompt}' in tiles: {raster_layer.name()[:30]}...", "processing")
@@ -5983,10 +6005,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
     def _run_tiled_similar_segmentation(self, raster_layer):
         """Run tiled segmentation for similar objects mode (large rasters)"""
-        print("\n" + "="*80)  # noqa: E226
-        print("🔧 TILED SIMILAR MODE - Processing large raster in tiles")
-        print("="*80)  # noqa: E226
-
         # Use the TiledSegmentationWorker
         self._set_ui_enabled(False)
         self._update_status(f"🗺️  Processing similar objects in tiles: {raster_layer.name()[:30]}...", "processing")
@@ -6093,21 +6111,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._set_ui_enabled(False)
         self._update_status(f"🗺️  Starting tiled segmentation on: {raster_layer.name()[:30]}...", "processing")
 
-        import sys
-        print("\n" + "="*80)  # noqa: E226
-        print("🔧 CREATING TILED WORKER")
-        print("="*80)  # noqa: E226
-        print(f"Raster path: {raster_layer.source()}")
-        print(f"Request type: {self.request_type}")
-        print(f"Text prompt: {self.text_prompt if hasattr(self, 'text_prompt') else None}")
-        print(f"Predictor: {type(self.predictor)}")
-        print("="*80)  # noqa: E226
-        sys.stdout.flush()
-
         # Create worker for background processing
         try:
-            print("🔧 Creating TiledSegmentationWorker instance...")
-            sys.stdout.flush()
 
             # Get class color
             class_color = self.classes.get(self.current_class, {}).get('color', '128,128,128')
@@ -6490,12 +6495,34 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Convert mask to features
         features = []
         try:
+            _fill_holes = (
+                hasattr(self, 'fillHolesSwitch') and
+                self.fillHolesSwitch.isChecked() and
+                self.fillHolesSwitch.isEnabled()
+            )
+            _max_hole_px = (
+                self.maxHoleSizeSpinBox.value()
+                if hasattr(self, 'maxHoleSizeSpinBox') else 0
+            )
+
             for geom, _ in shapes(binary, mask=binary > 0, transform=mask_transform):
                 shp_geom = shape(geom)
                 if not shp_geom.is_valid:
                     shp_geom = shp_geom.buffer(0)
                 if shp_geom.is_empty:
                     continue
+
+                # Fill holes (Pro feature) — keeps holes larger than threshold, fills smaller ones.
+                # Must use Polygon(ring) to get area — LinearRing.area always returns 0.
+                if _fill_holes and hasattr(shp_geom, 'exterior'):
+                    from shapely.geometry import Polygon as _Polygon
+                    kept_rings = [
+                        ring for ring in shp_geom.interiors
+                        if _Polygon(ring).area > _max_hole_px
+                    ]
+                    shp_geom = _Polygon(shp_geom.exterior, kept_rings)
+                    if not shp_geom.is_valid:
+                        shp_geom = shp_geom.buffer(0)
 
                 # Shape filter check using shapely geometry
                 if sf and sf.get('enabled'):
