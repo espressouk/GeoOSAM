@@ -6496,9 +6496,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         features = []
         try:
             _fill_holes = (
-                hasattr(self, 'fillHolesSwitch')
-                and self.fillHolesSwitch.isChecked()
-                and self.fillHolesSwitch.isEnabled()
+                hasattr(self, 'fillHolesSwitch') and  # noqa: W504
+                self.fillHolesSwitch.isChecked() and  # noqa: W504
+                self.fillHolesSwitch.isEnabled()
             )
             _max_hole_px = (
                 self.maxHoleSizeSpinBox.value()

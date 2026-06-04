@@ -5,20 +5,19 @@ No QGIS dependency: helpers only use numpy and OpenCV.
 import sys
 import os
 import numpy as np
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from helpers import create_detection_helper
-from helpers.base_helper import BaseDetectionHelper
-from helpers.vehicle_helper import VehicleHelper
-from helpers.buildings_helper import BuildingsHelper
-from helpers.vegetation_helper import VegetationHelper
-from helpers.vessels_helper import VesselsHelper
-from helpers.water_helper import WaterHelper
-from helpers.road_helper import RoadHelper
-from helpers.general_helper import GeneralHelper
-from helpers.residential_helper import ResidentialHelper
-from helpers.agriculture_helper import AgricultureHelper
+from helpers import create_detection_helper  # noqa: E402
+from helpers.base_helper import BaseDetectionHelper  # noqa: E402
+from helpers.vehicle_helper import VehicleHelper  # noqa: E402
+from helpers.buildings_helper import BuildingsHelper  # noqa: E402
+from helpers.vegetation_helper import VegetationHelper  # noqa: E402
+from helpers.vessels_helper import VesselsHelper  # noqa: E402, F401
+from helpers.water_helper import WaterHelper  # noqa: E402, F401
+from helpers.road_helper import RoadHelper  # noqa: E402, F401
+from helpers.general_helper import GeneralHelper  # noqa: E402
+from helpers.residential_helper import ResidentialHelper  # noqa: E402, F401
+from helpers.agriculture_helper import AgricultureHelper  # noqa: E402, F401
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
