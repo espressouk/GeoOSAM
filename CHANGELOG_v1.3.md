@@ -100,7 +100,7 @@ GeoOSAM now offers a **Free Tier** and **Pro Tier** for SAM3 features:
 
 1. **Install CLIP** (one-time setup):
 ```bash
-pip install git+https://github.com/openai/CLIP.git ftfy wcwidth
+pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
 2. **Restart QGIS** to load the fix
@@ -144,7 +144,7 @@ from sam3_clip_fix import check_sam3_text_available
 if check_sam3_text_available():
     print("✅ SAM3 text features ready!")
 else:
-    print("❌ Install CLIP: pip install git+https://github.com/openai/CLIP.git")
+    print("❌ Install CLIP: pip install git+https://github.com/ultralytics/CLIP.git")
 ```
 
 ---
@@ -170,7 +170,7 @@ else:
 
 2. **Install CLIP** (if you want text prompts):
 ```bash
-pip install git+https://github.com/openai/CLIP.git ftfy wcwidth
+pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
 3. **Restart QGIS**

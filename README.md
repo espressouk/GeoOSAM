@@ -526,6 +526,14 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.4.2 - Pro Features & Fixes (2026-06-04)
+
+- **🆕 NEW**: Fill Holes in Filters tab (Pro) — removes interior voids from segmented polygons
+- **🔧 FIXED**: SAM3 text prompts now use native concept-prompting — text was previously ignored
+- **🔧 FIXED**: Removed debug print statements from production code
+- **🆕 NEW**: Automated test suite (41 tests)
+- **📝 NOTE**: Pro users must connect online once after updating to v1.4.2
+
 ### v1.4.1 - Code Quality Fix (2026-05-09)
 
 - **🔧 FIXED**: Flake8 E231/E221/E226 whitespace issues in geo_osam_dialog.py and vegetation_helper.py
@@ -703,6 +711,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-05-09
-**Plugin Version:** 1.4.1
+**Last updated:** 2026-06-04
+**Plugin Version:** 1.4.2
 **QGIS Compatibility:** 3.16+

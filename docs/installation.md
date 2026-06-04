@@ -81,7 +81,7 @@ for pkg in packages: subprocess.check_call([sys.executable, "-m", "pip", "instal
 To use SAM3 text prompts and similar object detection:
 
 ```bash
-pip install git+https://github.com/openai/CLIP.git ftfy wcwidth
+pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
 **Note:** The CLIP tokenizer fix is applied automatically at runtime in v1.3!

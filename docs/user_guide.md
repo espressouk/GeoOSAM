@@ -422,6 +422,24 @@ For **5+ band imagery**, vegetation detection uses:
 
 ---
 
+## 🔒 Pro Features
+
+Pro features are available to users with an active GeoOSAM Pro licence. Free tier users can see the Pro block in the Filters tab but controls are disabled until a licence is activated in Settings.
+
+### Fill Holes (Filters tab → Pro Features)
+
+Removes interior voids from segmented polygons — useful when SAM produces masks with small holes that need cleaning before export.
+
+**Controls:**
+- **Fill holes in polygons** — toggle on to enable
+- **Max hole size (px²)** — holes *smaller* than this value are filled; larger holes are preserved (e.g. building courtyards, irrigation pivots). Default: 500 px²
+
+**Typical use:** After running text-prompt or similar-object detection, enable Fill Holes before exporting to produce clean polygons without interior voids.
+
+**Note:** Fill Holes is applied at the vector conversion step — it affects all segmentation modes (point, bbox, text prompt, similar).
+
+---
+
 ## ⚡ Performance Optimization
 
 ### Getting Maximum Speed

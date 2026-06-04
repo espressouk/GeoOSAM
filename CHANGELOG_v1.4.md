@@ -1,3 +1,30 @@
+# GeoOSAM v1.4.2 — Pro Features & Fixes
+
+**Release Date:** 2026-06-04
+**Type:** New Features / Bug Fixes / Security
+
+---
+
+## What's New
+
+### Fill Holes (Pro)
+New **Fill Holes** toggle in the Filters tab Pro block. Removes interior voids from segmented polygons automatically. A configurable **Max Hole Size (px²)** threshold preserves real large voids (courtyards, irrigation pivots) while filling small SAM mask artifacts. Default: 500 px².
+
+### SAM3 Text Prompts Fixed
+Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM3SemanticPredictor`). Previously the text parameter was silently ignored — auto-segmentation ran regardless of what was typed.
+
+## Fixes
+
+- Removed debug print statements from production code (`geo_osam_dialog.py`, `sam3_clip_fix.py`, `geo_osam_license.py`)
+- Pro licence offline cache: improved security and reliability
+- Automated test suite added (41 tests covering helpers and mask pipeline — `python3 -m pytest tests/`)
+
+## Upgrade Note
+
+**Pro users:** please connect online once after updating to v1.4.2 to refresh your licence cache.
+
+---
+
 # GeoOSAM v1.4.0 — UI Redesign & Workflow Improvements
 
 **Release Date:** 2026-05-09

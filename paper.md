@@ -33,6 +33,8 @@ Existing QGIS-integrated SAM tools either lack current model support or omit the
 
 GeoOSAM fills this gap with a no-code, model-current plugin designed for the full GIS user spectrum: from a field ecologist digitising vegetation patches to an analyst running city-scale vehicle detection on satellite imagery. The plugin operates under a dual-tier model: all interactive segmentation and detection within the visible extent are available without charge under the GPL v2 licence, while full-raster tiled processing requires a Pro licence to sustain ongoing development.
 
+Community feedback confirms adoption across a wide range of research and professional disciplines. Reported use cases include archaeological survey (delineation of individual stones and boulders in drone orthophotos, with users reporting the elimination of weeks of manual digitisation), ecological and biological monitoring of habitats in aerial and UAV imagery, agricultural weed detection at sub-centimetre ground sampling distances, infrastructure inspection (crack detection in high-resolution orthophotos), and environmental monitoring for litter detection in ultra-high-resolution urban imagery. Users span academic researchers, environmental consultancies, and geospatial service providers across Europe, Australia, and Asia.
+
 # Design and Architecture
 
 ## Dual-model inference strategy
