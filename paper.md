@@ -21,19 +21,21 @@ bibliography: paper.bib
 
 # Summary
 
-GeoOSAM is an open-source QGIS plugin that brings Meta's Segment Anything Model 2.1 (SAM 2.1) [@ravi2024sam2] and SAM3 [@carion2025sam3] to a professional geographic information system (GIS) workflow. Through a four-tab dock panel (Segment, Detect, Results, Filters), users can delineate objects in any raster layer — satellite imagery, aerial photography, UAV captures, or online tile services — with a single point click or bounding-box draw, without writing any code. Segmented masks are immediately converted to georeferenced vector polygons and added to the QGIS layer tree as styled feature layers, ready for attribute editing, filtering, and multi-format export (GeoPackage, Shapefile, GeoJSON, FlatGeobuf).
+GeoOSAM is an open-source QGIS plugin that brings Meta's Segment Anything Model 2.1 (SAM 2.1) [@ravi2024sam2] and SAM3 [@carion2025sam3] to a professional geographic information system (GIS) workflow. Through a four-tab dock panel (Segment, Detect, Results, Filters), users can delineate objects in any raster layer (satellite imagery, aerial photography, UAV captures, or online tile services) with a single point click or bounding-box draw, without writing any code. Segmented masks are immediately converted to georeferenced vector polygons and added to the QGIS layer tree as styled feature layers, ready for attribute editing, filtering, and multi-format export (GeoPackage, Shapefile, GeoJSON, FlatGeobuf).
 
 Beyond interactive segmentation, GeoOSAM exposes SAM3's semantic capabilities through a Detect tab: users can describe objects in natural language ("find all vehicles"), click a reference object to find visually similar ones across a scene, or use any existing polygon as an exemplar query. All detection modes support automatic tiling for large rasters and can be spatially restricted to a vector polygon region of interest (ROI). The plugin has accumulated 12,423 downloads and 370 community ratings on the QGIS Plugin Repository as of June 2026, with approximately 1,600 downloads in the preceding 30 days. Downloads have been recorded in more than 20 countries spanning six continents, including the United States, Brazil, China, India, Indonesia, Germany, and Burkina Faso.
 
 # Statement of Need
 
-Manual digitisation of objects in remote sensing imagery remains one of the most time-consuming tasks in operational GIS workflows. Supervised classification pipelines require labelled training data and domain expertise; traditional edge-detection and thresholding approaches are brittle across sensor types and illumination conditions. The emergence of foundation models for image segmentation — particularly Meta's Segment Anything family — has dramatically lowered the barrier to high-quality object delineation, but most implementations target Python scripting environments rather than the point-and-click workflows used daily by GIS practitioners, planners, ecologists, and humanitarian mapping teams.
+Manual digitisation of objects in remote sensing imagery remains one of the most time-consuming tasks in operational GIS workflows. Supervised classification pipelines require labelled training data and domain expertise; traditional edge-detection and thresholding approaches are brittle across sensor types and illumination conditions. The emergence of foundation models for image segmentation, particularly Meta's Segment Anything family, has dramatically lowered the barrier to high-quality object delineation, but most implementations target Python scripting environments rather than the point-and-click workflows used daily by GIS practitioners, planners, ecologists, and humanitarian mapping teams.
 
 Existing QGIS-integrated SAM tools either lack current model support or omit the GIS-specific workflow features required for operational use. Geo-SAM [@zhao2023geosam] supports SAM 1.0 via a manual encoder pre-processing step that must be re-run each time the image or resolution changes. The `samgeo` Python package [@wu2023samgeo] and its companion QGIS plugin support SAM 2.1 and SAM3 text prompts, but neither provides exemplar-based similar-object detection, GSD-aware size and shape filters, nor a vector polygon ROI constraint for restricting tiled processing to a defined area of interest.
 
-GeoOSAM fills this gap with a no-code, model-current plugin designed for the full GIS user spectrum: from a field ecologist digitising vegetation patches to an analyst running city-scale vehicle detection on satellite imagery. The plugin operates under a dual-tier model: all interactive segmentation and detection within the visible extent are available without charge under the GPL v2 licence, while full-raster tiled processing requires a Pro licence to sustain ongoing development.
+GeoOSAM fills this gap with a no-code, model-current plugin designed for the full GIS user spectrum: from a field ecologist digitising vegetation patches to an analyst running city-scale vehicle detection on satellite imagery. All core segmentation functionality (point, bounding-box, text-prompt, and similar-object modes on the visible extent) is available without charge under the GPL v2 licence. Full-raster tiled processing over entire datasets requires a Pro licence to sustain ongoing development, but does not restrict access to any segmentation algorithm.
 
-Community feedback confirms adoption across a wide range of research and professional disciplines. Reported use cases include archaeological survey (delineation of individual stones and boulders in drone orthophotos, with users reporting the elimination of weeks of manual digitisation), ecological and biological monitoring of habitats in aerial and UAV imagery, agricultural weed detection at sub-centimetre ground sampling distances, infrastructure inspection (crack detection in high-resolution orthophotos), and environmental monitoring for litter detection in ultra-high-resolution urban imagery. Users span academic researchers, environmental consultancies, and geospatial service providers across Europe, Australia, and Asia.
+Community feedback confirms adoption across a wide range of research and professional disciplines. Reported use cases include archaeological survey (delineation of individual stones and boulders in drone orthophotos, with users self-reporting the elimination of weeks of manual digitisation), ecological and biological monitoring of habitats in aerial and UAV imagery, agricultural weed detection at centimetre-scale ground sampling distances, infrastructure inspection (crack detection in high-resolution orthophotos), and environmental monitoring for litter detection in ultra-high-resolution urban imagery. Users span academic researchers, environmental consultancies, and geospatial service providers across Europe, Australia, and Asia, confirming demand for accessible, no-code AI segmentation across the breadth of applied remote sensing.
+
+GeoOSAM is available on the QGIS Plugin Repository and on GitHub at https://github.com/espressouk/GeoOSAM. Installation instructions and dependency requirements are provided in the repository README.
 
 # Design and Architecture
 
@@ -48,7 +50,7 @@ SAM3 [@carion2025sam3] is available as a third path on GPU systems, providing au
 
 ## Worker thread architecture
 
-All model inference runs on `QThread` workers — `OptimizedSAM2Worker` for interactive point and bounding-box prompts, and `TiledSegmentationWorker` for full-raster detection jobs. This design keeps QGIS responsive during long operations and exposes cancellation signals so users can abort mid-tile runs without restarting the application.
+All model inference runs on `QThread` workers: `OptimizedSAM2Worker` for interactive point and bounding-box prompts, and `TiledSegmentationWorker` for full-raster detection jobs. This design keeps QGIS responsive during long operations and exposes cancellation signals so users can abort mid-tile runs without restarting the application.
 
 ## Class-specific detection helpers
 
@@ -56,7 +58,7 @@ The `helpers/` module implements a clean abstract base class (`BaseDetectionHelp
 
 ## Mask-to-vector pipeline
 
-Raw inference masks are converted to georeferenced vector polygons via `rasterio.features.shapes` and `shapely` [@shapely2007], with the spatial transform derived directly from the source raster's affine metadata. This ensures correct geographic coordinates regardless of the raster's projection or resolution. Per-feature attributes — class name, segment ID, area (m²), diameter (cm), circularity, and compactness — are written to the output layer using QGIS field objects, enabling downstream filtering and analysis within the native QGIS attribute table.
+Raw inference masks are converted to georeferenced vector polygons via `rasterio.features.shapes` and `shapely` [@shapely2007], with the spatial transform derived directly from the source raster's affine metadata. This ensures correct geographic coordinates regardless of the raster's projection or resolution. Per-feature attributes (class name, segment ID, area (m²), diameter (cm), circularity, and compactness) are written to the output layer using QGIS field objects, enabling downstream filtering and analysis within the native QGIS attribute table.
 
 # Functionality
 
@@ -74,7 +76,7 @@ The Detect tab exposes three SAM3-powered modes:
 
 ## Filters tab
 
-Real-world size and shape filters are applied post-segmentation: minimum and maximum diameter (cm) and area (m²) calculated from the raster's ground sampling distance (GSD), plus circularity, compactness, and aspect-ratio thresholds. This dramatically reduces false positives in text-prompt runs on heterogeneous imagery.
+Real-world size and shape filters are applied post-segmentation: minimum and maximum diameter (cm) and area (m²) calculated from the raster's ground sampling distance (GSD), plus circularity, compactness, and aspect-ratio thresholds. These filters reduce false positives in text-prompt runs on heterogeneous imagery.
 
 ## Export and class management
 
@@ -82,7 +84,7 @@ Twelve pre-defined classes with colour coding cover the most common mapping targ
 
 # Performance
 
-All benchmarks were measured on a system with an NVIDIA GeForce RTX 4080 Laptop GPU and a 32-core CPU, using an 8-run median over a synthetic 1024×1024 RGB image after two warmup passes.
+All benchmarks were measured on a system with an NVIDIA GeForce RTX 4080 Laptop GPU and a 32-core CPU, using an 8-run median over a synthetic 1024×1024 RGB image after two warmup passes. Results can be reproduced using the included `benchmark_joss.py` script.
 
 ## Inference time by model (point prompt, 1024×1024)
 
@@ -152,6 +154,8 @@ Conversion of an inference mask to georeferenced QGIS polygons adds 8–35 ms fo
 | No-code QGIS operation | Yes | Yes | Yes |
 
 †Geo-SAM supports encoder-based tiling as a separate manual pre-processing step.
+
+Several additional QGIS-native tools integrating SAM variants have emerged since 2024; the comparison above focuses on tools with citable academic or software releases.
 
 # Acknowledgements
 
