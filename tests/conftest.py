@@ -32,10 +32,13 @@ class _QAbstractButton:
 
 def _pyqtSignal(*args, **kwargs):
     class _Sig:
+
         def connect(self, *a, **kw):
             pass
+
         def emit(self, *a, **kw):
             pass
+
         def disconnect(self, *a, **kw):
             pass
     return _Sig()
@@ -61,17 +64,17 @@ _qgis_pyqt.QtWidgets = _qtwidgets
 _qgis_pyqt.QtGui = _qtgui
 
 sys.modules.update({
-    "qgis":                         _qgis,
-    "qgis.PyQt":                    _qgis_pyqt,
-    "qgis.PyQt.QtCore":             _qtcore,
-    "qgis.PyQt.QtWidgets":          _qtwidgets,
-    "qgis.PyQt.QtGui":              _qtgui,
-    "qgis.core":                    MagicMock(),
-    "qgis.gui":                     MagicMock(),
-    "hydra":                        MagicMock(),
-    "hydra.core":                   MagicMock(),
-    "hydra.core.global_hydra":      MagicMock(),
-    "sam2":                         MagicMock(),
-    "sam2.build_sam":               MagicMock(),
-    "sam2.sam2_image_predictor":    MagicMock(),
+    "qgis": _qgis,
+    "qgis.PyQt": _qgis_pyqt,
+    "qgis.PyQt.QtCore": _qtcore,
+    "qgis.PyQt.QtWidgets": _qtwidgets,
+    "qgis.PyQt.QtGui": _qtgui,
+    "qgis.core": MagicMock(),
+    "qgis.gui": MagicMock(),
+    "hydra": MagicMock(),
+    "hydra.core": MagicMock(),
+    "hydra.core.global_hydra": MagicMock(),
+    "sam2": MagicMock(),
+    "sam2.build_sam": MagicMock(),
+    "sam2.sam2_image_predictor": MagicMock(),
 })

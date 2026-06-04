@@ -29,10 +29,10 @@ IMAGE_SIZE = 1024  # pixels, representative satellite crop
 
 # SAM2.1 (Meta) model configs — paths relative to plugin root
 SAM2_MODELS = [
-    ("SAM2.1 Tiny",   "sam2/checkpoints/sam2.1_hiera_tiny.pt",      "sam2.1/sam2.1_hiera_t"),
-    ("SAM2.1 Small",  "sam2/checkpoints/sam2.1_hiera_small.pt",     "sam2.1/sam2.1_hiera_s"),
-    ("SAM2.1 Base+",  "sam2/checkpoints/sam2.1_hiera_base_plus.pt", "sam2.1/sam2.1_hiera_b+"),
-    ("SAM2.1 Large",  "sam2/checkpoints/sam2.1_hiera_large.pt",     "sam2.1/sam2.1_hiera_l"),
+    ("SAM2.1 Tiny", "sam2/checkpoints/sam2.1_hiera_tiny.pt", "sam2.1/sam2.1_hiera_t"),
+    ("SAM2.1 Small", "sam2/checkpoints/sam2.1_hiera_small.pt", "sam2.1/sam2.1_hiera_s"),
+    ("SAM2.1 Base+", "sam2/checkpoints/sam2.1_hiera_base_plus.pt", "sam2.1/sam2.1_hiera_b+"),
+    ("SAM2.1 Large", "sam2/checkpoints/sam2.1_hiera_large.pt", "sam2.1/sam2.1_hiera_l"),
 ]
 
 SAM21_ULTRALYTICS_WEIGHTS = "/home/rius/sam2.1_b.pt"
@@ -227,7 +227,7 @@ def fmt_row(label, device, point_t, bbox_t, err):
 def main():
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A"
     cpu_count = os.cpu_count()
-    print(f"\nGeoOSAM Inference Benchmark")
+    print("\nGeoOSAM Inference Benchmark")
     print(f"GPU : {gpu_name}")
     print(f"CPU : {cpu_count} logical cores")
     print(f"PyTorch : {torch.__version__}")
@@ -246,17 +246,17 @@ def main():
     label_cpu = "SAM2.1 Tiny"
     ckpt_cpu = SAM2_MODELS[0][1]
     cfg_cpu = SAM2_MODELS[0][2]
-    print(f"  Benchmarking SAM2.1 Tiny (CPU)...", flush=True)
+    print("  Benchmarking SAM2.1 Tiny (CPU)...", flush=True)
     pt, bt, err = benchmark_sam2(label_cpu, ckpt_cpu, cfg_cpu, "cpu")
     results.append((label_cpu + " (Meta)", "CPU", pt, bt, err))
 
     # Ultralytics SAM2.1_B on CPU
-    print(f"  Benchmarking SAM2.1_B Ultralytics (CPU)...", flush=True)
+    print("  Benchmarking SAM2.1_B Ultralytics (CPU)...", flush=True)
     pt, bt, err = benchmark_ultralytics_cpu()
     results.append(("SAM2.1_B Ultralytics", "CPU", pt, bt, err))
 
     # SAM3 on GPU
-    print(f"  Benchmarking SAM3 (GPU)...", flush=True)
+    print("  Benchmarking SAM3 (GPU)...", flush=True)
     pt, bt, err = benchmark_sam3_gpu()
     results.append(("SAM3", "GPU", pt, bt, err))
 
