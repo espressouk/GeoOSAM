@@ -1,0 +1,11 @@
+tests/ export-ignore
+benchmark_joss.py export-ignore
+benchmark_joss_full.py export-ignore
+paper.md export-ignore
+paper.bib export-ignore
+requirements.txt export-ignore
+SAM3_CLIP_FIX_README.md export-ignore
+SAM3_TEST_REPORT.md export-ignore
+docs/SAM3_IMPLEMENTATION_OPTIONS.md export-ignore
+docs/SAM3_SIMILAR_MODE_NOTES.md export-ignore
+.github/ export-ignore
