@@ -1533,15 +1533,8 @@ class OptimizedSAM2Worker(QThread):
             # Use helper for validation
             helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
 
-            # Debug mask info
-            mask_area = np.sum(mask > 0) if hasattr(mask, 'sum') else 0
-            print(f"🔍 VALIDATION DEBUG - Class: {class_name}, Mask area: {mask_area} pixels")
-
             valid_masks = helper.process_sam_mask(mask)
-            result = len(valid_masks) > 0
-            print(f"🔍 VALIDATION RESULT: {result} (found {len(valid_masks)} valid masks)")
-
-            return result
+            return len(valid_masks) > 0
 
         except Exception as e:
             print(f"Validation error: {e}")
@@ -2164,6 +2157,7 @@ class EnhancedBBoxClickTool(QgsMapTool):
 
     def canvasPressEvent(self, e):
         self.start_point = self.canvas.getCoordinateTransform().toMapCoordinates(e.pos())
+        self.start_pixel = e.pos()
         self.is_dragging = True
         self.bbox_rubber.reset(QgsWkbTypes.PolygonGeometry)
 
@@ -2178,11 +2172,12 @@ class EnhancedBBoxClickTool(QgsMapTool):
         if self.is_dragging and self.start_point:
             end_point = self.canvas.getCoordinateTransform().toMapCoordinates(e.pos())
             rect = QgsRectangle(self.start_point, end_point)
-            # Dynamic size validation based on coordinate system
-            # For geographic coordinates (degrees), use much smaller thresholds
-            min_size = 0.000001 if abs(rect.width()) < 1 and abs(rect.height()) < 1 else 10
-
-            if rect.width() > min_size and rect.height() > min_size:
+            # Validate the drag in SCREEN PIXELS, not map units — a fixed map-distance
+            # floor wrongly rejects small boxes on high-resolution imagery (cm/pixel).
+            # A real drag spans several pixels; an accidental click spans ~0.
+            dx = abs(e.pos().x() - self.start_pixel.x())
+            dy = abs(e.pos().y() - self.start_pixel.y())
+            if dx >= 5 and dy >= 5:
                 self.cb(rect)
             else:
                 self.bbox_rubber.reset(QgsWkbTypes.PolygonGeometry)
@@ -5378,6 +5373,23 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         self._run_segmentation()
 
     def _run_segmentation(self):
+        """Guarded entry point: any unexpected synchronous crash during setup must
+        reset is_processing, re-enable the UI, surface the error, and keep the queue
+        moving — otherwise a single exception freezes all further requests until restart.
+        """
+        try:
+            self._run_segmentation_impl()
+        except Exception as e:
+            import traceback
+            self._update_status(f"❌ Segmentation failed to start: {e}", "error")
+            print(f"❌ _run_segmentation crashed:\n{traceback.format_exc()}")
+            self._remove_cancel_button()
+            self._set_ui_enabled(True)
+            self.is_processing = False
+            # Drain the queue so a crash on one request doesn't strand the rest.
+            self._process_queue()
+
+    def _run_segmentation_impl(self):
         """Enhanced segmentation that ensures current layer is used"""
         # Prevent multiple simultaneous requests
         if self.is_processing:
@@ -5390,10 +5402,6 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
         # Set processing state
         self.is_processing = True
-
-        # DEBUG: Verify settings are correct
-        if self.batch_mode_enabled and self.current_mode == 'bbox':
-            self._debug_current_settings()
 
         if not self.current_class:
             self._update_status("No class selected", "error")
@@ -5445,6 +5453,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             result = self._prepare_optimized_segmentation_data(current_layer)
             if result is None:
                 self._set_ui_enabled(True)
+                self.is_processing = False
+                self._process_queue()
                 return
 
             # Handle both RGB and multi-spectral data
@@ -5463,6 +5473,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         except Exception as e:
             self._update_status(f"Error preparing data from {current_layer.name()}: {e}", "error")
             self._set_ui_enabled(True)
+            self.is_processing = False
+            self._process_queue()
             return
 
         # Determine processing mode based on request type
