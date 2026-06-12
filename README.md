@@ -526,6 +526,12 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
+### v1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
+
+- **✨ IMPROVED**: Vegetation segmentation on multispectral imagery (5+ bands) — less shadow and soil bleed in tree and crop masks (automatic; no effect on RGB or non-vegetation classes)
+- **🔧 FIXED**: BBox selections on high-resolution imagery were sometimes rejected — small boxes now register correctly
+- **🔧 FIXED**: Batch mode could freeze the request queue after an error — now recovers cleanly
+
 ### v1.4.2 - Pro Features & Fixes (2026-06-04)
 
 - **🆕 NEW**: Fill Holes in Filters tab (Pro) — removes interior voids from segmented polygons
@@ -711,6 +717,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-06-04
-**Plugin Version:** 1.4.2
+**Last updated:** 2026-06-12
+**Plugin Version:** 1.4.3
 **QGIS Compatibility:** 3.16+

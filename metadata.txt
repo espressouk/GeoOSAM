@@ -5,7 +5,7 @@ qgisMaximumVersion=3.99
 description=AI-powered segmentation for QGIS — SAM2.1 & SAM3 with text prompts, similar object detection, vector ROI, and professional GIS workflow features
 about=GeoOSAM brings Meta's SAM 2.1 and SAM3 to QGIS with a streamlined 4-tab UI (Segment, Detect, Results, Filters). Point-click or draw a bounding box on any raster to instantly segment objects. SAM3 users unlock the Detect tab: run text-prompt auto-segmentation ("find all vehicles"), click a reference object to find similar ones across the scene, or use any existing polygon as an exemplar via Similar from Selection. Pro users can run these modes over entire rasters with automatic tiling and restrict processing to a vector polygon ROI. Includes 12 pre-defined classes with color coding, custom class creation, real-world size and shape filters (GSD-based), multi-point segmentation (Shift/Ctrl+click), multi-format export (GeoPackage, Shapefile, GeoJSON), undo support, and persistent output folder. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU with automatic hardware detection and model selection.
 
-version=1.4.2
+version=1.4.3
 author=Ofer Butbega
 email=geoosamplugin@gmail.com
 
@@ -32,7 +32,12 @@ server=False
 plugin_dependencies=
 
 # Changelog (REQUIRED for updates)
-changelog=1.4.2 - Pro Features & Fixes (2026-06-04)
+changelog=1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
+    - IMPROVED: Vegetation segmentation on multispectral imagery (5+ bands) — less shadow and soil bleed in tree and crop masks. Automatic; no effect on RGB or non-vegetation classes
+    - FIXED: BBox selections on high-resolution imagery were sometimes rejected — small boxes now register correctly
+    - FIXED: Batch mode could freeze the request queue after an error — now recovers cleanly
+
+    1.4.2 - Pro Features & Fixes (2026-06-04)
     - NEW: Fill Holes in Filters tab (Pro) — removes interior voids from segmented polygons with configurable size threshold
     - FIXED: SAM3 text prompts now use native concept-prompting — text was previously ignored
     - FIXED: Removed debug print statements from production code

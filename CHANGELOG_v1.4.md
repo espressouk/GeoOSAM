@@ -1,3 +1,22 @@
+# GeoOSAM v1.4.3 — Vegetation & Bbox Improvements
+
+**Release Date:** 2026-06-12
+**Type:** Improvements / Bug Fixes
+
+---
+
+## Improvements
+
+### Better Vegetation Masks on Multispectral Imagery
+Vegetation segmentation on multispectral rasters (5+ bands) now produces cleaner masks, with noticeably less shadow and soil bleed around tree crowns and crop boundaries. Applies automatically — no setting to enable, no effect on RGB imagery or non-vegetation classes.
+
+## Fixes
+
+- **BBox on high-resolution imagery:** small bounding-box selections were sometimes rejected on very high-resolution rasters. Boxes now register correctly regardless of raster resolution.
+- **Batch mode queue recovery:** an error during batch processing could leave the request queue stuck, requiring a restart. Errors are now surfaced and the queue recovers cleanly.
+
+---
+
 # GeoOSAM v1.4.2 — Pro Features & Fixes
 
 **Release Date:** 2026-06-04
