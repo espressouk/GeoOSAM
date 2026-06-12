@@ -289,3 +289,6 @@ class VegetationHelper(BaseDetectionHelper):
     def supports_multispectral(self):
         """Vegetation supports multispectral images"""
         return True
+
+    def is_vegetation_class(self):
+        return True  # definite vegetation -> NDVI may drop non-veg false positives

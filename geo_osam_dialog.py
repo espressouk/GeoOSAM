@@ -495,6 +495,112 @@ Copyright (C) 2025 by Ofer Butbega
 _THREADS_CONFIGURED = False
 
 
+def detect_ndvi_bands(src, bands=None):
+    """Identify red and NIR band numbers (1-based) from per-band wavelength metadata.
+
+    Parses rasterio descriptions/tags (e.g. "Band 05: 650.000000 Nanometers") so NDVI uses
+    the correct bands regardless of sensor band order. Returns (red_band, nir_band) or None
+    when wavelengths can't be read or red/NIR aren't both present.
+    """
+    import re
+
+    if bands is None:
+        bands = list(range(1, src.count + 1))
+
+    def _wavelength_nm(band_idx):
+        sources = []
+        try:
+            desc = src.descriptions[band_idx - 1]
+            if desc:
+                sources.append(desc)
+        except Exception:
+            pass
+        try:
+            sources.extend(str(v) for v in src.tags(band_idx).values())
+        except Exception:
+            pass
+        for text in sources:
+            m = re.search(r'(\d+(?:\.\d+)?)\s*(?:nm|nanomet)', text, re.IGNORECASE)
+            if m:
+                return float(m.group(1))
+        return None
+
+    wavelengths = {b: _wavelength_nm(b) for b in bands}
+    wavelengths = {b: wl for b, wl in wavelengths.items() if wl is not None}
+    if not wavelengths:
+        return None
+
+    red = min(((b, wl) for b, wl in wavelengths.items() if 620 <= wl <= 700),
+              key=lambda bw: abs(bw[1] - 670), default=None)
+    nir = min(((b, wl) for b, wl in wavelengths.items() if 760 <= wl <= 900),
+              key=lambda bw: abs(bw[1] - 840), default=None)
+    if red is None or nir is None:
+        return None
+    return (red[0], nir[0])
+
+
+def ndvi_shadow_trim(masks, ndvi, min_object_size, force_drop=False):
+    """Trim shadow/soil (NDVI < 0) from vegetation masks.
+
+    Each mask is first reduced to its vegetation (NDVI >= 0, sub-min-size speckle removed).
+    Masks with essentially no vegetation are false positives (e.g. SAM matching a pure-shadow
+    blob). They are dropped when `force_drop` is set (caller knows the run is definitely
+    vegetation, e.g. class == Vegetation) OR when vegetation masks are the batch majority
+    (`veg_run`); otherwise they pass through untouched. NDVI is resampled to each mask if
+    resolutions differ. Caller owns the class gate. masks: list of uint8 (H,W) 0/255.
+
+    Returns (out_masks, stats) where stats = {trimmed, dropped, kept, veg_run}.
+    """
+    stats = {'trimmed': 0, 'dropped': 0, 'kept': 0, 'veg_run': False}
+    if ndvi is None or not masks:
+        return masks, stats
+
+    veg_full = ndvi >= 0.0
+
+    entries = []  # (clean_mask, veg_area, original_mask)
+    for mask in masks:
+        binary = mask > 127
+        if not binary.any():
+            continue
+        if veg_full.shape != binary.shape:
+            veg = cv2.resize(veg_full.astype(np.uint8),
+                             (binary.shape[1], binary.shape[0]),
+                             interpolation=cv2.INTER_NEAREST).astype(bool)
+        else:
+            veg = veg_full
+        kept_u8 = (binary & veg).astype(np.uint8)
+        n, labels, st, _ = cv2.connectedComponentsWithStats(kept_u8, connectivity=8)
+        clean = np.zeros_like(kept_u8)
+        veg_area = 0
+        for lbl in range(1, n):
+            a = st[lbl, cv2.CC_STAT_AREA]
+            if a >= min_object_size:
+                clean[labels == lbl] = 1
+                veg_area += a
+        entries.append((clean, veg_area, mask))
+
+    if not entries:
+        return masks, stats
+
+    veg_count = sum(1 for _, va, _ in entries if va >= min_object_size)
+    veg_run = veg_count >= 0.5 * len(entries)
+    stats['veg_run'] = veg_run
+    drop_nonveg = force_drop or veg_run
+
+    out = []
+    for clean, veg_area, mask in entries:
+        if veg_area >= min_object_size:
+            out.append((clean * 255).astype(np.uint8))
+            stats['trimmed'] += 1
+        elif drop_nonveg:
+            stats['dropped'] += 1
+        else:
+            out.append(mask)
+            stats['kept'] += 1
+
+    return (out if out else masks), stats
+
+
 def merge_nearby_masks_class_aware(masks, class_name, buffer_px=3):
     """Class-aware merging with different strategies per class"""
 
@@ -1033,6 +1139,22 @@ class TiledSegmentationWorker(QThread):
                     except Exception as e:
                         print(f"⚠️  Could not extract exemplar: {e}")
 
+                # NDVI shadow-trim setup (vegetation classes only). Detect red/NIR once;
+                # explicit non-veg classes opt out via the negative class gate.
+                ndvi_bands = None
+                ndvi_force_drop = False
+                try:
+                    helper = create_detection_helper(self.current_class or 'Other', self.min_object_size, 25)
+                    veg_context = not (hasattr(helper, 'is_vegetation_context') and not helper.is_vegetation_context())
+                    if veg_context:
+                        ndvi_bands = detect_ndvi_bands(src)
+                        ndvi_force_drop = hasattr(helper, 'is_vegetation_class') and helper.is_vegetation_class()
+                        if ndvi_bands:
+                            print(f"🌿 NDVI shadow trim enabled (red=band {ndvi_bands[0]}, "
+                                  f"NIR=band {ndvi_bands[1]}, force_drop={ndvi_force_drop})")
+                except Exception as e:
+                    print(f"⚠️  NDVI setup skipped: {e}")
+
                 # Process each tile
                 for tile_idx, window in enumerate(tiles):
                     # Check for cancellation request
@@ -1162,6 +1284,22 @@ class TiledSegmentationWorker(QThread):
                         print(f"⏱️  Inference time: {time.time() - start_infer:.2f}s")
                         print(f"📊 Masks returned: {len(masks) if masks is not None else 0}")
 
+                        # NDVI shadow trim (vegetation runs only) — compute NDVI for this tile
+                        # from raw red/NIR reflectance and trim shadow/soil off the masks.
+                        if ndvi_bands is not None and masks is not None and len(masks) > 0:
+                            try:
+                                nd = src.read(list(ndvi_bands), window=window, out_dtype=np.float32)
+                                denom = nd[1] + nd[0]
+                                ndvi = np.zeros_like(nd[0])
+                                valid = denom > 0
+                                ndvi[valid] = (nd[1][valid] - nd[0][valid]) / denom[valid]
+                                masks, nd_stats = ndvi_shadow_trim(
+                                    masks, ndvi, self.min_object_size, force_drop=ndvi_force_drop)
+                                print(f"🌿 Tile NDVI trim: {nd_stats['trimmed']} trimmed, "
+                                      f"{nd_stats['dropped']} dropped (veg_run={nd_stats['veg_run']})")
+                            except Exception as e:
+                                print(f"⚠️  NDVI trim skipped for tile: {e}")
+
                         # Convert masks to features using tile transform
                         tile_objects = 0
                         if masks is not None and len(masks) > 0:
@@ -1286,11 +1424,14 @@ class OptimizedSAM2Worker(QThread):
     def __init__(self, predictor, arr, mode, model_choice="SAM2", point_coords=None,
                  point_labels=None, box=None, mask_transform=None, debug_info=None, device="cpu",
                  min_object_size=50, max_objects=20, arr_multispectral=None, text_prompt=None,
-                 max_object_size_px=None, shape_filters=None):
+                 max_object_size_px=None, shape_filters=None, ndvi_map=None,
+                 save_debug_masks=False):
         super().__init__()
         self.predictor = predictor
         self.arr = arr
         self.arr_multispectral = arr_multispectral
+        self.ndvi_map = ndvi_map
+        self.save_debug_masks = save_debug_masks
         self.mode = mode
         self.text_prompt = text_prompt
         self.model_choice = model_choice
@@ -1512,6 +1653,9 @@ class OptimizedSAM2Worker(QThread):
 
             processed_masks.append(mask)
 
+        # Trim shadow/soil from vegetation masks using NDVI (no-op for other classes)
+        processed_masks = self._apply_ndvi_shadow_trim(processed_masks)
+
         # Emit all masks together
         result = {
             'masks': processed_masks,  # Multiple masks
@@ -1526,6 +1670,86 @@ class OptimizedSAM2Worker(QThread):
         }
 
         self.finished.emit(result)
+
+    def _apply_ndvi_shadow_trim(self, masks):
+        """Trim shadow/soil (NDVI < 0) off vegetation masks for the AOI path.
+
+        Applies the negative class gate (explicit non-veg classes opt out — NDVI is a
+        vegetation signal), then delegates to the shared `ndvi_shadow_trim`.
+        """
+        ndvi = self.ndvi_map
+        if ndvi is None or not masks:
+            return masks
+
+        class_name = self.debug_info.get('class', 'Other')
+        force_drop = False
+        try:
+            helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+            if hasattr(helper, 'is_vegetation_context') and not helper.is_vegetation_context():
+                return masks
+            force_drop = hasattr(helper, 'is_vegetation_class') and helper.is_vegetation_class()
+        except Exception:
+            pass
+
+        out, stats = ndvi_shadow_trim(masks, ndvi, self.min_object_size, force_drop=force_drop)
+        if self.save_debug_masks:
+            print(f"🌿 NDVI shadow trim: {stats['trimmed']} trimmed, {stats['dropped']} "
+                  f"non-veg dropped, {stats['kept']} non-veg kept (veg_run={stats['veg_run']})")
+        return out
+
+    def _apply_ndvi_shadow_trim_single(self, mask):
+        """Trim shadow/soil (NDVI < 0) off a single deliberately-selected mask (bbox mode).
+
+        TRIM-ONLY — never drops. The user explicitly drew a box around this object, so
+        returning nothing is never acceptable (unlike the find-all path). If NDVI < 0 would
+        consume the majority of the mask, the object is treated as non-vegetation and left
+        completely untouched — this protects buildings/roads/paths selected under a
+        vegetation-context class (General/Other/Vegetation/Agriculture).
+        """
+        ndvi = self.ndvi_map
+        if ndvi is None or mask is None:
+            return mask
+
+        # Negative class gate — explicit non-veg classes opt out (NDVI is a vegetation signal).
+        class_name = self.debug_info.get('class', 'Other')
+        try:
+            helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
+            if hasattr(helper, 'is_vegetation_context') and not helper.is_vegetation_context():
+                return mask
+        except Exception:
+            pass
+
+        binary = mask > 127
+        mask_area = int(binary.sum())
+        if mask_area == 0:
+            return mask
+
+        veg_full = ndvi >= 0.0
+        if veg_full.shape != binary.shape:
+            veg = cv2.resize(veg_full.astype(np.uint8),
+                             (binary.shape[1], binary.shape[0]),
+                             interpolation=cv2.INTER_NEAREST).astype(bool)
+        else:
+            veg = veg_full
+
+        kept_u8 = (binary & veg).astype(np.uint8)
+        n, labels, st, _ = cv2.connectedComponentsWithStats(kept_u8, connectivity=8)
+        clean = np.zeros_like(kept_u8)
+        veg_area = 0
+        for lbl in range(1, n):
+            a = st[lbl, cv2.CC_STAT_AREA]
+            if a >= self.min_object_size:
+                clean[labels == lbl] = 1
+                veg_area += a
+
+        # Majority guard: if the object is mostly NDVI < 0, it isn't vegetation — leave it
+        # untouched rather than shave a deliberately-selected non-veg object down to scraps.
+        if veg_area < 0.5 * mask_area:
+            return mask
+
+        if self.save_debug_masks:
+            print(f"🌿 NDVI single-mask trim: {mask_area} -> {veg_area} px kept (class={class_name})")
+        return (clean * 255).astype(np.uint8)
 
     def _validate_mask_for_class(self, mask, class_name, center_point):
         """Validate segmented mask based on class-specific criteria"""
@@ -1723,6 +1947,10 @@ class OptimizedSAM2Worker(QThread):
             helper = create_detection_helper(current_class, self.min_object_size, self.max_objects)
             individual_masks = helper.merge_nearby_masks(individual_masks)
             individual_masks = helper.dedupe_or_merge_masks(individual_masks)
+
+            # Batch bbox is a find-all mode: trim shadow/soil and drop pure-shadow false
+            # positives via NDVI, same semantics as the text/similar path (no-op off-veg).
+            individual_masks = self._apply_ndvi_shadow_trim(individual_masks)
 
             print(f"🎯 Point-guided batch complete: {successful_detections}/{len(candidates_to_process)} objects successfully segmented")
 
@@ -2044,6 +2272,10 @@ class OptimizedSAM2Worker(QThread):
 
         if mask.dtype != np.uint8:
             mask = (mask * 255).astype(np.uint8)
+
+        # Trim shadow/soil (NDVI < 0) off a single bbox selection (trim-only, never drops).
+        # No-op for point mode (ndvi_map is None there) and for non-veg-context classes.
+        mask = self._apply_ndvi_shadow_trim_single(mask)
 
         result = {
             'mask': mask,
@@ -5526,6 +5758,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # Pass batch settings
             min_object_size=effective_min_size,
             arr_multispectral=arr_multispectral,
+            ndvi_map=getattr(self, '_ndvi_map', None),
+            save_debug_masks=getattr(self, 'save_debug_masks', False),
             max_objects=self.max_objects,
             text_prompt=getattr(self, 'text_prompt', None),
             max_object_size_px=effective_max_size,
@@ -6780,6 +7014,95 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             self._update_status(f"Error adding features: {e}", "error")
             return
 
+    def _detect_ndvi_band_indices(self, src, bands_to_read):
+        """Red/NIR positions (0-based, into bands_to_read) via wavelength metadata, or None.
+
+        Thin wrapper over the shared `detect_ndvi_bands` (which returns 1-based band numbers),
+        mapping those numbers back to positions within bands_to_read.
+        """
+        result = detect_ndvi_bands(src, bands_to_read)
+        if result is None:
+            return None
+        red_band, nir_band = result
+        try:
+            return (bands_to_read.index(red_band), bands_to_read.index(nir_band))
+        except ValueError:
+            return None
+
+    def _read_prepared_bands(self, src, bands_to_read, band_count, window, out_shape=None, ndvi_bands=None):
+        """Read a window from a rasterio source and return (normalized (H,W,C) uint8 array, ndvi).
+
+        Shared base prep for every prompt type (point/bbox/text/similar) so they all feed
+        SAM the same way. Multi-spectral (>=5 bands) is read as float32 and normalized
+        per-band to preserve reflectance ranges; 1/3/4-band inputs are read as uint8 and
+        globally normalized, with 1/2-band data expanded to 3 channels.
+
+        When ndvi_bands=(red_pos, nir_pos) is given (multi-spectral only), a true NDVI map
+        is computed from the raw reflectance *before* per-band normalization and returned
+        aligned to the array; otherwise ndvi is None. Returns (None, None) if empty.
+        """
+        read_dtype = np.float32 if band_count >= 5 else np.uint8
+        if out_shape is not None:
+            arr = src.read(bands_to_read, window=window, out_shape=out_shape, out_dtype=read_dtype)
+        else:
+            arr = src.read(bands_to_read, window=window, out_dtype=read_dtype)
+
+        if arr.size == 0:
+            return None, None
+
+        # Expand low-band-count inputs to 3 channels; >=5 keeps all bands as-is
+        if band_count == 1:
+            arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
+        elif band_count == 2:
+            arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
+
+        arr = np.moveaxis(arr, 0, -1)
+
+        # Compute true NDVI from raw reflectance before normalization distorts band ratios
+        ndvi = None
+        if band_count >= 5 and ndvi_bands is not None:
+            red_pos, nir_pos = ndvi_bands
+            red_f = arr[:, :, red_pos].astype(np.float32)
+            nir_f = arr[:, :, nir_pos].astype(np.float32)
+            denom = nir_f + red_f
+            ndvi = np.zeros_like(red_f)
+            valid = denom > 0
+            ndvi[valid] = (nir_f[valid] - red_f[valid]) / denom[valid]
+
+        # Normalize - preserve multi-spectral data ranges
+        if band_count >= 5:
+            # For multi-spectral, normalize each band independently
+            normalized_bands = []
+            for i in range(arr.shape[2]):
+                band = arr[:, :, i].astype(np.float32)
+                if band.max() > band.min():
+                    band_norm = ((band - band.min()) / (band.max() - band.min()) * 255).astype(np.uint8)
+                else:
+                    band_norm = np.zeros_like(band, dtype=np.uint8)
+                normalized_bands.append(band_norm)
+            arr = np.stack(normalized_bands, axis=2)
+        else:
+            # Standard normalization for RGB
+            if arr.max() > arr.min():
+                arr_min, arr_max = arr.min(), arr.max()
+                arr = ((arr.astype(np.float32) - arr_min) /  # noqa: W504
+                    (arr_max - arr_min) * 255).astype(np.uint8)  # noqa: E128
+            else:
+                arr = np.zeros_like(arr, dtype=np.uint8)
+
+        return arr, ndvi
+
+    def _split_rgb_multispectral(self, arr, band_count):
+        """Split a prepared (H, W, C) array into (rgb, multispectral).
+
+        For multi-spectral (>=5 bands) SAM gets the first 3 bands as RGB while the full
+        stack is kept for vegetation/NDVI processing. Otherwise the array is already RGB
+        and there is no multi-spectral companion.
+        """
+        if band_count >= 5:
+            return arr[:, :, :3].copy(), arr.copy()
+        return arr, None
+
     def _prepare_optimized_segmentation_data(self, rlayer):
         # Check if this is a tile layer that needs caching
         tile_type = self._detect_tile_layer_type(rlayer)
@@ -6833,6 +7156,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     self._update_status("No bands found in raster", "error")
                     return None
 
+                # NDVI shadow-filter support: identify red/NIR bands by wavelength so
+                # vegetation masks can be trimmed of shadow/soil. None = can't tell → skip.
+                self._ndvi_map = None
+                ndvi_bands = self._detect_ndvi_band_indices(src, bands_to_read) if band_count >= 5 else None
+
                 # TEXT/SIMILAR MODE (extent-based crop)
                 if hasattr(self, 'request_type') and self.request_type in ['text', 'similar']:
                     scope = getattr(self, 'request_scope', 'aoi')
@@ -6866,17 +7194,19 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             max_size = 2048  # Text mode can handle larger
 
                         scale = 1.0
+                        out_shape = None
                         if window.width > max_size or window.height > max_size:
                             scale = min(max_size / window.width, max_size / window.height)
                             out_width = int(window.width * scale)
                             out_height = int(window.height * scale)
-                            arr = src.read(bands_to_read, window=window,
-                                         out_shape=(len(bands_to_read), out_height, out_width),  # noqa: E128
-                                         out_dtype=np.uint8)  # noqa: E128
-                        else:
-                            arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
+                            out_shape = (len(bands_to_read), out_height, out_width)
 
-                        arr = np.moveaxis(arr, 0, -1)
+                        arr, self._ndvi_map = self._read_prepared_bands(
+                            src, bands_to_read, band_count, window, out_shape=out_shape, ndvi_bands=ndvi_bands)
+                        if arr is None:
+                            self._update_status("Empty crop area", "error")
+                            return None
+
                         input_coords = None
                         input_labels = None
                         input_box = None
@@ -6929,7 +7259,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                             'device': self.device
                         }
 
-                        return arr, mask_transform, debug_info, input_coords, input_labels, input_box
+                        arr_rgb, arr_multispectral = self._split_rgb_multispectral(arr, band_count)
+                        return arr_rgb, mask_transform, debug_info, input_coords, input_labels, input_box, arr_multispectral
 
                     except Exception as e:
                         self._update_status(f"Error processing {self.request_type} mode extent: {e}", "error")
@@ -6984,50 +7315,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         x_min, y_min, x_max - x_min, y_max - y_min)
 
                     try:
-                        # Use float32 for multi-spectral to preserve reflectance values
-                        if band_count >= 5:
-                            arr = src.read(bands_to_read, window=window, out_dtype=np.float32)
-                        else:
-                            arr = src.read(bands_to_read, window=window, out_dtype=np.uint8)
-                        if arr.size == 0:
+                        arr, _ = self._read_prepared_bands(src, bands_to_read, band_count, window)
+                        if arr is None:
                             self._update_status("Empty crop area", "error")
                             return None
                     except Exception as e:
                         self._update_status(f"Error reading raster: {e}", "error")
                         return None
-
-                    # Handle different band configurations
-                    if band_count == 1:
-                        arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
-                    elif band_count == 2:
-                        arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
-                    elif band_count >= 5:
-                        # Multi-spectral: keep all bands as-is
-                        pass
-                    # For 3-4 bands, arr is already correct
-
-                    arr = np.moveaxis(arr, 0, -1)
-
-                    # Normalize - preserve multi-spectral data ranges
-                    if band_count >= 5:
-                        # For multi-spectral, normalize each band independently
-                        normalized_bands = []
-                        for i in range(arr.shape[2]):
-                            band = arr[:, :, i].astype(np.float32)
-                            if band.max() > band.min():
-                                band_norm = ((band - band.min()) / (band.max() - band.min()) * 255).astype(np.uint8)
-                            else:
-                                band_norm = np.zeros_like(band, dtype=np.uint8)
-                            normalized_bands.append(band_norm)
-                        arr = np.stack(normalized_bands, axis=2)
-                    else:
-                        # Standard normalization for RGB
-                        if arr.max() > arr.min():
-                            arr_min, arr_max = arr.min(), arr.max()
-                            arr = ((arr.astype(np.float32) - arr_min) /  # noqa: W504
-                                (arr_max - arr_min) * 255).astype(np.uint8)  # noqa: E128
-                        else:
-                            arr = np.zeros_like(arr, dtype=np.uint8)
 
                     # Build input coordinates — single or multi-point
                     multi_points = self.current_request.get('multi_points') if self.current_request else None
@@ -7140,6 +7434,7 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         return None
 
                     # Check if crop would be too large and downsample if needed
+                    out_shape = None
                     if padded_window.width > max_crop_size or padded_window.height > max_crop_size:
                         # Calculate downsampling factor
                         scale_factor = min(
@@ -7150,75 +7445,18 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         # Read with downsampling
                         out_width = int(padded_window.width * scale_factor)
                         out_height = int(padded_window.height * scale_factor)
+                        out_shape = (len(bands_to_read), out_height, out_width)
+                        print(f"🔽 Downsampled large bbox: {padded_window.width}x{padded_window.height} -> {out_width}x{out_height}")
 
-                        try:
-                            # Use float32 for multi-spectral to preserve reflectance values
-                            if band_count >= 5:
-                                arr = src.read(
-                                    bands_to_read,
-                                    window=padded_window,
-                                    out_shape=(len(bands_to_read), out_height, out_width),
-                                    out_dtype=np.float32
-                                )
-                            else:
-                                arr = src.read(
-                                    bands_to_read,
-                                    window=padded_window,
-                                    out_shape=(len(bands_to_read), out_height, out_width),
-                                    out_dtype=np.uint8
-                                )
-                            print(f"🔽 Downsampled large bbox: {padded_window.width}x{padded_window.height} -> {out_width}x{out_height}")
-                        except Exception as e:
-                            self._update_status(f"Error reading downsampled raster: {e}", "error")
+                    try:
+                        arr, self._ndvi_map = self._read_prepared_bands(
+                            src, bands_to_read, band_count, padded_window, out_shape=out_shape, ndvi_bands=ndvi_bands)
+                        if arr is None:
+                            self._update_status("Empty crop area", "error")
                             return None
-                    else:
-                        # Read at full resolution
-                        try:
-                            # Use float32 for multi-spectral to preserve reflectance values
-                            if band_count >= 5:
-                                arr = src.read(bands_to_read, window=padded_window, out_dtype=np.float32)
-                            else:
-                                arr = src.read(bands_to_read, window=padded_window, out_dtype=np.uint8)
-                        except Exception as e:
-                            self._update_status(f"Error reading raster: {e}", "error")
-                            return None
-
-                    if arr.size == 0:
-                        self._update_status("Empty crop area", "error")
+                    except Exception as e:
+                        self._update_status(f"Error reading raster: {e}", "error")
                         return None
-
-                    # Handle different band configurations
-                    if band_count == 1:
-                        arr = np.stack([arr[0], arr[0], arr[0]], axis=0)
-                    elif band_count == 2:
-                        arr = np.stack([arr[0], arr[0], arr[1]], axis=0)
-                    elif band_count >= 5:
-                        # Multi-spectral: keep all bands as-is
-                        pass
-                    # For 3-4 bands, arr is already correct
-
-                    arr = np.moveaxis(arr, 0, -1)
-
-                    # Normalize - preserve multi-spectral data ranges
-                    if band_count >= 5:
-                        # For multi-spectral, normalize each band independently
-                        normalized_bands = []
-                        for i in range(arr.shape[2]):
-                            band = arr[:, :, i].astype(np.float32)
-                            if band.max() > band.min():
-                                band_norm = ((band - band.min()) / (band.max() - band.min()) * 255).astype(np.uint8)
-                            else:
-                                band_norm = np.zeros_like(band, dtype=np.uint8)
-                            normalized_bands.append(band_norm)
-                        arr = np.stack(normalized_bands, axis=2)
-                    else:
-                        # Standard normalization for RGB
-                        if arr.max() > arr.min():
-                            arr_min, arr_max = arr.min(), arr.max()
-                            arr = ((arr.astype(np.float32) - arr_min) /  # noqa: W504
-                                (arr_max - arr_min) * 255).astype(np.uint8)  # noqa: E128
-                        else:
-                            arr = np.zeros_like(arr, dtype=np.uint8)
 
                     # Calculate bbox coordinates in the cropped image
                     padded_transform = src.window_transform(padded_window)
@@ -7291,15 +7529,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         'device': self.device
                     }
 
-                # Create RGB version for SAM2 and keep multi-spectral for vegetation detection
-                if band_count >= 5:
-                    # Create RGB version for SAM2 (use first 3 bands)
-                    arr_rgb = arr[:, :, :3].copy()
-                    # Keep full multi-spectral for vegetation detection
-                    arr_multispectral = arr.copy()
-                    return arr_rgb, mask_transform, debug_info, input_coords, input_labels, input_box, arr_multispectral
-                else:
-                    return arr, mask_transform, debug_info, input_coords, input_labels, input_box, None
+                # Create RGB version for SAM and keep multi-spectral for vegetation detection
+                arr_rgb, arr_multispectral = self._split_rgb_multispectral(arr, band_count)
+                return arr_rgb, mask_transform, debug_info, input_coords, input_labels, input_box, arr_multispectral
 
         except Exception as e:
             self._update_status(f"Error accessing raster data: {e}", "error")

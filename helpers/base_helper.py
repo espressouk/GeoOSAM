@@ -36,6 +36,24 @@ class BaseDetectionHelper(ABC):
         """Override in subclasses - return True if this class should merge nearby masks"""
         return False
 
+    def is_vegetation_context(self):
+        """Whether NDVI-based processing (e.g. shadow trimming) is meaningful for this class.
+
+        NDVI is a vegetation signal, so explicit non-vegetation classes (buildings, water,
+        roads, vehicles, ...) override this to False to opt out. Vegetation/Agriculture and
+        ambiguous/general classes keep the default True and rely on content-based safeguards.
+        """
+        return True
+
+    def is_vegetation_class(self):
+        """Whether this class is *definitely* vegetation (vs. ambiguous like General/Other).
+
+        Definite-vegetation classes (Vegetation, Agriculture) let the NDVI shadow filter drop
+        non-vegetation masks as false positives unconditionally. Ambiguous classes keep the
+        content-based majority-vote safeguard instead. Default False.
+        """
+        return False
+
     def process_sam_mask(self, mask, predictor=None):
         """Common SAM mask processing logic"""
         if mask is None:

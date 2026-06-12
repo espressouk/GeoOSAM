@@ -70,6 +70,7 @@ plugin_upload.pyc
 
 # Ignore screenshots and large sample files (optional)
 test/data/
+sample_data/
 *.tif
 *.tiff
 

@@ -55,6 +55,9 @@ class AgricultureHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return True  # Agriculture fields can be merged if adjacent
 
+    def is_vegetation_class(self):
+        return True  # crops are vegetation -> NDVI may drop non-veg false positives
+
     def get_background_threshold(self, bbox_area):
         """Agriculture-specific background threshold"""
         return bbox_area * 0.7  # Medium-high threshold (fields can be large)

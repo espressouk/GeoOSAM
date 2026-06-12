@@ -55,6 +55,9 @@ class BuildingsHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return False  # Buildings don't merge - each detection should stay separate
 
+    def is_vegetation_context(self):
+        return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
+
     def get_merge_buffer_size(self):
         """Buildings: NO merging - each detection should stay separate"""
         return 0

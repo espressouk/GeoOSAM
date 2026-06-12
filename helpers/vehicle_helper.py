@@ -62,6 +62,9 @@ class VehicleHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return False  # Vehicles should stay separate - don't merge
 
+    def is_vegetation_context(self):
+        return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
+
     def get_merge_buffer_size(self):
         """Vehicle: minimal merging (1-2px buffer)"""
         return 1

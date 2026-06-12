@@ -72,6 +72,9 @@ class ResidentialHelper(BaseDetectionHelper):
     def should_merge_masks(self):
         return False  # Buildings don't merge - each detection should stay separate
 
+    def is_vegetation_context(self):
+        return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
+
     def get_background_threshold(self, bbox_area):
         """Residential-specific background threshold"""
         return bbox_area * 0.6  # Medium threshold
