@@ -534,7 +534,7 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
-### v1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (TBD)
+### v1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (2026-10-23)
 
 - **✨ NEW**: QGIS 4 (Qt6) support — the same plugin runs on QGIS 3.16+ and QGIS 4.x; existing Pro licenses work unchanged
 - **✨ NEW**: Configurable models folder (Settings → Models) — all weights (SAM2, SAM2.1, SAM3) stored in the plugin instead of QGIS's launch directory; existing downloads (incl. `~/.ultralytics/weights`) are moved in automatically

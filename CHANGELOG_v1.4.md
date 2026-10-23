@@ -1,6 +1,6 @@
 # GeoOSAM v1.4.4 — QGIS 4 Support, Model Storage & High-Resolution Point Mode
 
-**Release Date:** TBD
+**Release Date:** 2026-10-23
 **Type:** Improvements / Bug Fixes
 
 ---
