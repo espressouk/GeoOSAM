@@ -99,8 +99,8 @@ class LicenseManager:
                 if 'already activated' in error_msg.lower():
                     return False
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"License server check failed, using cached license: {e}")
 
         if LicenseManager._validate_from_cache(email, license_key):
             return True
@@ -183,8 +183,8 @@ class LicenseManager:
             settings.setValue(LicenseManager._KEY_LICENSE_KEY, license_key)
             settings.setValue(LicenseManager._KEY_LICENSE_CACHE_DATE, date_str)
             settings.setValue(LicenseManager._KEY_LICENSE_CACHE_SIG, sig)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Could not cache license locally: {e}")
 
     @staticmethod
     def _validate_from_cache(email, license_key):

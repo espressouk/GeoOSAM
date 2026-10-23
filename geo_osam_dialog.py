@@ -1,5 +1,6 @@
 import sys
 import os
+from contextlib import suppress
 
 # Fix for QGIS on Windows setting sys.stderr/stdout to None during plugin loading,
 # which causes numpy import to crash with: AttributeError: 'NoneType' has no attribute 'write'
@@ -526,12 +527,10 @@ class SAM3PredictorWrapper:
 
     def _reset_predictor_if_semantic(self):
         """Avoid using semantic predictor with an interactive SAM3 model."""
-        try:
+        with suppress(Exception):
             predictor = getattr(self.model, "predictor", None)
             if predictor and predictor.__class__.__name__ == "SAM3SemanticPredictor":
                 self.model.predictor = None
-        except Exception:
-            pass
 
     def _predict_exemplar_semantic(self, bbox):
         """Run SAM3 semantic predictor with exemplar bbox prompt."""
@@ -599,16 +598,12 @@ def detect_ndvi_bands(src, bands=None):
 
     def _wavelength_nm(band_idx):
         sources = []
-        try:
+        with suppress(Exception):
             desc = src.descriptions[band_idx - 1]
             if desc:
                 sources.append(desc)
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             sources.extend(str(v) for v in src.tags(band_idx).values())
-        except Exception:
-            pass
         for text in sources:
             m = re.search(r'(\d+(?:\.\d+)?)\s*(?:nm|nanomet)', text, re.IGNORECASE)
             if m:
@@ -1771,8 +1766,8 @@ class OptimizedSAM2Worker(QThread):
             if hasattr(helper, 'is_vegetation_context') and not helper.is_vegetation_context():
                 return masks
             force_drop = hasattr(helper, 'is_vegetation_class') and helper.is_vegetation_class()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ NDVI class gate check failed, trimming anyway: {e}")
 
         out, stats = ndvi_shadow_trim(masks, ndvi, self.min_object_size, force_drop=force_drop)
         if self.save_debug_masks:
@@ -1799,8 +1794,8 @@ class OptimizedSAM2Worker(QThread):
             helper = create_detection_helper(class_name, self.min_object_size, self.max_objects)
             if hasattr(helper, 'is_vegetation_context') and not helper.is_vegetation_context():
                 return mask
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ NDVI class gate check failed, trimming anyway: {e}")
 
         binary = mask > 127
         mask_area = int(binary.sum())
@@ -2785,8 +2780,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                 if self.device == "cpu":
                     try:
                         sam_model = torch.jit.optimize_for_inference(sam_model)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Note: TorchScript CPU optimization skipped: {e}")
 
                 self.predictor = SAM2ImagePredictor(sam_model)
                 print(f"✅ {model_config['name']} loaded on {self.device}")
@@ -3007,10 +3002,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             progress.close()
 
             if canceled or weights_path.stat().st_size < 1_000_000:
-                try:
+                with suppress(Exception):
                     weights_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
                 return False
 
             if weights_path.exists() and weights_path.stat().st_size > 1000000:
@@ -4820,8 +4813,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             if available_colors:
                 color = available_colors[0]
             else:
-                import random
-                color = f"{random.randint(100, 255)},{random.randint(100, 255)},{random.randint(100, 255)}"
+                # Stable per-name color once the palette is used up (not security-sensitive)
+                import zlib
+                h = zlib.crc32(class_name.encode("utf-8"))
+                color = f"{100 + h % 156},{100 + (h >> 8) % 156},{100 + (h >> 16) % 156}"
 
             description = f'Custom class: {class_name}'
 
@@ -5394,10 +5389,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
             # No need to restore visibility since we didn't change it
 
             # Clean up PNG
-            try:
+            with suppress(Exception):
                 os.unlink(temp_img_path)
-            except Exception:
-                pass
 
             print(f"✅ Successfully cached tiles to: {temp_tif_path}")
             return temp_tif_path
@@ -7434,13 +7427,11 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         all_px = [center_pixel_x]
                         all_py = [center_pixel_y]
                         for map_pt, _ in multi_points:
-                            try:
+                            with suppress(Exception):
                                 mpx, mpy = _to_raster_crs(map_pt.x(), map_pt.y())
                                 r, c = src.index(mpx, mpy)
                                 all_px.append(c)
                                 all_py.append(r)
-                            except Exception:
-                                pass
                         # Crop must contain all points with padding
                         px_min, px_max = min(all_px), max(all_px)
                         py_min, py_max = min(all_py), max(all_py)
@@ -7501,15 +7492,13 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                         coords_list = []
                         labels_list = []
                         for map_pt, label in multi_points:
-                            try:
+                            with suppress(Exception):  # Skip points outside raster bounds
                                 mpx, mpy = _to_raster_crs(map_pt.x(), map_pt.y())
                                 r, c = src.index(mpx, mpy)
                                 rel_x = max(0, min(arr.shape[1] - 1, int((c - x_min) * pt_scale)))
                                 rel_y = max(0, min(arr.shape[0] - 1, int((r - y_min) * pt_scale)))
                                 coords_list.append([rel_x, rel_y])
                                 labels_list.append(label)
-                            except Exception:
-                                pass  # Skip points outside raster bounds
                         if not coords_list:
                             self._update_status("No valid points in raster bounds", "error")
                             return None
@@ -7781,8 +7770,8 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     helper = create_detection_helper(
                         self.current_class, self.min_object_size, self.max_objects)
                     target_ground_m = helper.expected_footprint_m()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️ Class footprint lookup failed, using 40 m default: {e}")
             footprint_px = int(target_ground_m / gsd_m)
             crop_size = max(crop_size, footprint_px)
 
@@ -7860,12 +7849,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
         # Find the highest existing segment_id
         max_id = 0
         for feature in layer.getFeatures():
-            try:
+            with suppress(Exception):
                 segment_id = feature.attribute("segment_id")
                 if segment_id is not None and isinstance(segment_id, int):
                     max_id = max(max_id, segment_id)
-            except Exception:
-                pass
 
         return max_id + 1
 
@@ -7877,12 +7864,10 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
 
             max_id = 0
             for feature in layer.getFeatures():
-                try:
+                with suppress(Exception):
                     segment_id = feature.attribute("segment_id")
                     if segment_id is not None and isinstance(segment_id, int):
                         max_id = max(max_id, segment_id)
-                except Exception:
-                    pass
 
             self.segment_counts[class_name] = max_id
         except RuntimeError:
@@ -8545,11 +8530,9 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
     def closeEvent(self, event):
         """Handle close event to clean up tools"""
         try:
-            try:
+            with suppress(Exception):
                 QgsProject.instance().layersAdded.disconnect(self._on_layers_added)
                 QgsProject.instance().layersRemoved.disconnect(self._on_layers_removed)
-            except Exception:
-                pass
 
             # Reset to original map tool if we changed it
             if self.original_map_tool:

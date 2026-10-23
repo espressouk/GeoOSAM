@@ -39,7 +39,8 @@ def apply_sam3_clip_fix():
             # Workaround for https://github.com/ultralytics/ultralytics/issues/22647:
             # SimpleTokenizer is not callable, so use clip.tokenize() directly.
             if isinstance(text[0], str):
-                assert input_boxes is None or len(input_boxes) == 0, "not supported"
+                if input_boxes is not None and len(input_boxes) != 0:
+                    raise ValueError("input_boxes are not supported with text prompts")
                 tokenized = clip.tokenize(
                     text,
                     context_length=self.context_length,
@@ -48,7 +49,8 @@ def apply_sam3_clip_fix():
                 text_attention_mask = (tokenized != 0).bool()
                 inputs_embeds = self.encoder.token_embedding(tokenized)
                 _, text_memory = self.encoder(tokenized)
-                assert text_memory.shape[1] == inputs_embeds.shape[1]
+                if text_memory.shape[1] != inputs_embeds.shape[1]:
+                    raise RuntimeError("SAM3 text encoder returned mismatched sequence lengths")
                 text_attention_mask = text_attention_mask.ne(1)
                 text_memory = text_memory.transpose(0, 1)
                 text_memory_resized = self.resizer(text_memory)

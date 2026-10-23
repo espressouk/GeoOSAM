@@ -1,0 +1,4 @@
+[bandit]
+# sam2/ is Meta's vendored SAM 2 library (asserts are part of its upstream code);
+# test/ holds unit tests, which use assert by design. Neither is GeoOSAM runtime code.
+exclude = ./sam2,./test,*/sam2/*,*/test/*
