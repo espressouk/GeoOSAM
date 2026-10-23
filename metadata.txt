@@ -208,4 +208,4 @@ changelog=1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (20
     - Cross-platform compatibility with Windows, macOS, and Linux
 
 # Update and support information
-update_date=2026-06-04
+update_date=2026-10-23

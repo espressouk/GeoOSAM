@@ -75,7 +75,7 @@ body:
     id: qgis-version
     attributes:
       label: QGIS Version
-      placeholder: "e.g., 3.28.12"
+      placeholder: "e.g., 3.40.5 or 4.2.3"
 
   - type: input
     id: plugin-version
