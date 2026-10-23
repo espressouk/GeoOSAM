@@ -53,12 +53,12 @@ try:
     POINT_GEOMETRY = Qgis.GeometryType.Point  # QGIS >= 3.30
     POLYGON_GEOMETRY = Qgis.GeometryType.Polygon
 except AttributeError:
-    POINT_GEOMETRY = QgsWkbTypes.PointGeometry
-    POLYGON_GEOMETRY = QgsWkbTypes.PolygonGeometry
+    POINT_GEOMETRY = QgsWkbTypes.GeometryType.PointGeometry
+    POLYGON_GEOMETRY = QgsWkbTypes.GeometryType.PolygonGeometry
 try:
     VECTOR_LAYER_FILTER = Qgis.LayerFilter.VectorLayer  # QGIS >= 3.34
 except AttributeError:
-    VECTOR_LAYER_FILTER = QgsMapLayerProxyModel.VectorLayer
+    VECTOR_LAYER_FILTER = QgsMapLayerProxyModel.Filter.VectorLayer
 # Scoped on Qt6 (QGIS 4); unscoped always works on QGIS 3 / PyQt5
 VECTOR_WRITER_NO_ERROR = getattr(QgsVectorFileWriter, "WriterError", QgsVectorFileWriter).NoError
 if Qgis.QGIS_VERSION_INT >= 33800:  # QgsField takes QMetaType from 3.38 (required on Qt6)
@@ -2379,7 +2379,7 @@ class EnhancedPointClickTool(QgsMapTool):
 
         self.point_rubber = QgsRubberBand(canvas, POINT_GEOMETRY)
         self.point_rubber.setColor(QtCore.Qt.GlobalColor.red)
-        self.point_rubber.setIcon(QgsRubberBand.ICON_CIRCLE)
+        self.point_rubber.setIcon(QgsRubberBand.IconType.ICON_CIRCLE)
         self.point_rubber.setIconSize(12)
         self.point_rubber.setWidth(4)
 
@@ -2421,10 +2421,10 @@ class EnhancedPointClickTool(QgsMapTool):
         """Add a +/- marker on the map"""
         marker = QgsVertexMarker(self.canvas)
         if positive:
-            marker.setIconType(QgsVertexMarker.ICON_CROSS)
+            marker.setIconType(QgsVertexMarker.IconType.ICON_CROSS)
             marker.setColor(QtGui.QColor(0, 200, 0))  # Green for positive
         else:
-            marker.setIconType(QgsVertexMarker.ICON_X)
+            marker.setIconType(QgsVertexMarker.IconType.ICON_X)
             marker.setColor(QtGui.QColor(255, 0, 0))  # Red for negative
         marker.setIconSize(14)
         marker.setPenWidth(3)
