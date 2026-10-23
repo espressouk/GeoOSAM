@@ -2,7 +2,6 @@
 name=GeoOSAM
 qgisMinimumVersion=3.16
 qgisMaximumVersion=4.99
-supportsQt6=True
 description=AI-powered segmentation for QGIS - SAM2.1 & SAM3 with text prompts, similar object detection, vector ROI, and professional GIS workflow features
 about=GeoOSAM brings Meta's SAM 2.1 and SAM3 to QGIS with a streamlined 4-tab UI (Segment, Detect, Results, Filters). Point-click or draw a bounding box on any raster to instantly segment objects. SAM3 users unlock the Detect tab: run text-prompt auto-segmentation ("find all vehicles"), click a reference object to find similar ones across the scene, or use any existing polygon as an exemplar via Similar from Selection. Pro users can run these modes over entire rasters with automatic tiling and restrict processing to a vector polygon ROI. Includes 12 pre-defined classes with color coding, custom class creation, real-world size and shape filters (GSD-based), multi-point segmentation (Shift/Ctrl+click), multi-format export (GeoPackage, Shapefile, GeoJSON), undo support, persistent output folder, and a configurable models folder. Optimized for NVIDIA GPU, Apple Silicon, and multi-core CPU with automatic hardware detection and model selection.
 
