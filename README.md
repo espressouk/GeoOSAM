@@ -3,11 +3,13 @@
 🛰️ **State-of-the-art image segmentation using Meta's SAM 2.1, SAM3, and Ultralytics models with intelligent hardware optimization**
 
 [![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green)](https://plugins.qgis.org)
+[![QGIS](https://img.shields.io/badge/QGIS-3.16%2B%20%7C%204.x-brightgreen)](https://qgis.org)
 [![Python](https://img.shields.io/badge/Python-3.7+-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 
 ## 🌟 Features
 
+- **🆕 QGIS 4 Ready**: Runs on QGIS 4.x (Qt6) and QGIS 3.16+ from the same plugin (v1.4.4)
 - **🤖 SAM3 Integration**: Text prompts, similar object detection, auto-segment
 - **🔍 Similar from Selection**: Use any segmented polygon as exemplar to find matching objects (v1.4)
 - **🗺️ Vector Extent ROI**: Restrict entire-raster processing to a polygon area of interest (v1.4, Pro)
@@ -532,11 +534,13 @@ If you use GeoOSAM in your research, please cite:
 
 ## 🔄 Changelog
 
-### v1.4.4 - Model Storage & High-Resolution Point Mode (TBD)
+### v1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (TBD)
 
+- **✨ NEW**: QGIS 4 (Qt6) support — the same plugin runs on QGIS 3.16+ and QGIS 4.x; existing Pro licenses work unchanged
 - **✨ NEW**: Configurable models folder (Settings → Models) — all weights (SAM2, SAM2.1, SAM3) stored in the plugin instead of QGIS's launch directory; existing downloads (incl. `~/.ultralytics/weights`) are moved in automatically
 - **✨ IMPROVED**: Point mode adapts the crop to imagery resolution and class — fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
 - **🔧 FIXED**: Ultralytics models (e.g. `sam2.1_b.pt`) downloaded to the working directory instead of a plugin folder
+- **🔧 FIXED**: Result outlines drawn as thick blobs on high-DPI screens — now a fixed 2 px
 
 ### v1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
 
