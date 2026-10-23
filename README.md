@@ -25,10 +25,11 @@
 - **🌐 Online Map Support**: Works with ESRI, Google Satellite, and XYZ/WMS/WMTS tile services
 - **↶ Undo Support**: Mistake correction with polygon-level undo on both Segment and Detect tabs
 - **📁 Custom Output**: User-selectable output folders
+- **🗂️ Configurable Models Folder**: Choose where model weights are stored (Settings → Models)
 - **🎨 Class Management**: Custom classes with color coding
 - **📡 Smart Workflow**: Auto-raster selection, progress tracking
 - **💾 Professional Export**: Multi-format export (GeoPackage, Shapefile, GeoJSON, FlatGeobuf)
-- **🔧 Adaptive Processing**: Optimized based on zoom level and hardware
+- **🔧 Adaptive Processing**: Crop adapts to imagery resolution, class, zoom level, and hardware
 
 ## 📊 Performance & Model Selection
 
@@ -224,7 +225,7 @@ For current limitations and upcoming fixes, see:
 
 ### Minimum
 
-- QGIS 3.16+
+- QGIS 3.16+ or QGIS 4.x (Qt6)
 - Python 3.7+
 - 8GB RAM
 - 2GB disk space
@@ -280,6 +281,8 @@ Requires: `pytest`, `numpy`, `opencv-python`, `rasterio`, `shapely`
    # Windows
    xcopy . "C:\Users\%USERNAME%\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\geo_osam" /E /I
    ```
+
+   On QGIS 4, use the `QGIS4` profile folder instead of `QGIS3` in these paths.
 
 4. **Install dependencies** (see below)
 
@@ -370,11 +373,13 @@ if torch.cuda.is_available():
 
 **📥 Download Details:**
 
-| Model Type             | How It Downloads                         | Where Stored                       |
-| ---------------------- | ---------------------------------------- | ---------------------------------- |
-| **SAM2.1 (GPU)**       | Direct download with progress dialog     | Plugin checkpoints folder          |
-| **SAM2.1 T/B/L (CPU)** | Ultralytics auto-download (notification) | `~/.ultralytics/weights/`          |
-| **SAM3**               | Hugging Face with token prompt           | Plugin folder or Ultralytics cache |
+All models are stored in a single **models folder**, by default `<plugin>/models/weights/`, so downloads never land in the directory QGIS was launched from. You can change the location in **Settings → Models → Choose**; existing weights (including any in `~/.ultralytics/weights/`) are moved into the selected folder on first use, so they are never re-downloaded.
+
+| Model Type             | How It Downloads                         | Where Stored               |
+| ---------------------- | ---------------------------------------- | -------------------------- |
+| **SAM2.1 (GPU)**       | Direct download with progress dialog     | Models folder              |
+| **SAM2.1 T/B/L (CPU)** | Ultralytics auto-download (notification) | Models folder              |
+| **SAM3**               | Hugging Face with token prompt           | Models folder              |
 
 **⚡ Performance Highlights:**
 
@@ -391,8 +396,9 @@ if torch.cuda.is_available():
 # SAM2.1 T/B/L (CPU) are auto-downloaded by Ultralytics
 # SAM3 requires Hugging Face token (prompted in UI)
 
-# Manual fallback for SAM2.1 (rare):
-cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
+# Manual fallback for SAM2.1 (rare) — place the file in the models folder
+# (default: <plugin>/models/weights/, or whatever you set in Settings → Models):
+cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/models/weights/
 wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
 # Replace 'tiny' with 'small', 'base_plus', or 'large' as needed
 ```
@@ -525,6 +531,12 @@ If you use GeoOSAM in your research, please cite:
 ```
 
 ## 🔄 Changelog
+
+### v1.4.4 - Model Storage & High-Resolution Point Mode (TBD)
+
+- **✨ NEW**: Configurable models folder (Settings → Models) — all weights (SAM2, SAM2.1, SAM3) stored in the plugin instead of QGIS's launch directory; existing downloads (incl. `~/.ultralytics/weights`) are moved in automatically
+- **✨ IMPROVED**: Point mode adapts the crop to imagery resolution and class — fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
+- **🔧 FIXED**: Ultralytics models (e.g. `sam2.1_b.pt`) downloaded to the working directory instead of a plugin folder
 
 ### v1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
 
@@ -690,7 +702,7 @@ export GEOOSAM_FORCE_CPU=1
 Please check:
 
 - Plugin version (latest preferred)
-- QGIS version (3.16+ required)
+- QGIS version (3.16+ or 4.x required)
 - Dependencies installed:
 
   - `torch`
@@ -717,6 +729,6 @@ To be determined based on user feedback and usage patterns.
 
 ---
 
-**Last updated:** 2026-06-12
-**Plugin Version:** 1.4.3
-**QGIS Compatibility:** 3.16+
+**Last updated:** 2026-10-23
+**Plugin Version:** 1.4.4
+**QGIS Compatibility:** 3.16+ and 4.x

@@ -54,6 +54,18 @@ class BaseDetectionHelper(ABC):
         """
         return False
 
+    def expected_footprint_m(self):
+        """Ground footprint (metres) the point-mode crop should span for this class.
+
+        Sets how much ground a single click should see around it. The clicked
+        object then occupies roughly object_size / footprint of the frame, so
+        small classes (vehicles) use a tight footprint to keep enough pixels and
+        large/linear classes (buildings, roads) use a wide one so they aren't
+        cropped to fill the frame. Only applied on high-resolution imagery where
+        a fixed pixel crop would otherwise be too small. Default 40 m.
+        """
+        return 40.0
+
     def process_sam_mask(self, mask, predictor=None):
         """Common SAM mask processing logic"""
         if mask is None:

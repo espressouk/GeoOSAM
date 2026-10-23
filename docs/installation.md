@@ -4,7 +4,7 @@
 
 ### Step 1: Install from QGIS Plugin Repository
 
-1. **Open QGIS** (version 3.16 or later)
+1. **Open QGIS** (version 3.16 or later, including QGIS 4)
 2. **Menu:** Plugins → Manage and Install Plugins
 3. **Search:** Type "GeoOSAM"
 4. **Install:** Click "Install Plugin"
@@ -129,7 +129,7 @@ If you select SAM3 and the weights are missing, GeoOSAM will prompt you to downl
 3. Create a Hugging Face **Access Token** with **Token type: Read**
 4. Paste the token (used once, not stored)
 
-Weights are saved to `~/.ultralytics/weights/sam3.pt`.
+Weights are saved to the models folder (default `<plugin>/models/weights/sam3.pt`). You can change this location in **Settings → Models → Choose**.
 
 ---
 
@@ -140,7 +140,7 @@ Weights are saved to `~/.ultralytics/weights/sam3.pt`.
 #### Minimum Requirements
 
 - **Operating System:** Windows 10, macOS 10.14, Ubuntu 18.04
-- **QGIS Version:** 3.16 or later
+- **QGIS Version:** 3.16 or later, or QGIS 4.x (Qt6)
 - **Python:** 3.7 or later
 - **RAM:** 8GB minimum
 - **Storage:** 2GB free space
@@ -253,6 +253,8 @@ cp -r . ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam
 ```
 
 **Note:** The `.` copies the current directory contents (all the plugin files) into a new folder named `geo_osam` in the QGIS plugins directory.
+
+**QGIS 4:** QGIS 4 keeps its own profile, so replace `QGIS3` with `QGIS4` in the paths above (e.g. `~/.local/share/QGIS/QGIS4/profiles/default/python/plugins/geo_osam`). Plugins and settings are not shared between QGIS 3 and QGIS 4.
 
 #### Install Dependencies
 

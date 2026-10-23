@@ -1,3 +1,30 @@
+# GeoOSAM v1.4.4 — QGIS 4 Support, Model Storage & High-Resolution Point Mode
+
+**Release Date:** TBD
+**Type:** Improvements / Bug Fixes
+
+---
+
+## What's New
+
+### QGIS 4 Support
+GeoOSAM now runs on **QGIS 4 (Qt6)** as well as QGIS 3.16+, from the same plugin, so it now shows up in the QGIS 4 Plugin Manager. Existing Pro licenses work unchanged.
+
+### Configurable Models Folder
+All model weights (SAM2, SAM2.1, SAM3) are now stored in a single **models folder** — by default `<plugin>/models/weights/` — instead of the directory QGIS happened to be launched from. A new **Settings → Models → Choose** picker lets you point this anywhere. Weights you've already downloaded (including any in `~/.ultralytics/weights/`) are moved into the selected folder automatically on first use, so nothing is re-downloaded.
+
+## Improvements
+
+### Resolution-Aware Point Mode
+Point-mode segmentation now adapts the analysis crop to the imagery's ground resolution and the selected class. On very high-resolution imagery (e.g. ~2 cm/px), this fixes roads being captured as full-tile blobs and large buildings being clipped. Each class targets a sensible ground footprint (small for vehicles, wide for roads/buildings/fields), so objects are framed with the right amount of context.
+
+## Fixes
+
+- **Models downloaded to the working directory:** Ultralytics models (e.g. `sam2.1_b.pt`) were downloaded to QGIS's launch directory instead of a plugin folder. They now always go to the models folder.
+- **Thick result outlines on high-DPI screens:** polygon outlines were sized in millimetres. On screens where QGIS reports a high DPI (seen on QGIS 4), small polygons were drawn as same-size blobs. Outlines are now a fixed 2 px.
+
+---
+
 # GeoOSAM v1.4.3 — Vegetation & Bbox Improvements
 
 **Release Date:** 2026-06-12

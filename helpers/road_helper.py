@@ -69,6 +69,9 @@ class RoadHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 70.0  # Roads are linear — wide frame keeps them a thin feature
+
     def get_background_threshold(self, bbox_area):
         """Road-specific background threshold"""
         return bbox_area * 0.5  # Medium threshold

@@ -58,6 +58,9 @@ class AgricultureHelper(BaseDetectionHelper):
     def is_vegetation_class(self):
         return True  # crops are vegetation -> NDVI may drop non-veg false positives
 
+    def expected_footprint_m(self):
+        return 120.0  # Fields are large — wide frame for context
+
     def get_background_threshold(self, bbox_area):
         """Agriculture-specific background threshold"""
         return bbox_area * 0.7  # Medium-high threshold (fields can be large)

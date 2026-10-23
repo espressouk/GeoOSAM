@@ -58,6 +58,9 @@ class BuildingsHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 70.0  # Buildings can be large — wide frame so they aren't clipped
+
     def get_merge_buffer_size(self):
         """Buildings: NO merging - each detection should stay separate"""
         return 0

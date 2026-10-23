@@ -75,6 +75,9 @@ class ResidentialHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 60.0  # Houses — wide-ish frame so they aren't clipped
+
     def get_background_threshold(self, bbox_area):
         """Residential-specific background threshold"""
         return bbox_area * 0.6  # Medium threshold

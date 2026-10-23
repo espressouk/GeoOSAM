@@ -58,6 +58,9 @@ class WaterHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 100.0  # Water bodies are large — wide frame for context
+
     def get_background_threshold(self, bbox_area):
         """Water-specific background threshold"""
         return bbox_area * 0.4  # Lower threshold for water (larger areas expected)

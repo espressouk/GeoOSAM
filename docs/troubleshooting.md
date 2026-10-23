@@ -40,8 +40,8 @@ except ImportError:
 except Exception as e:
     print(f"⚠️ SAM2.1_B error: {e}")
 
-# Check SAM 2.1 model:
-sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/sam2.1_hiera_tiny.pt")
+# Check SAM 2.1 model (default models folder; change via Settings → Models):
+sam_path = os.path.expanduser("~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/models/weights/sam2.1_hiera_tiny.pt")
 print(f"SAM 2.1 model exists: {os.path.exists(sam_path)}")
 if os.path.exists(sam_path):
     print(f"SAM 2.1 size: {os.path.getsize(sam_path)/1024/1024:.1f}MB")
@@ -91,10 +91,34 @@ print(f"CPU cores: {os.cpu_count()}")
 pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
-- Confirm SAM3 weights exist at `~/.ultralytics/weights/sam3.pt`.
+- Confirm SAM3 weights exist in the models folder (default `<plugin>/models/weights/sam3.pt`; legacy `~/.ultralytics/weights/sam3.pt` is also detected and moved in on first use).
 - If text/similar still fails, use auto‑segmentation or point/bbox mode.
 
 ---
+
+## 🆕 QGIS 4 Issues
+
+### Plugin paths in this guide
+
+The paths in this guide use the QGIS 3 profile folder. On QGIS 4, replace `QGIS3` with `QGIS4` (e.g. `~/.local/share/QGIS/QGIS4/profiles/default/python/plugins/geo_osam`).
+
+### QGIS crashes on the first segmentation (Linux, conda-forge QGIS 4)
+
+**Symptoms:** the plugin loads, but QGIS closes as soon as you click. The terminal shows `QGIS died on signal 11`, sometimes preceded by many `OpenBLAS Warning : Detect OpenMP Loop` lines.
+
+**Cause:** some Linux QGIS 4 builds (e.g. conda-forge) load OpenBLAS at startup. Its BLAS functions then shadow the ones PyTorch expects (MKL), and PyTorch crashes inside matrix multiplication. GeoOSAM code is not involved, and plain Python with the same packages works fine.
+
+**Fix:**
+
+```bash
+# 1. Install PyTorch and OpenCV from conda-forge (not pip), with MKL as the BLAS
+conda install -c conda-forge "pytorch=*=cpu*" torchvision "libblas=*=*mkl" "libopencv=*=headless*" py-opencv
+
+# 2. Launch QGIS with MKL preloaded
+LD_PRELOAD=$CONDA_PREFIX/lib/libmkl_rt.so.3 qgis
+```
+
+Avoid the pip `opencv-python` wheels in a conda QGIS environment: they bundle their own OpenBLAS and Qt.
 
 ## 🛰️ Multi-spectral Image Issues
 
@@ -371,10 +395,10 @@ pip install ultralytics
 **Solution:**
 
 ```bash
-# For SAM 2.1 (GPU users):
-cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/sam2/checkpoints/
+# For SAM 2.1 (GPU users) — default models folder (or your Settings → Models path):
+cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/models/weights/
 rm -f sam2.1_hiera_tiny.pt
-wget https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2.1_hiera_tiny.pt
+wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
 
 # For SAM2.1_B (CPU users):
 pip uninstall ultralytics

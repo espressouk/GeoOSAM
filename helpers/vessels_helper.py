@@ -61,6 +61,9 @@ class VesselsHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 50.0  # Boats vary widely — moderate-to-wide frame
+
     def get_background_threshold(self, bbox_area):
         """Vessel-specific background threshold"""
         return bbox_area * 0.7  # High threshold for boats on water

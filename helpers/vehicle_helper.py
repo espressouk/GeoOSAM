@@ -65,6 +65,9 @@ class VehicleHelper(BaseDetectionHelper):
     def is_vegetation_context(self):
         return False  # NDVI is a vegetation signal — opt out of NDVI shadow trimming
 
+    def expected_footprint_m(self):
+        return 15.0  # Vehicles are small — tight frame keeps enough pixels
+
     def get_merge_buffer_size(self):
         """Vehicle: minimal merging (1-2px buffer)"""
         return 1
