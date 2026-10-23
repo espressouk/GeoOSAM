@@ -1,4 +1,4 @@
-# GeoOSAM v1.4.4 — QGIS 4 Support, Model Storage & High-Resolution Point Mode
+# GeoOSAM v1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode
 
 **Release Date:** 2026-10-23
 **Type:** Improvements / Bug Fixes
@@ -11,7 +11,7 @@
 GeoOSAM now runs on **QGIS 4 (Qt6)** as well as QGIS 3.16+, from the same plugin, so it now shows up in the QGIS 4 Plugin Manager. Existing Pro licenses work unchanged.
 
 ### Configurable Models Folder
-All model weights (SAM2, SAM2.1, SAM3) are now stored in a single **models folder** — by default `<plugin>/models/weights/` — instead of the directory QGIS happened to be launched from. A new **Settings → Models → Choose** picker lets you point this anywhere. Weights you've already downloaded (including any in `~/.ultralytics/weights/`) are moved into the selected folder automatically on first use, so nothing is re-downloaded.
+All model weights (SAM2, SAM2.1, SAM3) are now stored in a single **models folder** - by default `<plugin>/models/weights/` - instead of the directory QGIS happened to be launched from. A new **Settings → Models → Choose** picker lets you point this anywhere. Weights you've already downloaded (including any in `~/.ultralytics/weights/`) are moved into the selected folder automatically on first use, so nothing is re-downloaded.
 
 ## Improvements
 
@@ -25,7 +25,7 @@ Point-mode segmentation now adapts the analysis crop to the imagery's ground res
 
 ---
 
-# GeoOSAM v1.4.3 — Vegetation & Bbox Improvements
+# GeoOSAM v1.4.3 - Vegetation & Bbox Improvements
 
 **Release Date:** 2026-06-12
 **Type:** Improvements / Bug Fixes
@@ -35,7 +35,7 @@ Point-mode segmentation now adapts the analysis crop to the imagery's ground res
 ## Improvements
 
 ### Better Vegetation Masks on Multispectral Imagery
-Vegetation segmentation on multispectral rasters (5+ bands) now produces cleaner masks, with noticeably less shadow and soil bleed around tree crowns and crop boundaries. Applies automatically — no setting to enable, no effect on RGB imagery or non-vegetation classes.
+Vegetation segmentation on multispectral rasters (5+ bands) now produces cleaner masks, with noticeably less shadow and soil bleed around tree crowns and crop boundaries. Applies automatically - no setting to enable, no effect on RGB imagery or non-vegetation classes.
 
 ## Fixes
 
@@ -44,7 +44,7 @@ Vegetation segmentation on multispectral rasters (5+ bands) now produces cleaner
 
 ---
 
-# GeoOSAM v1.4.2 — Pro Features & Fixes
+# GeoOSAM v1.4.2 - Pro Features & Fixes
 
 **Release Date:** 2026-06-04
 **Type:** New Features / Bug Fixes / Security
@@ -57,13 +57,13 @@ Vegetation segmentation on multispectral rasters (5+ bands) now produces cleaner
 New **Fill Holes** toggle in the Filters tab Pro block. Removes interior voids from segmented polygons automatically. A configurable **Max Hole Size (px²)** threshold preserves real large voids (courtyards, irrigation pivots) while filling small SAM mask artifacts. Default: 500 px².
 
 ### SAM3 Text Prompts Fixed
-Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM3SemanticPredictor`). Previously the text parameter was silently ignored — auto-segmentation ran regardless of what was typed.
+Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM3SemanticPredictor`). Previously the text parameter was silently ignored - auto-segmentation ran regardless of what was typed.
 
 ## Fixes
 
 - Removed debug print statements from production code (`geo_osam_dialog.py`, `sam3_clip_fix.py`, `geo_osam_license.py`)
 - Pro licence offline cache: improved security and reliability
-- Automated test suite added (41 tests covering helpers and mask pipeline — `python3 -m pytest tests/`)
+- Automated test suite added (41 tests covering helpers and mask pipeline - `python3 -m pytest tests/`)
 
 ## Upgrade Note
 
@@ -71,7 +71,7 @@ Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM
 
 ---
 
-# GeoOSAM v1.4.0 — UI Redesign & Workflow Improvements
+# GeoOSAM v1.4.0 - UI Redesign & Workflow Improvements
 
 **Release Date:** 2026-05-09
 **Type:** UI Redesign / New Features / Bug Fixes
@@ -82,12 +82,12 @@ Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM
 
 ### Redesigned Panel Layout
 
-- **4-tab flat layout** — Segment, Detect, Results, Filters
-- **Settings as a gear overlay** — opens in place of the tabs, no tab clutter
-- **Persistent log panel** — scrollable message log always visible below the tabs, hidden when Settings is open
-- **Synced class selector** — class combo in Segment and Detect tabs stay in sync
+- **4-tab flat layout** - Segment, Detect, Results, Filters
+- **Settings as a gear overlay** - opens in place of the tabs, no tab clutter
+- **Persistent log panel** - scrollable message log always visible below the tabs, hidden when Settings is open
+- **Synced class selector** - class combo in Segment and Detect tabs stay in sync
 - **Minimum panel width** increased to 360px to fit all tabs comfortably
-- **Settings order** — License → Model → Classes → Output
+- **Settings order** - License → Model → Classes → Output
 - **Tooltips removed** for a cleaner look
 
 ### Similar from Selection
@@ -95,7 +95,7 @@ Text prompts in the Detect tab now use SAM3's native concept-prompting API (`SAM
 Use any existing segmented polygon as the exemplar for a similarity search:
 
 1. Select a segmented feature with the QGIS selection tool
-2. Click **Similar from Selection** in the Detect tab — button enables automatically when a feature is selected
+2. Click **Similar from Selection** in the Detect tab - button enables automatically when a feature is selected
 3. GeoOSAM finds matching objects across the visible extent or entire raster
 
 ### Vector Extent ROI for Entire Raster (Pro)
@@ -110,7 +110,7 @@ Pro users running **Entire Raster** mode can now restrict processing to a vector
 
 - **Cancel button** now appears on the Detect tab during tiled processing
 - **Undo button** available on the Detect tab
-- **Find Similar** is independently toggleable — click again to exit, restoring text input and Auto-Segment
+- **Find Similar** is independently toggleable - click again to exit, restoring text input and Auto-Segment
 
 ---
 

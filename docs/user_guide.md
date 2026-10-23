@@ -61,10 +61,10 @@ GeoOSAM automatically detects your hardware and optimizes accordingly:
 #### 📄 **Export Format**
 
 - Choose your preferred vector format from the **Export format** dropdown
-- **GeoPackage (.gpkg)** — default, recommended for modern GIS workflows
-- **ESRI Shapefile (.shp)** — legacy compatibility
-- **GeoJSON (.geojson)** — web-friendly, human-readable
-- **FlatGeobuf (.fgb)** — fast, compact, streaming-capable
+- **GeoPackage (.gpkg)** - default, recommended for modern GIS workflows
+- **ESRI Shapefile (.shp)** - legacy compatibility
+- **GeoJSON (.geojson)** - web-friendly, human-readable
+- **FlatGeobuf (.fgb)** - fast, compact, streaming-capable
 
 #### 💾 **Debug Masks** (Optional)
 
@@ -428,15 +428,15 @@ Pro features are available to users with an active GeoOSAM Pro licence. Free tie
 
 ### Fill Holes (Filters tab → Pro Features)
 
-Removes interior voids from segmented polygons — useful when SAM produces masks with small holes that need cleaning before export.
+Removes interior voids from segmented polygons - useful when SAM produces masks with small holes that need cleaning before export.
 
 **Controls:**
-- **Fill holes in polygons** — toggle on to enable
-- **Max hole size (px²)** — holes *smaller* than this value are filled; larger holes are preserved (e.g. building courtyards, irrigation pivots). Default: 500 px²
+- **Fill holes in polygons** - toggle on to enable
+- **Max hole size (px²)** - holes *smaller* than this value are filled; larger holes are preserved (e.g. building courtyards, irrigation pivots). Default: 500 px²
 
 **Typical use:** After running text-prompt or similar-object detection, enable Fill Holes before exporting to produce clean polygons without interior voids.
 
-**Note:** Fill Holes is applied at the vector conversion step — it affects all segmentation modes (point, bbox, text prompt, similar).
+**Note:** Fill Holes is applied at the vector conversion step - it affects all segmentation modes (point, bbox, text prompt, similar).
 
 ---
 

@@ -398,7 +398,7 @@ All models are stored in a single **models folder**, by default `<plugin>/models
 # SAM2.1 T/B/L (CPU) are auto-downloaded by Ultralytics
 # SAM3 requires Hugging Face token (prompted in UI)
 
-# Manual fallback for SAM2.1 (rare) — place the file in the models folder
+# Manual fallback for SAM2.1 (rare) - place the file in the models folder
 # (default: <plugin>/models/weights/, or whatever you set in Settings → Models):
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/models/weights/
 wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
@@ -536,22 +536,22 @@ If you use GeoOSAM in your research, please cite:
 
 ### v1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (2026-10-23)
 
-- **✨ NEW**: QGIS 4 (Qt6) support — the same plugin runs on QGIS 3.16+ and QGIS 4.x; existing Pro licenses work unchanged
-- **✨ NEW**: Configurable models folder (Settings → Models) — all weights (SAM2, SAM2.1, SAM3) stored in the plugin instead of QGIS's launch directory; existing downloads (incl. `~/.ultralytics/weights`) are moved in automatically
-- **✨ IMPROVED**: Point mode adapts the crop to imagery resolution and class — fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
+- **✨ NEW**: QGIS 4 (Qt6) support - the same plugin runs on QGIS 3.16+ and QGIS 4.x; existing Pro licenses work unchanged
+- **✨ NEW**: Configurable models folder (Settings → Models) - all weights (SAM2, SAM2.1, SAM3) stored in the plugin instead of QGIS's launch directory; existing downloads (incl. `~/.ultralytics/weights`) are moved in automatically
+- **✨ IMPROVED**: Point mode adapts the crop to imagery resolution and class - fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
 - **🔧 FIXED**: Ultralytics models (e.g. `sam2.1_b.pt`) downloaded to the working directory instead of a plugin folder
-- **🔧 FIXED**: Result outlines drawn as thick blobs on high-DPI screens — now a fixed 2 px
+- **🔧 FIXED**: Result outlines drawn as thick blobs on high-DPI screens - now a fixed 2 px
 
 ### v1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
 
-- **✨ IMPROVED**: Vegetation segmentation on multispectral imagery (5+ bands) — less shadow and soil bleed in tree and crop masks (automatic; no effect on RGB or non-vegetation classes)
-- **🔧 FIXED**: BBox selections on high-resolution imagery were sometimes rejected — small boxes now register correctly
-- **🔧 FIXED**: Batch mode could freeze the request queue after an error — now recovers cleanly
+- **✨ IMPROVED**: Vegetation segmentation on multispectral imagery (5+ bands) - less shadow and soil bleed in tree and crop masks (automatic; no effect on RGB or non-vegetation classes)
+- **🔧 FIXED**: BBox selections on high-resolution imagery were sometimes rejected - small boxes now register correctly
+- **🔧 FIXED**: Batch mode could freeze the request queue after an error - now recovers cleanly
 
 ### v1.4.2 - Pro Features & Fixes (2026-06-04)
 
-- **🆕 NEW**: Fill Holes in Filters tab (Pro) — removes interior voids from segmented polygons
-- **🔧 FIXED**: SAM3 text prompts now use native concept-prompting — text was previously ignored
+- **🆕 NEW**: Fill Holes in Filters tab (Pro) - removes interior voids from segmented polygons
+- **🔧 FIXED**: SAM3 text prompts now use native concept-prompting - text was previously ignored
 - **🔧 FIXED**: Removed debug print statements from production code
 - **🆕 NEW**: Automated test suite (41 tests)
 - **📝 NOTE**: Pro users must connect online once after updating to v1.4.2
@@ -562,11 +562,11 @@ If you use GeoOSAM in your research, please cite:
 
 ### v1.4.0 - UI Redesign & Workflow Improvements (2026-05-09)
 
-- **🎨 NEW**: Redesigned 4-tab flat UI — Segment, Detect, Results, Filters, Settings as gear overlay
-- **🔍 NEW**: Similar from Selection — use any segmented polygon as exemplar
-- **🗺️ NEW**: Vector Extent ROI for Entire Raster (Pro) — restrict tiled processing to a polygon
+- **🎨 NEW**: Redesigned 4-tab flat UI - Segment, Detect, Results, Filters, Settings as gear overlay
+- **🔍 NEW**: Similar from Selection - use any segmented polygon as exemplar
+- **🗺️ NEW**: Vector Extent ROI for Entire Raster (Pro) - restrict tiled processing to a polygon
 - **↶ NEW**: Undo and Cancel buttons on Detect tab
-- **🔀 NEW**: Find Similar toggleable — click again to exit similar mode
+- **🔀 NEW**: Find Similar toggleable - click again to exit similar mode
 
 ### v1.3.6 - Code Quality & Security Fixes (2026-04-22)
 
@@ -583,10 +583,10 @@ If you use GeoOSAM in your research, please cite:
 
 ### v1.3.4 - Settings Tab, Size & Shape Filters, GSD Support (2026-04-06)
 
-- **🗂️ NEW**: Tabbed UI — "Segmentation" and "Settings" tabs for a cleaner, less cluttered layout
-- **📐 NEW**: GSD / Resolution card — auto-detect from raster metadata or enter manually (cm/px)
-- **📏 NEW**: Real-world size filtering — filter objects by min/max diameter (cm) or area (m²); live pixel-equivalent hints update as you type
-- **🔷 NEW**: Shape filters — min circularity, min compactness, max aspect ratio; applied after segmentation across all modes
+- **🗂️ NEW**: Tabbed UI - "Segmentation" and "Settings" tabs for a cleaner, less cluttered layout
+- **📐 NEW**: GSD / Resolution card - auto-detect from raster metadata or enter manually (cm/px)
+- **📏 NEW**: Real-world size filtering - filter objects by min/max diameter (cm) or area (m²); live pixel-equivalent hints update as you type
+- **🔷 NEW**: Shape filters - min circularity, min compactness, max aspect ratio; applied after segmentation across all modes
 - **📊 NEW**: `area_m2`, `diameter_cm`, `circularity` attributes exported per feature
 - **📊 NEW**: Per-mask progress bar during text/similar mode processing
 - **🔧 IMPROVED**: Font sizes increased across the UI for laptop-screen readability
@@ -595,7 +595,7 @@ If you use GeoOSAM in your research, please cite:
 
 ### v1.3.3 - Multi-Point, Export Formats & Fixes (2026-02-07)
 
-- **🎯 NEW**: Multi-point segmentation — Shift+click to add positive points, Ctrl+click for negative, normal click to run prediction
+- **🎯 NEW**: Multi-point segmentation - Shift+click to add positive points, Ctrl+click for negative, normal click to run prediction
 - **🎯 NEW**: Visual +/- markers on map showing accumulated points before prediction
 - **📄 NEW**: Multi-format export support (GeoPackage, Shapefile, GeoJSON, FlatGeobuf)
 - **📄 NEW**: GeoPackage as default export format

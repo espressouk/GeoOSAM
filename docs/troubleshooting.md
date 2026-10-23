@@ -395,7 +395,7 @@ pip install ultralytics
 **Solution:**
 
 ```bash
-# For SAM 2.1 (GPU users) — default models folder (or your Settings → Models path):
+# For SAM 2.1 (GPU users) - default models folder (or your Settings → Models path):
 cd ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/geo_osam/models/weights/
 rm -f sam2.1_hiera_tiny.pt
 wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt

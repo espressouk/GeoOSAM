@@ -215,7 +215,7 @@ class GeoOSAMControlPanel:
 
 ### Testing
 
-GeoOSAM has an automated test suite covering the helpers module and the mask-to-vector pipeline. Tests run without a QGIS installation — QGIS modules are stubbed by `tests/conftest.py`.
+GeoOSAM has an automated test suite covering the helpers module and the mask-to-vector pipeline. Tests run without a QGIS installation - QGIS modules are stubbed by `tests/conftest.py`.
 
 ```bash
 # Install test dependencies
@@ -226,8 +226,8 @@ python3 -m pytest tests/ -v
 ```
 
 **Test coverage:**
-- `tests/test_helpers.py` — All 9 detection helper classes (factory, morphology, merge, dedupe, validate_object)
-- `tests/test_mask_pipeline.py` — Mask-to-vector conversion, `filter_contained_masks`, `merge_nearby_masks_class_aware`, `dedupe_or_merge_masks_smart`
+- `tests/test_helpers.py` - All 9 detection helper classes (factory, morphology, merge, dedupe, validate_object)
+- `tests/test_mask_pipeline.py` - Mask-to-vector conversion, `filter_contained_masks`, `merge_nearby_masks_class_aware`, `dedupe_or_merge_masks_smart`
 
 When adding new features, add corresponding tests. New helper subclasses must have at least `validate_object` and `apply_morphology` covered.
 
