@@ -22,6 +22,7 @@ Point-mode segmentation now adapts the analysis crop to the imagery's ground res
 
 - **Models downloaded to the working directory:** Ultralytics models (e.g. `sam2.1_b.pt`) were downloaded to QGIS's launch directory instead of a plugin folder. They now always go to the models folder.
 - **Thick result outlines on high-DPI screens:** polygon outlines were sized in millimetres. On screens where QGIS reports a high DPI (seen on QGIS 4), small polygons were drawn as same-size blobs. Outlines are now a fixed 2 px.
+- **SAM3 without `timm` opened a second QGIS window (Windows, #12):** Ultralytics tried to auto-install the missing `timm` package with `sys.executable -m pip`, but inside QGIS that is the QGIS program itself. Auto-install is now disabled, and the plugin shows how to install `timm` before loading SAM3. `timm` is also added to the install instructions.
 
 ---
 

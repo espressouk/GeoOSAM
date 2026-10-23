@@ -8,6 +8,12 @@ if sys.stderr is None:
 if sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
 
+# Stop Ultralytics auto-installing missing packages (e.g. timm for SAM3). It runs
+# `sys.executable -m pip`, and inside QGIS sys.executable is the QGIS binary, so on
+# Windows this launches a second QGIS instead of pip (GitHub #12). Must be set before
+# any ultralytics import.
+os.environ.setdefault("YOLO_AUTOINSTALL", "False")
+
 from hydra.core.global_hydra import GlobalHydra
 from hydra import initialize_config_module
 from shapely.geometry import shape
@@ -2847,6 +2853,15 @@ class GeoOSAMControlPanel(QtWidgets.QDockWidget):
                     weights_path = str(resolved) if resolved.exists() else None
                 if not weights_path:
                     raise FileNotFoundError("SAM3 weights not found - download from Hugging Face")
+
+            # Pre-flight: SAM3 needs timm, and Ultralytics' auto-install is disabled above
+            import importlib.util
+            if importlib.util.find_spec("timm") is None:
+                raise ImportError(
+                    "SAM3 needs the 'timm' package, which is not installed.\n\n"
+                    "Install it, then restart QGIS:\n"
+                    "  Windows: OSGeo4W Shell -> pip install timm\n"
+                    "  macOS/Linux: <QGIS Python> -m pip install timm")
 
             self.predictor = SAM3PredictorWrapper(weights_path)
             print(f"✅ SAM3 loaded from {weights_path}")

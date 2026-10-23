@@ -312,7 +312,7 @@ pip install "ultralytics>=8.3.237" opencv-python rasterio shapely hydra-core iop
 SAM3 concept-prompt modes (text prompts, Find Similar) require the Ultralytics CLIP fork. The standard `pip install clip` package will **not** work and will cause a `TypeError: 'SimpleTokenizer' object is not callable` crash.
 
 ```bash
-pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
+pip install timm git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
 GeoOSAM includes a runtime compatibility shim (`sam3_clip_fix.py`) that handles tokenizer differences across CLIP versions, but the Ultralytics fork is still required for SAM3 text features to function.
@@ -541,6 +541,7 @@ If you use GeoOSAM in your research, please cite:
 - **✨ IMPROVED**: Point mode adapts the crop to imagery resolution and class - fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
 - **🔧 FIXED**: Ultralytics models (e.g. `sam2.1_b.pt`) downloaded to the working directory instead of a plugin folder
 - **🔧 FIXED**: Result outlines drawn as thick blobs on high-DPI screens - now a fixed 2 px
+- **🔧 FIXED**: Loading SAM3 without `timm` opened a second QGIS window on Windows - the plugin now asks you to install `timm` instead ([#12](https://github.com/espressouk/GeoOSAM/issues/12))
 
 ### v1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
 

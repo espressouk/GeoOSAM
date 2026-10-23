@@ -88,7 +88,7 @@ print(f"CPU cores: {os.cpu_count()}")
 - Install CLIP dependencies:
 
 ```bash
-pip install git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
+pip install timm git+https://github.com/ultralytics/CLIP.git ftfy wcwidth
 ```
 
 - Confirm SAM3 weights exist in the models folder (default `<plugin>/models/weights/sam3.pt`; legacy `~/.ultralytics/weights/sam3.pt` is also detected and moved in on first use).

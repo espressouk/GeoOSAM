@@ -38,6 +38,7 @@ changelog=1.4.4 - QGIS 4 Support, Model Storage & High-Resolution Point Mode (20
     - IMPROVED: Point mode adapts the crop to imagery resolution and class - fixes roads captured as full-tile blobs and clipped large buildings on very high-resolution imagery
     - FIXED: Ultralytics models (e.g. sam2.1_b.pt) downloaded to the working directory instead of a plugin folder
     - FIXED: Result outlines drawn as thick blobs on high-DPI screens (now a fixed 2 px)
+    - FIXED: Loading SAM3 without timm opened a second QGIS window on Windows; the plugin now asks you to install timm instead (#12)
 
     1.4.3 - Vegetation & Bbox Improvements (2026-06-12)
     - IMPROVED: Vegetation segmentation on multispectral imagery (5+ bands) - less shadow and soil bleed in tree and crop masks. Automatic; no effect on RGB or non-vegetation classes
